@@ -137,8 +137,6 @@ interface WebPluginRecord {
   /** Loader resolution input that selected this package instance. */
   sourceKey: string
   meta: PkgMeta
-  /** Exact build artifact included in the startup batches. */
-  bundle: Buffer
   /** Pre-read filesystem baseline handed to the HMR watcher. */
   baseline: ClientArtifactBaseline
 }
@@ -149,7 +147,8 @@ interface ComboResource {
   rev: string
   clientPath: string
   fileName: string
-  bundle: Buffer
+  /** Reader for this artifact; the roster keeps the path, not a second copy of the bytes. */
+  readBundle: () => Buffer
 }
 
 /** One lazily materialized immutable response body. */
@@ -303,7 +302,7 @@ interface PreparedSource {
 
 /** Remove bundle-local debug directives and retain their stable generated-file name. */
 function prepareSource(resource: ComboResource): PreparedSource {
-  let source = resource.bundle.toString('utf8')
+  let source = resource.readBundle().toString('utf8')
   const sourceUrl = SOURCE_URL_TRAILER.exec(source)?.[1]
   source = source.replace(SOURCE_URL_TRAILER, '').replace(SOURCE_MAP_TRAILER, '')
   if (!source.endsWith('\n')) source += '\n'
@@ -441,7 +440,9 @@ function buildCombo(
     rev: record.entry.rev,
     clientPath: record.meta.clientPath,
     fileName: 'client.js',
-    bundle: record.bundle,
+    // Deferred with the combo body: one scan of the roster must not read — or
+    // retain — every client artifact a composition could serve.
+    readBundle: () => readFileSync(record.meta.clientPath),
   }))
   const rev = revision ?? comboRevision(resources)
   const entries = resources.map(resource => resource.id)
@@ -716,10 +717,8 @@ export class ClientModuleRegistry extends Service {
     const baseline = this.captureArtifactBaseline(record.meta.clientPath)
     const rev = artifactRevision(baseline)
     if (rev === record.entry.rev) return rev
-    const bundle = readFileSync(record.meta.clientPath)
     record.baseline = baseline
     record.entry = graphRow(id, rev, record.meta)
-    record.bundle = bundle
     this.composed = this.compose()
     for (const notify of this.rebuildListeners) {
       // Containment: rebuilt() runs inside the HMR watch callback — a
@@ -947,20 +946,16 @@ export class ClientModuleRegistry extends Service {
   }
 
   /**
-   * Read the activation-time bundle snapshot.
+   * Stat the activation-time client artifact, which is what the graph revision
+   * and the HMR watch need; the bytes are read when a combo is actually built.
    * @param pkgName - package that declares the client bundle.
    * @param clientPath - absolute path of the built client artifact.
    * @returns the immutable bytes plus the pre-read filesystem baseline.
    * @throws {MissingClientBundleError} when the read fails with `ENOENT`; other filesystem errors are rethrown unchanged.
    */
-  private initialBundleSnapshot(pkgName: string, clientPath: string): {
-    bundle: Buffer
-    baseline: ClientArtifactBaseline
-  } {
+  private initialBaseline(pkgName: string, clientPath: string): ClientArtifactBaseline {
     try {
-      const baseline = this.captureArtifactBaseline(clientPath)
-      const bundle = readFileSync(clientPath)
-      return { bundle, baseline }
+      return this.captureArtifactBaseline(clientPath)
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       throw new MissingClientBundleError(pkgName, clientPath, error)
@@ -1035,15 +1030,14 @@ export class ClientModuleRegistry extends Service {
     if (source === undefined) return this.table.delete(packageName)
     if (this.table.get(packageName)?.sourceKey === source.sourceKey) return false
     // Startup and HMR share revisions so unchanged artifacts survive a server restart.
-    const snapshot = this.initialBundleSnapshot(packageName, source.meta.clientPath)
-    const rev = artifactRevision(snapshot.baseline)
+    const baseline = this.initialBaseline(packageName, source.meta.clientPath)
+    const rev = artifactRevision(baseline)
     this.table.set(packageName, {
       entry: graphRow(packageName, rev, source.meta),
       loaderName: source.loaderName,
       sourceKey: source.sourceKey,
       meta: source.meta,
-      bundle: snapshot.bundle,
-      baseline: snapshot.baseline,
+      baseline,
     })
     return true
   }
@@ -1110,7 +1104,7 @@ export class ClientModuleRegistry extends Service {
       rev: record.entry.rev,
       clientPath,
       fileName,
-      bundle: readFileSync(clientPath),
+      readBundle: () => readFileSync(clientPath),
     })
     const response: LazyResponse = sourceMap
       ? {
