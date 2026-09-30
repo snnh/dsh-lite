@@ -6,6 +6,8 @@
 
 /* v8 ignore file -- built-bin acceptance exercises this self-executing dispatch. */
 
+// Imported first: every module below it is compiled after the cache is enabled.
+import './compile-cache.ts'
 import { getDshRuntimeVersion, loadLayeredEnv, StartupError } from '@deepseek-ai/dsh-app-boot'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { parseDshArgs } from './args.ts'
