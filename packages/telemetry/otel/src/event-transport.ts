@@ -1,11 +1,26 @@
 /** Cancellable ordinary-event HTTP exports, including retry waits and response reads. */
 import type { Agent as HttpsAgent } from 'node:https'
 import { gzipSync } from 'node:zlib'
-import got from 'got'
 import { createOtlpNetworkExportDelegate, OTLPExporterBase, type OTLPExporterNodeConfigBase } from '@opentelemetry/otlp-exporter-base'
 import { JsonLogsSerializer } from '@opentelemetry/otlp-transformer'
 import type { LogRecordExporter } from '@opentelemetry/sdk-logs'
 import { logTransportOptions } from './transport.ts'
+
+/** The `got` implementation exported by the dependency. */
+type Got = typeof import('got')['default']
+
+let pendingGot: Promise<Got> | undefined
+
+/**
+ * Resolve the HTTP client on first use. `got` is the largest dependency of this
+ * package and only an actual export needs it, so an idle process that never
+ * reports an ordinary event stays without it.
+ * @returns the memoized `got` implementation.
+ */
+function loadGot(): Promise<Got> {
+  // A failed load is not cached, so a corrected installation can be retried.
+  return pendingGot ??= import('got').then(module => module.default)
+}
 
 /**
  * Create a channel-owned exporter whose cancellation releases requests and retry timers.
@@ -24,6 +39,7 @@ export function createEventLogExporter(options: OTLPExporterNodeConfigBase & { u
       const headers = await config.headers()
       signal.throwIfAborted()
       const compressed = config.compression === 'gzip'
+      const got = await loadGot()
       const request = got.post(config.url, {
         body: compressed ? gzipSync(data) : Buffer.from(data),
         headers: { ...headers, ...(compressed ? { 'content-encoding': 'gzip' } : {}),
