@@ -2,18 +2,33 @@
 # section, a hash of its English and Chinese blocks outside code blocks and generated regions.
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/user/guide/public-deployments.md
-/publish-the-web-ui-behind-a-reverse-proxy:
-  en: 15b92e92d2526f37
-  zh: b58079cf6eee78cc
-/publish-the-web-ui-behind-a-reverse-proxy/what-public-url-advertises:
-  en: 576292b93ccf299a
-  zh: ded5adc55396869c
-/publish-the-web-ui-behind-a-reverse-proxy/what-the-proxy-must-do:
-  en: 8dd9d910a93fe54d
-  zh: 1e9e21d9949c8ab2
-/publish-the-web-ui-behind-a-reverse-proxy/trust-the-authority-browsers-use:
-  en: 907b5f90c9860733
-  zh: dcbffd3f00d6c64f
-/publish-the-web-ui-behind-a-reverse-proxy/secure-the-external-leg:
-  en: a833880da5c8bbf4
-  zh: 6f9bd565b7266241
+/deploy-the-web-ui-exposure-and-trust-boundaries:
+  en: afac7d4b7c58f75d
+  zh: 10c9f7c862f9c1c9
+/deploy-the-web-ui-exposure-and-trust-boundaries/what-the-default-exposes:
+  en: ede1cb6ad40d7f7d
+  zh: f68af2f816dc8080
+/deploy-the-web-ui-exposure-and-trust-boundaries/choose-a-posture:
+  en: a322ae10650848d1
+  zh: f2c5a202fd0e738c
+/deploy-the-web-ui-exposure-and-trust-boundaries/behind-a-reverse-proxy:
+  en: 1be11391edea3f66
+  zh: 97500201d0caba2c
+/deploy-the-web-ui-exposure-and-trust-boundaries/behind-a-reverse-proxy/what-public-url-advertises:
+  en: 8922acdf5904f40d
+  zh: 568b97e298731bf0
+/deploy-the-web-ui-exposure-and-trust-boundaries/behind-a-reverse-proxy/what-the-proxy-must-do:
+  en: e6a0d25b1f05c393
+  zh: 548890d480692121
+/deploy-the-web-ui-exposure-and-trust-boundaries/behind-a-reverse-proxy/trust-the-authority-browsers-use:
+  en: a1f6f7e3aa202fd9
+  zh: 938eeec3548eff6e
+/deploy-the-web-ui-exposure-and-trust-boundaries/what-stays-the-deployment-s-job:
+  en: c938be08f332bc1b
+  zh: 3af8ddc026f772bb
+/deploy-the-web-ui-exposure-and-trust-boundaries/when-plain-http-is-acceptable:
+  en: 53fa669ff8492bfe
+  zh: 7bbe9fa21e9e3c3b
+/deploy-the-web-ui-exposure-and-trust-boundaries/reach-it-without-exposing-it:
+  en: ac446e0ce09ae7ba
+  zh: c6f0754725a0a5dc

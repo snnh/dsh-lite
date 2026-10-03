@@ -1,18 +1,35 @@
-# 在反向代理之后发布 Web UI
+# 部署 Web UI：暴露面与信任边界
 
 [English](public-deployments.md) | 中文
 
-`dsh --profile web` 在 loopback 端口上以明文 HTTP 提供 GUI，因此其他机器上的浏览器无法访问它，进程也无从得知你实际使用的地址。它前面的反向代理拥有这条外部链路——公开主机名、TLS，以及转发到监听器之前剥离的路径前缀——`--public-url` 则告诉 DSH 浏览器使用的是哪个地址：
+`dsh --profile web` 默认绑定一个网络地址——本机的局域网地址——因此同网络上的手机、平板或另一台电脑无需任何配置即可打开 Web UI。本页说明这个默认姿态暴露了什么、部署要在它前面加上什么，以及哪些边界仍然由部署者负责。[Web 应用参考](../../../packages/bundle/web-app/README.zh.md#public-deployments)负责 `--public-url` 与 `--trusted-host` 的命令行约定，以及 `publicUrl` 与 `trustedHosts` 字段；[lan-access 参考](../../../packages/host/lan-access/README.zh.md)负责绑定地址这一行。
+
+## 默认暴露了什么
+
+服务器绑定的是一个地址而非所有接口：第一个自带网络的接口，其中容器网桥（`docker0`、`br-<id>`）、veth 对、虚拟机交换机与隧道排在最后，机器本身不携带任何网络时回退到回环。只有被绑定的地址会应答，因此本机回环访问不到绑定在局域网地址上的服务器，未绑定的接口保持仅回环姿态。命令行仍然拒绝 `--host 0.0.0.0`；绑定所有接口是在 `lan-access` 行配置 `host: 0.0.0.0`。
+
+绑定决定可达性：每个能路由到该地址的设备都能连上监听端口。认证是持久访问令牌，每个非回环绑定都要求它，并从 `$DSH_HOME/access-token` 解析——权限 `0600`、首次启动时创建、可用 `DSH_ACCESS_TOKEN` 覆盖；无法写入的 Harness home 会拒绝该绑定，而不会以未认证的方式监听。
+
+令牌是进程凭据，不是用户凭据。它随服务器打印的 URL 出现一次，页面随后把它换成签名的浏览器 cookie——`HttpOnly`、`SameSite=Strict`、不带 `Secure`——两者都走明文 HTTP。任何能看到网络路径的人都能读到令牌或 cookie，并以此浏览器的身份行事。这样接入的客户端拿到的是进程的权限：本机上 agent 的工作区、shell 与文件。
+
+## 选择姿态
+
+- **把局域网视为可信。** 保持默认，并接受：每个能路由到绑定地址的设备都是这个进程的操作者。harness 无法区分这些设备，因此这是对网络的判断，而不是它强制的控制。
+- **在前面挡一层。** 用反向代理终止 TLS，或让服务器加入一个决定谁能连到该端口的虚拟网络。对端与用户的限制只能存在于那一层，因为这一层不提供任何限制。
+
+## 反向代理之后
+
+监听器前面的反向代理拥有这条外部链路——公开主机名、TLS，以及转发前剥离的路径前缀——`--public-url` 则告诉 DSH 浏览器使用的是哪个地址：
 
 ```sh
 dsh --profile web --public-url https://app.example/ui/ --trusted-host app.example
 ```
 
-## `--public-url` 公告什么
+### `--public-url` 公告什么
 
 `--public-url` 接受可带挂载前缀的 `http://` 或 `https://` 根，并把它归一化为以 `/` 结尾。它提供打印与打开的启动 URL、`DSH_WEB_URL` 与 web 表层定位。webserver 继续提供 origin-root 路由，且从不了解挂载。`publicUrl` 配置字段发布同样的公告。
 
-## 代理必须做什么
+### 代理必须做什么
 
 - **保留浏览器可见的 `Host`。** 栅栏把收到的 `Host` 与被接受的 authority 比对，因此代理应原样转发，而不要改写成监听器的地址。
 - **剥离挂载前缀。** 监听器应答的是 origin-root 路由，因此对 `/ui/api/...` 的请求必须以 `/api/...` 抵达。
@@ -20,14 +37,29 @@ dsh --profile web --public-url https://app.example/ui/ --trusted-host app.exampl
 - **改写 cookie 作用域。** 后端始终签发不带 `Secure` 的 host-only `Path=/` cookie；代理把 `Path` 改写为挂载（`/ui/`），并仅在其 HTTPS 链路上添加 `Secure`。
 - **重定向裸挂载。** `/ui/` 是唯一入口：只有它把启动 token 换成会话 cookie；已持有该 cookie 的浏览器可由它或 `/ui/index.html` 取得文档，因为所提供的文档以自身目录解析 URL。对 `/ui` 的请求必须以 `/ui/` 抵达，而被剥离路径的后端无法重建该外部路径。
 
-## 信任浏览器使用的 authority
+### 信任浏览器使用的 authority
 
 栅栏接受 loopback，以及每个由 `--trusted-host` 点名的 authority。浏览器若以其他任何 authority 访问部署，无论代理多么正确，每个 API 调用都会得到 403，因此请用 `--trusted-host` 点名浏览器可见的 authority；用 `--public-url` 公告它只是展示，并不等于接纳。不带端口的条目匹配任意端口，适合每次绑定不同端口的隧道。栅栏只放行请求；打印 URL 中的启动 token 与签名会话 cookie 才完成认证。
 
 无论是公告 URL 还是栅栏都不保护监听端口本身，因此请把端口限制在可信代理或网络内。
 
-## 保护外部链路
+## 哪些仍由部署负责
 
-在代理处终止 TLS。`http://` 公告根会以明文发送启动 token 与会话 cookie，而 `https://` 根只加密浏览器到代理这一段。打印的 URL 携带进程凭据，只应与预期用户分享。
+- **TLS 终止。** 监听器只提供明文 HTTP，不终止任何 TLS。
+- **`Secure` 与 HSTS。** 没有 cookie 携带 `Secure`，也没有响应携带 HSTS 头，因此这里没有任何东西保护或升级浏览器这一段。
+- **对端白名单。** 任何抵达该端口的连接都会被服务；限制来源地址属于网络或代理。
+- **按用户身份与第二因素。** 一个令牌以进程身份认证浏览器，没有可用于区分用户的账号。
+- **由栅栏完成认证。** Host/Origin 栅栏拒绝跨站与 DNS 重绑定请求；认证由令牌完成。
 
-[Web 应用参考](../../../packages/bundle/web-app/README.zh.md#public-deployments)负责 `--public-url` 与 `--trusted-host` 的命令行约定，以及 `publicUrl` 与 `trustedHosts` 字段。
+## 明文 HTTP 何时可接受
+
+令牌与会话 cookie 以明文穿过网络，因此可接受与否取决于它们穿过的网络，而不是 harness。
+
+- **你控制的网络**是预期姿态：明文这一段止于该网络的边界，而其中每台设备本来就能连到该端口。
+- **你无法端到端控制的网络**不可以：不受信任的 WLAN、共享网段，或经路由器转发的端口，会把凭据送到观察该路径的任何人身前。
+
+在代理处终止 TLS、用 VPN 或覆盖网络承载这条连接、以及完全不暴露端口，是三种解法。
+
+## 不暴露也能访问
+
+对于从不需要其他设备的工作，用 `host: 127.0.0.1` 把该行恢复到回环，再用 SSH 转发端口：`ssh -L 3080:127.0.0.1:3080 host`。仅回环姿态转发的是回环端点，浏览器随后使用的 `127.0.0.1:3080` authority 是栅栏接受的。保持默认姿态时，转发必须点名服务器绑定的地址，浏览器则继续使用回环 URL 和打印行里的令牌。

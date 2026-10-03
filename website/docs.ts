@@ -141,7 +141,7 @@ const homeAndGuide = pairedPages([
   {
     source: 'docs/user/guide/public-deployments.md',
     route: 'guide/public-deployments.md',
-    label: { root: '公开部署', en: 'Public deployments' },
+    label: { root: '部署边界', en: 'Deployment boundaries' },
     sidebar: { root: 'zh-guide', en: 'en-guide' },
     section: { root: '入门', en: 'Guide' },
     order: 4,
