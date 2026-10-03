@@ -17,6 +17,13 @@
  * never excluded: a machine whose only address is a VPN interface still binds
  * it.
  *
+ * `detectLanAddress()` answers which address the row binds, and `isLanHost()`
+ * answers the question one step before it — whether this machine holds a LAN
+ * worth binding at all. The same bridge-and-tunnel distinction decides it: a
+ * machine whose every address belongs to a bridge or a tunnel gives a caller
+ * something the ranking cannot, namely the difference between "no LAN here"
+ * and "the VPN is the only way in".
+ *
  * A reachable address is reachable by anyone who can route to it, so this row
  * refuses a bind it cannot authenticate: every non-loopback host requires the
  * persistent access token, which is resolved (and created when the harness home
@@ -122,8 +129,61 @@ export interface LanCandidate {
   readonly virtual: boolean
 }
 
+/** One address as `node:os` reports it, tagged with the interface carrying it. */
+type InterfaceAddress = NetworkInterfaceInfo & { readonly iface: string }
+
+/**
+ * The MAC `node:os` reports for an interface that has none. Tunnels and
+ * loopback-style shims carry no hardware identity, so this literal says
+ * nothing about which addresses belong together.
+ */
+const ABSENT_MAC = '00:00:00:00:00:00'
+
+/**
+ * The key that groups the addresses one interface carries. A real MAC is the
+ * hardware's identity, so several names answering to it — a Linux address
+ * alias, say — form one group. An interface that reports no MAC is keyed by
+ * its own name instead, so two unrelated MAC-less interfaces never merge.
+ * @param entry - one address, as `node:os` reported it.
+ * @returns the group key of the interface carrying this address.
+ */
+function interfaceKey(entry: InterfaceAddress): string {
+  return entry.mac === ABSENT_MAC ? `iface:${entry.iface}` : `mac:${entry.mac}`
+}
+
+/**
+ * Order the addresses of one interface by the name that carries them, each
+ * name keeping the order the operating system reported. Sorting by name rather
+ * than by enumeration alone makes the order of an interface's own addresses
+ * independent of how the platform happened to sequence them.
+ * @param entries - the addresses of one interface.
+ * @returns the same addresses, names in order.
+ */
+function byName(entries: readonly InterfaceAddress[]): readonly InterfaceAddress[] {
+  const names = [...new Set(entries.map(entry => entry.iface))].sort()
+  return names.flatMap(name => entries.filter(entry => entry.iface === name))
+}
+
+/**
+ * Group the addresses of one interface into one contiguous run, groups in the
+ * order the operating system first reported them.
+ *
+ * The reordering is confined to an interface's own addresses: two different
+ * interfaces never trade places, because a group sits where its first address
+ * was reported. The enumeration order the ranking falls back on — alike
+ * candidates keep the order the platform reported them in — therefore survives
+ * the grouping untouched.
+ *
+ * @param entries - addresses in the order `node:os` reported them.
+ * @returns the same addresses, one interface's entries contiguous.
+ */
+function groupByInterface(entries: readonly InterfaceAddress[]): readonly InterfaceAddress[] {
+  const keys = [...new Set(entries.map(entry => interfaceKey(entry)))]
+  return keys.flatMap(key => byName(entries.filter(entry => interfaceKey(entry) === key)))
+}
+
 /** Every non-internal IPv4 address this machine holds, in interface order. */
-function lanEntries(): readonly (NetworkInterfaceInfo & { readonly iface: string })[] {
+function lanEntries(): readonly InterfaceAddress[] {
   return Object.entries(networkInterfaces())
     .flatMap(([iface, list]) => (list ?? []).map(entry => ({ ...entry, iface })))
     .filter(entry => entry.family === 'IPv4' && !entry.internal)
@@ -132,11 +192,16 @@ function lanEntries(): readonly (NetworkInterfaceInfo & { readonly iface: string
 /**
  * Every non-internal IPv4 address this machine holds, tagged with its
  * interface and whether that interface is a bridge or tunnel.
+ *
+ * One interface's addresses form one contiguous run, which is what the ranking
+ * and {@link detectLanAddress} rely on: the first address of the first
+ * interface is the address this row binds.
+ *
  * @returns the candidates in interface order; empty on a machine with only
  *   loopback.
  */
 export function listLanCandidates(): readonly LanCandidate[] {
-  return lanEntries().map(entry => ({
+  return groupByInterface(lanEntries()).map(entry => ({
     address: entry.address,
     iface: entry.iface,
     virtual: isVirtualInterface(entry.iface),
@@ -166,6 +231,26 @@ export function rankLanCandidates(candidates: readonly LanCandidate[]): readonly
  */
 export function detectLanAddress(): string | undefined {
   return rankLanCandidates(listLanCandidates())[0]?.address
+}
+
+/**
+ * Whether this machine holds a LAN worth binding: at least one non-internal,
+ * non-virtual IPv4 address.
+ *
+ * The complement of {@link detectLanAddress}, which answers *which* address
+ * the row binds by default; this answers whether there is a LAN to bind at
+ * all, so a caller can tell "this machine has no LAN" apart from "the rank
+ * picked one of several". A purely virtual machine is not a LAN host: a
+ * container whose only address is its bridge, or a laptop whose only address
+ * is its VPN tunnel, holds addresses that reach the container network or the
+ * tunnel and nothing a peer on the local network could open. Loopback is not a
+ * LAN either, and {@link listLanCandidates} excludes it already.
+ *
+ * @returns true when the candidate list holds an address carried by an
+ *   interface that is not a bridge, container link, or tunnel.
+ */
+export function isLanHost(): boolean {
+  return listLanCandidates().some(candidate => !candidate.virtual)
 }
 
 /**

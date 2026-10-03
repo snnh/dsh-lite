@@ -30,6 +30,10 @@ The row is mounted without a `host`, which means "this machine's LAN address".
 
 That address is the first interface carrying a network of its own. Container bridges (`docker0`, `br-<id>`), veth pairs, hypervisor switches (`vmnet*`, `vboxnet*`), and tunnels (`tun*`, `utun*`, `wg*`, `tailscale*`) rank last: they are addresses a phone cannot reach and an operator did not mean, and a container host often reports them *before* the physical interface. They rank rather than disappear — a machine whose only address is a VPN interface still binds it.
 
+The same distinction answers one question earlier, in code: `isLanHost()` reports whether this machine holds a LAN worth binding at all — at least one non-internal IPv4 address on an interface that is not a bridge or a tunnel. It is the complement of the address above: a machine whose only address is a tunnel is not a LAN host, and the row still binds that tunnel.
+
+The candidate list keeps an interface's own addresses together as well. Entries sharing a MAC form one contiguous run, with the names inside a run in order, so the interfaces this selection reads are the platform's — and their running order is the order the platform reports them in, not the order `node:os` happened to enumerate entries in.
+
 An overlay overrides the choice:
 
 ```yaml
