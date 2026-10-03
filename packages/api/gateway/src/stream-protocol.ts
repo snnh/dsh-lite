@@ -238,6 +238,22 @@ export type RemoteStreamClientMessage =
     readonly streamId: string
     readonly endpoint: string
     readonly payload: unknown
+    /**
+     * Ask the Host to make this logical stream resumable: every item frame of
+     * the stream then carries its `seq`, and the Host retains a bounded window
+     * of recent item frames so a later `open` naming the same `streamId` with
+     * `resumeFromSeq` can be served. Absent or false means the Client never
+     * wants to resume this stream, so the Host stamps nothing and retains
+     * nothing — exactly the pre-resume wire behavior.
+     */
+    readonly resumable?: boolean
+    /**
+     * Resume a resumable logical stream instead of opening it fresh: the
+     * resending starts at this sequence number, i.e. the Client has already
+     * applied every item frame with a lower `seq` and wants the retained ones
+     * from here on. Absent means a fresh stream.
+     */
+    readonly resumeFromSeq?: number
   }
   | { readonly type: 'item'; readonly streamId: string; readonly value?: unknown }
   | { readonly type: 'end'; readonly streamId: string }
@@ -252,9 +268,29 @@ export interface RemoteStreamFailure {
 
 /** One logical stream frame sent from the Host. */
 export type RemoteStreamServerMessage =
-  | { readonly type: 'item'; readonly streamId: string; readonly value?: unknown }
+  | {
+    readonly type: 'item'
+    readonly streamId: string
+    readonly value?: unknown
+    /**
+     * Position of this item in its logical stream: the stream's first item is
+     * {@link REMOTE_STREAM_FIRST_SEQ} and each later item is one higher. Present
+     * only for a stream the Client asked to be resumable, so a Client that never
+     * opted in sees byte-identical item frames.
+     */
+    readonly seq?: number
+  }
   | { readonly type: 'error'; readonly streamId: string; readonly error: RemoteStreamFailure }
   | { readonly type: 'end'; readonly streamId: string }
+
+/**
+ * Sequence number the first item frame of one logical stream carries. Numbering
+ * is per logical stream — not global — because a resume point must be
+ * independent of unrelated streams sharing the physical socket, and a global
+ * counter would also leak other streams' progress. Zero is the first item, so
+ * `resumeFromSeq: 0` reads as "resend everything you retained".
+ */
+export const REMOTE_STREAM_FIRST_SEQ = 0
 
 /**
  * Parse and validate one browser-to-Host text message.
@@ -275,10 +311,16 @@ export function parseRemoteStreamClientMessage(text: string): RemoteStreamClient
       return value as RemoteStreamClientMessage
     }
     if (value.type === 'open'
-      && exactKeys(value, ['type', 'streamId', 'endpoint', 'payload'])
+      && hasOnlyKeys(
+        value,
+        ['type', 'streamId', 'endpoint', 'payload'],
+        ['resumable', 'resumeFromSeq'],
+      )
       && validId(value.streamId)
       && typeof value.endpoint === 'string'
-      && value.endpoint.length > 0) {
+      && value.endpoint.length > 0
+      && (!Object.hasOwn(value, 'resumable') || typeof value.resumable === 'boolean')
+      && (!Object.hasOwn(value, 'resumeFromSeq') || isSequence(value.resumeFromSeq))) {
       return value as RemoteStreamClientMessage
     }
     throw new Error('api gateway: invalid Remote stream client message')
@@ -293,8 +335,9 @@ export function parseRemoteStreamClientMessage(text: string): RemoteStreamClient
 export function parseRemoteStreamServerMessage(text: string): RemoteStreamServerMessage {
   return parseMessage(text, (value) => {
     if (value.type === 'item'
-      && (exactKeys(value, ['type', 'streamId']) || exactKeys(value, ['type', 'streamId', 'value']))
-      && validId(value.streamId)) {
+      && hasOnlyKeys(value, ['type', 'streamId'], ['value', 'seq'])
+      && validId(value.streamId)
+      && (!Object.hasOwn(value, 'seq') || isSequence(value.seq))) {
       return value as RemoteStreamServerMessage
     }
     if (value.type === 'end' && exactKeys(value, ['type', 'streamId']) && validId(value.streamId)) {
@@ -344,6 +387,15 @@ function exactKeys(value: Record<string, unknown>, expected: readonly string[]):
 
 function validId(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0
+}
+
+/**
+ * Recognize one item sequence number at a wire boundary.
+ * @param value - untrusted wire value.
+ * @returns whether the value is a position in a logical stream.
+ */
+function isSequence(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
 }
 
 function parseRemoteEventRejection(value: unknown): RemoteEventRejection {
