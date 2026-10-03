@@ -170,6 +170,18 @@
 
     # ── layer 2: transport/service ──────────────────────────────────────────────
 
+    # Opt-in network exposure. This row decides the address the web server
+    # binds: `127.0.0.1` (the default, identical to a tree without this row) or
+    # `0.0.0.0`, which exposes the harness to every network this machine is
+    # attached to. A network-reachable bind requires the persistent access
+    # token, so the row resolves (and creates) it before providing `lanAccess`,
+    # and refuses the bind when it cannot. See that package's README for the
+    # TLS and peer-allow-list boundaries this does not provide.
+    - id: lan-access
+      name: '@deepseek-ai/dsh-host-lan-access'
+      config:
+        host: '127.0.0.1'
+
     # Plain route-registration carrier; host and port come from the app's
     # webStartup provider, with these deployment fallbacks. The dist is served
     # by the web-runtime row below through the fallback seat. Routing and
@@ -177,9 +189,9 @@
     # web-runtime row owns.
     - id: webserver
       name: '@deepseek-ai/dsh-host-webserver'
-      inject: [webStartup]
+      inject: [webStartup, lanAccess]
       config:
-        host: !!js ctx.webStartup.host ?? '127.0.0.1'
+        host: !!js ctx.lanAccess.host
         port: !!js ctx.webStartup.port ?? 3080
         compression: gzip
         compressionLevel: 1

@@ -34,6 +34,7 @@
   },
   "license": "MIT",
   "dependencies": {
+    "@deepseek-ai/dsh-access-token": "workspace:*",
     "@deepseek-ai/dsh-credentials": "workspace:*",
     "@deepseek-ai/dsh-home-paths": "workspace:*",
     "@deepseek-ai/schemastery": "workspace:~",

@@ -1,0 +1,52 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/util/access-token/README.md
+/:
+  en: 7e921b6c4e959c67
+  zh: 97578834d4180100
+/deepseek-ai-dsh-access-token:
+  en: e2e38afccdb7e95f
+  zh: 2b67d4e2a6760e14
+/deepseek-ai-dsh-access-token/summary:
+  en: 267fbed7cdc265f2
+  zh: c1ffaca0652aea4a
+/deepseek-ai-dsh-access-token/table-of-contents:
+  en: 80b31a934611cb4a
+  zh: 3c9647af7a8067c3
+/deepseek-ai-dsh-access-token/use-this-package:
+  en: bbff250eba0f1b89
+  zh: 0a618f05cc88ee2b
+/deepseek-ai-dsh-access-token/use-this-package/resolving-the-token:
+  en: 45180323f0cf96bc
+  zh: cbc3ce095be0988f
+/deepseek-ai-dsh-access-token/use-this-package/reading-without-creating:
+  en: 170de7486c76d31f
+  zh: ad6581b0b78bd94e
+/deepseek-ai-dsh-access-token/use-this-package/constants:
+  en: 974dcea15d8cb402
+  zh: 61faff2430341888
+/deepseek-ai-dsh-access-token/understand-the-implementation:
+  en: ee4615a04fa6503d
+  zh: ee2c5fb2204a43cf
+/deepseek-ai-dsh-access-token/understand-the-implementation/precedence-and-rotation:
+  en: f7d0208286c0730a
+  zh: c05d2aaea9a23d35
+/deepseek-ai-dsh-access-token/understand-the-implementation/permissions:
+  en: 12a0acd8043438da
+  zh: 22078434ec4c6d60
+/deepseek-ai-dsh-access-token/further-exploration:
+  en: 8332a1dc4ac418eb
+  zh: 15e2b22c125deb71
+/deepseek-ai-dsh-access-token/known-limitations-and-deferred-work:
+  en: 493abbe63f256ad4
+  zh: 9c76fbc2228a367c
+/deepseek-ai-dsh-access-token/dev-note:
+  en: 7410b003a5057dc2
+  zh: 1432e59879b44e2d
+/deepseek-ai-dsh-access-token/dev-note/coverage:
+  en: 12c3679843c1f723
+  zh: 622dc61eeb286d32
+/deepseek-ai-dsh-access-token/dev-note/tests:
+  en: 7a3ceaadb73bfe4a
+  zh: 20feae5624b2ac20

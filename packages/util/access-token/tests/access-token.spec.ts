@@ -10,7 +10,7 @@ import {
   accessTokenFromEnv,
   ensureAccessToken,
   readPersistedAccessToken,
-} from '../src/access-token.ts'
+} from '../src/index.ts'
 
 /** A value exactly at the floor, so a boundary regression changes the outcome. */
 const AT_FLOOR = 'a'.repeat(MIN_ACCESS_TOKEN_LENGTH)

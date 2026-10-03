@@ -13,7 +13,7 @@
  * beyond the browser session that cookie represents. Deleting the file (or
  * changing the environment value) rotates the token on the next start.
  *
- * @module @deepseek-ai/dsh-connection/access-token
+ * @module @deepseek-ai/dsh-access-token
  */
 
 import { randomBytes } from 'node:crypto'
