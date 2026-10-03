@@ -6,6 +6,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { discoverShells, resolveShell } from './shells.ts'
+import { TerminalBudget, type TerminalBufferLimits } from './budget.ts'
 import { BrowserTerminal } from './terminal.ts'
 import { TerminalRetention } from './retention.ts'
 import type {
@@ -45,6 +46,14 @@ export interface Config {
   readonly scrollback: number
   /** Maximum queued UTF-8 frame bytes per output follower before disconnection. */
   readonly maxBufferedBytes: number
+  /**
+   * Host-wide ceiling in bytes on the screen and follower-queue buffers every
+   * Session's terminals may reserve together; `0` disables the ceiling. A
+   * request that would cross it is refused with `terminal/capacity-reached`,
+   * and no running terminal or attached follower is reclaimed to make room.
+   * @default 268435456
+   */
+  readonly maxTotalBufferedBytes?: number
   /** Maximum UTF-8 bytes in one input request. */
   readonly maxInputBytes: number
   /** Provider process-termination grace period in milliseconds. */
@@ -71,6 +80,16 @@ interface OwnedSession {
   readonly allocations: Map<WebTerminalId, TerminalAllocation>
 }
 
+/**
+ * Bytes of screens and follower queues the Host admits when
+ * {@link Config.maxTotalBufferedBytes} is unset. Chosen to sit far above any one
+ * Session's worst case — eight default terminals (8 × 2 MB screens) each with a
+ * follower (2 MiB apiece) reserve under 50 MiB — so ordinary work never sees the
+ * ceiling, while the pathological many-Session total, which previously grew
+ * without limit, stops at a quarter of a gigabyte of worst-case reservations.
+ */
+const DEFAULT_MAX_TOTAL_BUFFERED_BYTES = 256 * 1024 * 1024
+
 /** Typed Remote control of transient Session-owned terminal processes. */
 export class TerminalController extends TypertRemoteService {
   static inject = ['subprocess', 'sandboxPolicy', 'typert']
@@ -84,6 +103,7 @@ export class TerminalController extends TypertRemoteService {
     maxRows: z.number().step(1).min(1).default(200),
     scrollback: z.number().step(1).min(0).default(1000),
     maxBufferedBytes: z.number().step(1).min(1024).default(2 * 1024 * 1024),
+    maxTotalBufferedBytes: z.number().step(1).min(0).max(Number.MAX_SAFE_INTEGER).default(DEFAULT_MAX_TOTAL_BUFFERED_BYTES),
     maxInputBytes: z.number().step(1).min(1).default(64 * 1024),
     disposeGraceMs: z.number().step(1).min(1).default(1000),
     unattendedTimeoutMs: z.number().step(1).min(0).max(Number.MAX_SAFE_INTEGER).default(7_200_000),
@@ -93,6 +113,8 @@ export class TerminalController extends TypertRemoteService {
 
   private readonly owners = new Map<SessionId, OwnedSession>()
   private readonly lifetime = new AbortController()
+  /** Host-wide buffer budget shared by every Session; absent when the ceiling is disabled. */
+  private readonly budget: TerminalBudget | undefined
 
   /**
    * @param ctx - Host context carrying typed Remote and execution providers.
@@ -100,6 +122,8 @@ export class TerminalController extends TypertRemoteService {
    */
   constructor(ctx: Context, private readonly config: Config) {
     super(ctx, 'terminalController', { namespace: 'terminal' })
+    const maxTotal = config.maxTotalBufferedBytes ?? DEFAULT_MAX_TOTAL_BUFFERED_BYTES
+    this.budget = maxTotal === 0 ? undefined : new TerminalBudget(maxTotal)
     ctx.effect(() => async () => {
       this.lifetime.abort(new Error('Terminal controller disposed'))
       const results = await Promise.allSettled([...this.owners].map(([id, owner]) => this.disposeOwner(id, owner)))
@@ -171,7 +195,15 @@ export class TerminalController extends TypertRemoteService {
       return terminal.info
     }
     if (new Set([...owner.terminals.keys(), ...owner.pending.keys(), ...owner.allocations.keys()]).size >= this.config.maxTerminals) throw new RemoteError('terminal/limit-reached', 'Session terminal limit reached', { limit: this.config.maxTerminals })
-    const allocation = this.spawn(agent, owner, request, AbortSignal.any([signal, this.lifetime.signal, owner.lifetime.signal]))
+    // Host-wide admission happens before any process exists, so a refusal at the ceiling costs
+    // nothing and leaves every running terminal and attached follower exactly as it was.
+    const limits = this.limits()
+    const combined = AbortSignal.any([signal, this.lifetime.signal, owner.lifetime.signal])
+    // Only a committed terminal owns the admission: every other settlement refunds it here.
+    const allocation = this.spawn(agent, owner, request, combined, limits).catch((error: unknown) => {
+      limits?.screen.release()
+      throw error
+    })
     owner.pending.set(request.id, allocation)
     try {
       const terminal = await allocation
@@ -323,6 +355,16 @@ export class TerminalController extends TypertRemoteService {
     if (owner.closedIds.has(id)) throw new RemoteError('terminal/unavailable', 'Terminal was closed in this Session', {})
   }
 
+  /**
+   * Charge one terminal's worst-case screen against the Host-wide budget.
+   * @returns the accounting to hand to the terminal, or absent when the ceiling is disabled.
+   * @throws RemoteError `terminal/capacity-reached` when the Host cannot admit another screen.
+   */
+  private limits(): TerminalBufferLimits | undefined {
+    if (this.budget === undefined) return undefined
+    return { budget: this.budget, screen: this.budget.reserve(TerminalBudget.screen(this.config.scrollback, this.config.maxCols), 'terminal') }
+  }
+
   private dimensions(cols: number, rows: number): void {
     if (!Number.isSafeInteger(cols) || cols < 2 || cols > this.config.maxCols
       || !Number.isSafeInteger(rows) || rows < 1 || rows > this.config.maxRows) throw new Error('Terminal dimensions exceed the configured limits')
@@ -336,7 +378,18 @@ export class TerminalController extends TypertRemoteService {
     return { subprocess, sandboxPolicy }
   }
 
-  private async spawn(agent: Agent, owner: OwnedSession, request: TerminalCreateRequest, signal: AbortSignal): Promise<BrowserTerminal> {
+  /**
+   * Allocate a terminal process and hand it the Host-wide screen admission.
+   * @param agent - Session owner.
+   * @param owner - retained owner records.
+   * @param request - validated creation request.
+   * @param signal - combined lifetime cancellation.
+   * @param limits - this terminal's Host-wide accounting; absent when the ceiling is disabled.
+   * @returns the committed browser terminal, which then owns the screen charge.
+   */
+  private async spawn(
+    agent: Agent, owner: OwnedSession, request: TerminalCreateRequest, signal: AbortSignal, limits: TerminalBufferLimits | undefined,
+  ): Promise<BrowserTerminal> {
     const environment = this.environment(agent, signal)
     const { subprocess } = this.execution(agent)
     const shell = request.shellPath === undefined
@@ -355,7 +408,7 @@ export class TerminalController extends TypertRemoteService {
     }
     try {
       signal.throwIfAborted()
-      return new BrowserTerminal(handle, info, this.config.scrollback, this.config.maxBufferedBytes)
+      return new BrowserTerminal(handle, info, this.config.scrollback, this.config.maxBufferedBytes, limits)
     } catch (error) {
       const cleanup = new TerminalRetention(this.config, handle.inspectActivity.bind(handle), async () => {
         owner.closedIds.add(request.id)

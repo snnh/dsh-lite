@@ -1,5 +1,6 @@
 /** A bounded output queue for one Remote stream generation. */
 import { Deque } from '@deepseek-ai/dsh-deque'
+import type { TerminalCharge } from './budget.ts'
 import type { TerminalFrame } from './types.ts'
 
 /** Slow followers fail explicitly; a later attachment recovers from the screen. */
@@ -11,8 +12,11 @@ export class TerminalFollower {
   private finished = false
   private failure: Error | undefined
 
-  /** @param maxBytes - maximum queued UTF-8 bytes for this follower. */
-  constructor(private readonly maxBytes: number) {}
+  /**
+   * @param maxBytes - maximum queued UTF-8 bytes for this follower.
+   * @param charge - Host-wide admission refunded when this follower stops holding its queue.
+   */
+  constructor(private readonly maxBytes: number, private readonly charge?: TerminalCharge) {}
 
   /**
    * Queue a frame or fail this follower when its byte limit is exceeded.
@@ -37,12 +41,13 @@ export class TerminalFollower {
     this.wake?.()
   }
 
-  /** Stop this follower without stopping its terminal. */
+  /** Stop this follower without stopping its terminal, refunding its Host-wide queue budget. */
   close(): void {
     this.closed = true
     this.queue.clear()
     this.bytes = 0
     this.wake?.()
+    this.charge?.release()
   }
 
   /**

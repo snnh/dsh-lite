@@ -10,6 +10,17 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'terminal/control-unavailable': { readonly reason: 'read-only' | 'not-running' }
     /** Retained screens and pending allocations consume the Session's terminal quota. */
     'terminal/limit-reached': { readonly limit: number }
+    /** Retained screens and follower queues consume the Host-wide buffer budget; nothing was evicted. */
+    'terminal/capacity-reached': {
+      /** Configured Host-wide byte ceiling. */
+      readonly limit: number
+      /** Bytes reserved when the request was refused. */
+      readonly used: number
+      /** Bytes the refused screen or follower queue would have reserved. */
+      readonly requested: number
+      /** Which buffer the refused request was opening. */
+      readonly purpose: 'terminal' | 'follower'
+    }
   }
 }
 

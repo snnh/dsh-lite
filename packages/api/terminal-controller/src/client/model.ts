@@ -328,7 +328,9 @@ export class TerminalView {
       this.patch({ writable: false, error: undefined, issue: undefined })
       return
     }
-    const issue = failure?.code === 'terminal/view' ? failure.details.issue : failure?.code === 'terminal/limit-reached' ? 'terminalLimit' : failure?.code === 'terminal/unavailable' ? 'missingTerminal' : undefined
+    // Both quotas leave the user the same action — close an unused terminal — so they share one
+    // localized issue; only the Host's diagnostics distinguish which ceiling was reached.
+    const issue = failure?.code === 'terminal/view' ? failure.details.issue : failure?.code === 'terminal/limit-reached' || failure?.code === 'terminal/capacity-reached' ? 'terminalLimit' : failure?.code === 'terminal/unavailable' ? 'missingTerminal' : undefined
     this.patch({ phase: error instanceof RemoteStreamCarrierError ? 'disconnected' : 'failed', writable: false, issue, error: error instanceof Error ? error.message : String(error) })
   }
 }

@@ -4,6 +4,7 @@ import type { Terminal as HeadlessTerminal } from '@xterm/headless'
 import type { SerializeAddon as Serializer } from '@xterm/addon-serialize'
 import type { SubprocessTerminalHandle } from '@deepseek-ai/dsh-subprocess'
 import { createLazyRequire } from '@deepseek-ai/dsh-lazy-require'
+import type { TerminalBufferLimits } from './budget.ts'
 import { TerminalFollower } from './stream.ts'
 import { TerminalRetention, type TerminalRetentionPolicy } from './retention.ts'
 import type { TerminalAttachmentId, TerminalFrame, TerminalRetentionFrame, WebTerminalInfo } from './types.ts'
@@ -28,12 +29,14 @@ export class BrowserTerminal {
    * @param info - initial metadata.
    * @param scrollback - maximum retained scrollback rows.
    * @param maxBufferedBytes - per-follower queue cap.
+   * @param limits - Host-wide accounting this terminal charges and refunds; absent when the ceiling is disabled.
    */
   constructor(
     private readonly handle: SubprocessTerminalHandle,
     public info: WebTerminalInfo,
     scrollback: number,
     private readonly maxBufferedBytes: number,
+    private readonly limits?: TerminalBufferLimits,
   ) {
     const { Terminal } = requireHeadless()
     const { SerializeAddon } = requireSerialize()
@@ -76,17 +79,19 @@ export class BrowserTerminal {
    */
   async *follow(id: TerminalAttachmentId, signal: AbortSignal): AsyncIterable<TerminalFrame> {
     signal.throwIfAborted()
-    const follower = new TerminalFollower(this.maxBufferedBytes)
-    const baseline = await this.enqueue(() => {
-      signal.throwIfAborted()
-      this.controller = { id, follower }
-      this.info = { ...this.info, controllerId: id }
-      this.broadcast({ type: 'state', info: this.info })
-      const snapshot: TerminalFrame = { type: 'snapshot', sequence: this.sequence, screen: this.serializer.serialize(), info: this.info }
-      this.followers.add(follower)
-      return snapshot
-    })
+    // The follower reserves its whole queue from the Host-wide budget before it exists, so a
+    // refusal reports itself here instead of detaching an attachment that already worked.
+    const follower = new TerminalFollower(this.maxBufferedBytes, this.limits?.budget.reserve(this.maxBufferedBytes, 'follower'))
     try {
+      const baseline = await this.enqueue(() => {
+        signal.throwIfAborted()
+        this.controller = { id, follower }
+        this.info = { ...this.info, controllerId: id }
+        this.broadcast({ type: 'state', info: this.info })
+        const snapshot: TerminalFrame = { type: 'snapshot', sequence: this.sequence, screen: this.serializer.serialize(), info: this.info }
+        this.followers.add(follower)
+        return snapshot
+      })
       yield baseline
       yield* follower.read(signal)
     } finally {
@@ -160,6 +165,8 @@ export class BrowserTerminal {
       for (const follower of this.followers) follower.finish()
       this.followers.clear()
       this.screen.dispose()
+      // The screen is what the charge covers, so it is refunded only once that screen is gone.
+      this.limits?.screen.release()
     })().catch((error: unknown) => { this.closing = undefined; throw error })
     return this.closing
   }

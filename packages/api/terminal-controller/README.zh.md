@@ -37,6 +37,7 @@ Shell 探测结果首先列出执行环境声明的默认 shell。仅当 provide
 | `maxCols`、`maxRows` | `500`、`200` | PTY 最大尺寸 |
 | `scrollback` | `1000` | 屏幕历史行数 |
 | `maxBufferedBytes` | `2097152` | 单个订阅者的输出排队上限 |
+| `maxTotalBufferedBytes` | `268435456` | 所有 Session 的屏幕与订阅者队列合计可预留的上限；超过即拒绝新请求，`0` 关闭该上限 |
 | `maxInputBytes` | `65536` | 单次输入请求的字节上限 |
 | `disposeGraceMs` | `1000` | provider 终止宽限期，单位毫秒 |
 | `unattendedTimeoutMs` | `7200000` | 无窗口持有且持续确认空闲后开始清理的时长；`0` 禁用自动回收 |

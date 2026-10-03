@@ -11,7 +11,8 @@
     "src/terminal.ts",
     "src/retention.ts",
     "src/stream.ts",
-    "src/shells.ts"
+    "src/shells.ts",
+    "src/budget.ts"
   ],
   "references": [
     {
