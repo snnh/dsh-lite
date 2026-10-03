@@ -72,8 +72,6 @@ export interface StorageHandleState {
   recoveredTail?: SessionEvent[] | undefined
   /** Exact fork-inherited prefix length stored with the log; `0` when unseeded. */
   inheritedEventCount: SessionLogOffset
-  /** The validated stored prefix from a write open, served to reads until the first append. */
-  primed?: SessionHandleReadResult | undefined
 }
 
 /**
@@ -126,39 +124,17 @@ export class JsonlSessionHandle implements SessionHandle {
       throw new TypeError(`read length must be a non-negative safe integer, got ${String(length)}`)
     }
     options?.signal?.throwIfAborted()
-    let result: SessionHandleReadResult
-    const primed = this.state.primed
-    if (primed !== undefined) {
-      if (this.access === 'write') {
-        result = this.readPrimed(primed, offset, length)
-      } else {
-        const currentPath = await this.storage.resolveCurrentLog(this.id, options?.signal)
-        if (currentPath === undefined) {
-          result = this.readPrimed(primed, offset, length)
-        } else {
-          this.state.primed = undefined
-          result = await this.readCurrent(currentPath, offset, length, options?.signal)
-        }
-      }
-    } else if (this.access === 'write' && !this.state.materialized) {
-      result = { eventState: 'detached', events: [] }
-    } else {
-      const currentPath = await this.storage.resolveCurrentLog(this.id, options?.signal)
-      if (currentPath !== undefined) {
-        result = await this.readCurrent(currentPath, offset, length, options?.signal)
-      } else if (this.storage.hasPendingSession(this.id)) {
-        result = { eventState: 'detached', events: [] }
-      } else {
-        throw new SessionPersistenceNotFoundError(this.id)
-      }
+    if (this.access === 'write' && !this.state.materialized) {
+      return { eventState: 'detached', events: [] }
     }
-    return result
-  }
-
-  /** Read one slice from the prepared historical prefix retained by this handle. */
-  private readPrimed(source: SessionHandleReadResult, offset: number, length: number): SessionHandleReadResult {
-    this.observedLength = Math.max(this.observedLength, source.events.length)
-    return { eventState: source.eventState, events: source.events.slice(offset, offset + length) }
+    const currentPath = await this.storage.resolveCurrentLog(this.id, options?.signal)
+    if (currentPath !== undefined) {
+      return await this.readCurrent(currentPath, offset, length, options?.signal)
+    }
+    if (this.storage.hasPendingSession(this.id)) {
+      return { eventState: 'detached', events: [] }
+    }
+    throw new SessionPersistenceNotFoundError(this.id)
   }
 
   /** Read one current physical generation and enforce this handle's monotonic view. */
@@ -324,7 +300,7 @@ export class JsonlSessionHandle implements SessionHandle {
     // Commit any pending torn-tail repair first, clearing each step's state
     // only once it lands so a failed step retries on the next mutation:
     // truncate the torn bytes, then durably rewrite the complete events
-    // recovered from them (already counted in the primed cursor).
+    // recovered from them (already counted in the handle's cursor).
     if (this.state.tornTruncateTo !== undefined) {
       await this.storage.truncateTornTail(this.header, this.state.tornTruncateTo)
       this.state.tornTruncateTo = undefined
@@ -338,7 +314,6 @@ export class JsonlSessionHandle implements SessionHandle {
     await this.storage.persistBatch(this.header, batch, this.state.materialized, this.state.inheritedEventCount)
     this.state.materialized = true
     this.state.cursor += batch.length
-    this.state.primed = undefined
     this.observedLength = this.state.cursor
   }
 
