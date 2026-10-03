@@ -317,7 +317,9 @@ export async function listDirectory(target: LocalTarget, signal?: AbortSignal): 
   throwIfAborted(signal, 'list')
 
   const result: LocalDirEntry[] = []
-  for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+  // Code-unit order: `readdir` order is arbitrary, these names carry no locale
+  // rules, and ICU collation costs an order of magnitude more per comparison.
+  for (const entry of entries.sort((left, right) => Number(left.name > right.name) - Number(left.name < right.name))) {
     throwIfAborted(signal, 'list')
     try {
       const childTarget = await resolveListedChildTarget(target, entry.name)

@@ -49,7 +49,8 @@ interface SharedUpload {
 function fileScope(connection: DeepSeekFileConnection) {
   return deepSeekFileScope(
     messagesApiRoot(connection.baseURL),
-    JSON.stringify(Object.entries(connection.headers).sort(([left], [right]) => left.localeCompare(right))),
+    // Code-unit order: this is a cache scope key, so ICU collation only costs time.
+    JSON.stringify(Object.entries(connection.headers).sort(([left], [right]) => Number(left > right) - Number(left < right))),
   )
 }
 

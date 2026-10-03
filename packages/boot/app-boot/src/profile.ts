@@ -340,7 +340,8 @@ function linkedProfileRoots(profile: Profile, profilesDir: string): LinkedRoot[]
       || !statSync(realPath).isDirectory()) continue
     roots.push({ name: relative(modules, linkPath).split(sep).join('/'), realPath })
   }
-  return roots.sort((left, right) => left.name.localeCompare(right.name))
+  // Code-unit order: a link name is a path fragment, so ICU collation only costs time.
+  return roots.sort((left, right) => Number(left.name > right.name) - Number(left.name < right.name))
 }
 
 /** Whether a symlink's target directory is `root` or lies below it. */

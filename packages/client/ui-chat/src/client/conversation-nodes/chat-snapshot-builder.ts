@@ -504,7 +504,8 @@ export function orderedVisibleChatNodes(
     return leftPosition.anchor - rightPosition.anchor
       || leftPosition.rank - rightPosition.rank
       || leftPosition.originalAnchor - rightPosition.originalAnchor
-      || left.key.localeCompare(right.key)
+      // Code-unit order: node keys are opaque, so ICU collation only costs time.
+      || Number(left.key > right.key) - Number(left.key < right.key)
   })
 }
 

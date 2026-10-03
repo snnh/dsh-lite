@@ -292,7 +292,8 @@ export class TrajectorySnapshotBuilder implements ConversationViewBuilder<
 
   private rebuildContributions(): void {
     this.contributions = [...this.nodes.values()]
-      .sort((left, right) => left.anchorSeq - right.anchorSeq || left.key.localeCompare(right.key))
+      // Code-unit order: contribution keys are opaque, so ICU collation only costs time.
+      .sort((left, right) => left.anchorSeq - right.anchorSeq || Number(left.key > right.key) - Number(left.key < right.key))
     this.positions.clear()
     for (const [index, contribution] of this.contributions.entries()) {
       this.positions.set(contribution.key, index)

@@ -73,7 +73,9 @@ export class SidebarSessionViews {
   }
 
   private publish(): void {
-    this.source.set([...this.views.values()].sort((a, b) => a.sessionId.localeCompare(b.sessionId)).map(view => ({
+    // Code-unit order: session ids are opaque, so ICU collation only costs time.
+    const ordered = [...this.views.values()].sort((a, b) => Number(a.sessionId > b.sessionId) - Number(a.sessionId < b.sessionId))
+    this.source.set(ordered.map(view => ({
       sessionId: view.sessionId, reference: view.reference, selected: view.sessionId === this.selected, retainTab: view.retainTab,
     })))
   }

@@ -185,7 +185,8 @@ export class AgentPresetRegistry extends TypertRemoteService {
         ...(broken === undefined ? {} : { broken }),
       }
     }))
-    return rows.sort((a, b) => (a.order ?? Infinity) - (b.order ?? Infinity) || a.id.localeCompare(b.id))
+    // Code-unit order: a preset id is opaque, so ICU collation only costs time.
+    return rows.sort((a, b) => (a.order ?? Infinity) - (b.order ?? Infinity) || Number(a.id > b.id) - Number(a.id < b.id))
   }
 
   /** Read the selection roster.
