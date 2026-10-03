@@ -33,7 +33,6 @@
     "undici": "^8.10.0"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "workspace:~",
-    "@deepseek-ai/dsh-invariants": "workspace:*"
+    "@deepseek-ai/cordis": "workspace:~"
   }
 }

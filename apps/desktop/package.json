@@ -9,7 +9,7 @@
   "scripts": {
     "test:installer": "node scripts/test-windows-installer.mjs",
     "build": "tsc -b && pnpm run bundle",
-    "bundle": "tsdown",
+    "bundle": "tsdown --config-loader native",
     "dev": "tsx scripts/dev.ts",
     "start": "tsx scripts/dev.ts --skip-build",
     "test:updates:local": "pnpm run build && node scripts/test-local-updater.mjs",
