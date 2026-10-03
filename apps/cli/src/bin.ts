@@ -33,11 +33,16 @@ export async function runCli(options: RunCliOptions = {}): Promise<void> {
   switch (invocation.mode) {
     case 'profile': {
       const { runProfile } = await import('./profile-boot.ts')
-      const { startMemoryPolicy } = await import('./memory-policy.ts')
+      const { policyOptionsFromEnv, startMemoryPolicy } = await import('./memory-policy.ts')
       // Sampling starts before the host binds, and it outlives `runProfile`,
       // which resolves once the profile is composed rather than at shutdown.
       // Both timers are unref'd, so the policy never holds the process open.
-      startMemoryPolicy({ log: (line) => { process.stderr.write(`${line}\n`) } })
+      const policyOptions = policyOptionsFromEnv()
+      if (policyOptions === undefined) {
+        process.stderr.write('memory policy: disabled by DSH_GC=0\n')
+      } else {
+        startMemoryPolicy({ ...policyOptions, log: (line) => { process.stderr.write(`${line}\n`) } })
+      }
       try {
         await runProfile({
           environment: loadLayeredEnv('dsh'),

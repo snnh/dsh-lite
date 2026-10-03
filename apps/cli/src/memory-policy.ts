@@ -4,22 +4,36 @@
  * Booting a profile allocates far more than the host retains: module records,
  * profile parsing, the client roster, and every transient the loader built on
  * the way. An idle host without this policy holds those committed pages: the
- * built Web profile measures ~243 MB resident and stays there, against a live
- * set of ~57 MB.
+ * built Web profile measures ~255 MB resident and stays there.
  *
- * The policy resolves a collect function once, which needs the V8 flag hook
- * because a build launched without `--expose-gc` has none, and then samples the
- * resident set: once shortly after startup, and afterwards only above a
- * threshold and never more often than the minimum interval. Both timers are
- * unref'd, so the policy never keeps a finishing process alive.
+ * The lever is the collector lookup itself. Resolving a collector means asking
+ * the runtime for one, and a build launched without `--expose-gc` has none, so
+ * the lookup sets the flag and reads `gc` out of a fresh context. Creating that
+ * context collects once and V8 then returns the idle pages to the operating
+ * system; the resident set settles near 154 MB without any later call. Both
+ * halves are load-bearing and neither alone is enough, measured on the built
+ * Web profile by an external sampler:
  *
- * Measured on the built Web profile, 6 s to 90 s after startup: without the
- * policy the resident set is flat at ~243 MB, with it ~146-152 MB and flat at
- * that level. The startup report shows the resident set already reduced when it
- * runs, so the hook that makes collection reachable is what lets V8 reduce the
- * heap here, and the periodic collection is what bounds a host that keeps
- * working. A runtime that refuses the hook reports that once and samples
- * nothing.
+ * - `setFlagsFromString('--expose-gc')` alone leaves the resident set at 260 MB.
+ * - A fresh context whose `gc` is absent (the lookup's own failure path) still
+ *   settles at 152 MB.
+ * - The explicit startup collection reports the resident set already reduced,
+ *   so it adds observability and bounds a long-running host rather than making
+ *   the initial drop.
+ *
+ * The policy therefore resolves the collector once, samples the resident set
+ * once shortly after startup, and afterwards collects only above a threshold
+ * and never more often than the minimum interval. Both timers are unref'd, so
+ * the policy never keeps a finishing process alive. Every knob has an
+ * environment override, and `DSH_GC=0` turns the whole policy off.
+ *
+ * The V8 generation sizes this does not touch are startup-only: setting
+ * `--max-semi-space-size` after the heap exists changes nothing (measured at
+ * 256 MB against 164 MB for the same value passed to node), and the published
+ * `dsh` entry point is an `env node` script that cannot carry node arguments.
+ * An operator who wants that ~90 MB sets `NODE_OPTIONS=--max-semi-space-size=2`
+ * themselves; stacked with this policy it measured 152 MB against 153 MB, so
+ * the policy is what the CLI can own.
  *
  * @module @deepseek-ai/dsh/memory-policy
  */
@@ -38,6 +52,20 @@ export const DEFAULT_GC_MIN_INTERVAL_MS = 5 * 60 * 1000
 export const DEFAULT_SAMPLE_INTERVAL_MS = 60 * 1000
 /** Delay before the startup collection, which must land after boot allocates. */
 export const DEFAULT_INITIAL_DELAY_MS = 10 * 1000
+
+/**
+ * Environment variable naming the resident-set threshold in whole megabytes.
+ * `0` turns threshold sampling off while the startup collection still runs.
+ */
+export const GC_THRESHOLD_ENV = 'DSH_GC_THRESHOLD_MB'
+/** Environment variable naming the minimum interval between two collections, in milliseconds. */
+export const GC_MIN_INTERVAL_ENV = 'DSH_GC_MIN_INTERVAL_MS'
+/** Environment variable naming the interval between resident-set samples, in milliseconds. */
+export const GC_SAMPLE_INTERVAL_ENV = 'DSH_GC_SAMPLE_INTERVAL_MS'
+/** Environment variable naming the delay before the startup collection, in milliseconds. */
+export const GC_INITIAL_DELAY_ENV = 'DSH_GC_INITIAL_DELAY_MS'
+/** Environment variable that turns the whole policy off when set to `0`. */
+export const GC_DISABLED_ENV = 'DSH_GC'
 
 /** Policy inputs; every field has a default so a caller states only its deviation. */
 export interface MemoryPolicyOptions {
@@ -71,6 +99,10 @@ export function resolveCollectGarbage(): CollectGarbage | undefined {
   try {
     // Node exposes `gc` only to a context created after the flag is set, so a
     // build launched without `--expose-gc` still reaches it through this hook.
+    // The fresh context is also what drops the idle resident set by ~100 MB:
+    // creating it collects once and V8 then returns pages to the OS. Do not
+    // replace it with a cheaper flag read — a runtime that refuses the hook
+    // keeps the higher resident set (see the module comment for the A/B).
     setFlagsFromString('--expose-gc')
     const hooked = runInNewContext('gc') as unknown
     return typeof hooked === 'function' ? (hooked as CollectGarbage) : undefined
@@ -89,6 +121,42 @@ interface Reading {
 function readMemory(): Reading {
   const usage = process.memoryUsage()
   return { rssBytes: usage.rss, heapUsedBytes: usage.heapUsed }
+}
+
+/** Parse one non-negative integer setting, or undefined when unset or malformed. */
+function readCount(raw: string | undefined): number | undefined {
+  if (raw === undefined || raw.trim() === '') return undefined
+  const value = Number(raw)
+  // A malformed override keeps the documented default instead of failing a boot.
+  return Number.isSafeInteger(value) && value >= 0 ? value : undefined
+}
+
+/**
+ * Read the policy settings an operator may override without a rebuild. Every
+ * unset or malformed value keeps its default; `DSH_GC_THRESHOLD_MB=0` turns
+ * threshold sampling off while the startup collection still runs; `DSH_GC=0`
+ * disables the policy outright.
+ * @param env - environment to read; defaults to the process environment.
+ * @returns options for {@link startMemoryPolicy}, or undefined when disabled.
+ */
+export function policyOptionsFromEnv(env: NodeJS.ProcessEnv = process.env): MemoryPolicyOptions | undefined {
+  if (env[GC_DISABLED_ENV] === '0') return undefined
+  const options: MemoryPolicyOptions = {}
+  const thresholdMegabytes = readCount(env[GC_THRESHOLD_ENV])
+  if (thresholdMegabytes !== undefined) {
+    // An explicit zero means "never collect from a sample", which no finite
+    // resident-set reading reaches.
+    options.thresholdBytes = thresholdMegabytes === 0
+      ? Number.POSITIVE_INFINITY
+      : thresholdMegabytes * 1048576
+  }
+  const intervals = [[GC_MIN_INTERVAL_ENV, 'minIntervalMs'], [GC_SAMPLE_INTERVAL_ENV, 'sampleIntervalMs'],
+    [GC_INITIAL_DELAY_ENV, 'initialDelayMs']] as const
+  for (const [name, field] of intervals) {
+    const value = readCount(env[name])
+    if (value !== undefined) options[field] = value
+  }
+  return options
 }
 
 /** Report in whole megabytes, the unit an operator compares against a limit. */
