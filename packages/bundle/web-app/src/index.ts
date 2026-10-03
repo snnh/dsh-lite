@@ -134,12 +134,18 @@ try {
  * @returns the LAN display addresses and invocation-derived fence authorities.
  */
 export function resolveLanTrust(bindHost: string, extra: readonly string[]): WebRuntimeValues {
-  const lanAddresses = bindHost === ALL_INTERFACES_HOST
+  // A specific non-loopback address is itself the network address this host is
+  // reachable at, so it joins the fence instead of being sampled; `0.0.0.0` is
+  // not an authority, so its addresses are.
+  const reachable = bindHost === ALL_INTERFACES_HOST
     ? Object.values(networkInterfaces()).flat()
       .filter((iface): iface is NonNullable<typeof iface> => iface !== undefined && iface.family === 'IPv4' && !iface.internal)
       .map(iface => iface.address)
-    : []
-  return { lanAddresses, trustedHosts: [...lanAddresses, ...extra] }
+    : bindHost === LOOPBACK_HOST ? [] : [bindHost]
+  // The LAN link is printed beside the application URL, so it is only worth
+  // reporting when the URL does not already carry the bound address.
+  const lanAddresses = bindHost === ALL_INTERFACES_HOST ? reachable : []
+  return { lanAddresses, trustedHosts: [...reachable, ...extra] }
 }
 
 /** Model-visible orientation and acceptance boundary for sessions created through `dsh web`. */
@@ -158,9 +164,14 @@ function webSurfacePrompt(webUrl: string): string {
 
 /** Resolve the canonical loopback URL from the active Web server. */
 function localWebUrl(ctx: Context): string {
-  const port = ctx.get('webServer')?.port
-  if (port === undefined) throw new Error('web-app: webServer service missing while resolving Web runtime')
-  return `http://${LOOPBACK_HOST}:${String(port)}`
+  const webServer = ctx.get('webServer')
+  if (webServer === undefined) throw new Error('web-app: webServer service missing while resolving Web runtime')
+  const port = webServer.port
+  // `0.0.0.0` covers loopback as well but is not an address a browser can open,
+  // so the printed URL keeps the loopback literal for it; a specific bind
+  // address is the one this machine's browser must use.
+  const host = webServer.host === ALL_INTERFACES_HOST ? LOOPBACK_HOST : webServer.host
+  return `http://${host}:${String(port)}`
 }
 
 function appRootUrl(ctx: Context, publicUrl: string | undefined): string {

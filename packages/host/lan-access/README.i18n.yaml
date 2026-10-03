@@ -3,50 +3,47 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/host/lan-access/README.md
 /:
-  en: ebcf0b55f4a71af0
-  zh: 737bc579e524916a
+  en: bd859bb5b5037b84
+  zh: c023453783696bff
 /deepseek-ai-dsh-host-lan-access:
   en: c1f2e255968abe45
   zh: a1341d77bb380bfb
 /deepseek-ai-dsh-host-lan-access/summary:
-  en: 0ee13156fce8d3b8
-  zh: 569a751985a3ac91
+  en: de048956d9591add
+  zh: f5e0cb6d5ba4f580
 /deepseek-ai-dsh-host-lan-access/table-of-contents:
   en: 80b31a934611cb4a
   zh: 3c9647af7a8067c3
 /deepseek-ai-dsh-host-lan-access/use-this-package:
   en: bbff250eba0f1b89
   zh: 0a618f05cc88ee2b
-/deepseek-ai-dsh-host-lan-access/use-this-package/exposing-the-harness-on-the-local-network:
-  en: b18daf440fcee282
-  zh: 978b4a5edb3bd762
+/deepseek-ai-dsh-host-lan-access/use-this-package/choosing-the-bind-address:
+  en: 7e3d6748dcf2b948
+  zh: aeafc1773fa132fd
 /deepseek-ai-dsh-host-lan-access/use-this-package/returning-to-loopback:
-  en: fc6f455f7ab04928
-  zh: df5a761163776d12
-/deepseek-ai-dsh-host-lan-access/use-this-package/configuration:
-  en: 75bfee4817780d79
-  zh: e658a574d137de78
+  en: cb2118584d697b7f
+  zh: 6b31f686e150025c
 /deepseek-ai-dsh-host-lan-access/understand-the-implementation:
   en: ee4615a04fa6503d
   zh: ee2c5fb2204a43cf
-/deepseek-ai-dsh-host-lan-access/understand-the-implementation/why-this-is-a-row-rather-than-a-flag:
-  en: 14cf2a102f3f620a
-  zh: fb85129cacd6cd3b
+/deepseek-ai-dsh-host-lan-access/understand-the-implementation/why-the-default-is-the-lan-address:
+  en: c212371ef27af878
+  zh: 75e71d11521a4f28
 /deepseek-ai-dsh-host-lan-access/understand-the-implementation/what-the-refusal-covers:
-  en: 12502ace0df12f13
-  zh: 77746ea3dfbf5801
+  en: 0ae14e83fed47a0f
+  zh: 0ef56a922e3cf88b
 /deepseek-ai-dsh-host-lan-access/further-exploration:
-  en: 4a41edc8cda01b81
-  zh: 89b99fd8b3fd8cf7
+  en: 131de386ec0864b4
+  zh: 0ed2c741cebb73fa
 /deepseek-ai-dsh-host-lan-access/known-limitations-and-deferred-work:
-  en: 690aa690be2264ad
-  zh: 5f3bc9e17249d818
+  en: e5e913dbfb490420
+  zh: 44836bb0e0dfa0bf
 /deepseek-ai-dsh-host-lan-access/dev-note:
   en: 7410b003a5057dc2
   zh: 1432e59879b44e2d
 /deepseek-ai-dsh-host-lan-access/dev-note/coverage:
-  en: f8b2bd2f76a3d04c
-  zh: 44e35b2725cfdbfb
+  en: 8425d413e55d16ab
+  zh: b6a7776f9397e7a6
 /deepseek-ai-dsh-host-lan-access/dev-note/tests:
-  en: 8b0315b4d4776e40
-  zh: 5dbcaab0303a6e7f
+  en: 7d8575fb3d548e16
+  zh: 5f80164f03cf7e17

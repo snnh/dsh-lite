@@ -1,21 +1,25 @@
 /**
- * Opt-in network exposure for the web server.
+ * Network exposure for the web server.
  *
- * The web bundle binds loopback by default. An operator who wants the harness
- * reachable from a phone, a tablet, or another machine on the same network needs
- * the server on an address the network can reach — and that address is reachable
- * by anyone who can route to it, not only by the operator.
+ * The harness is most useful from the machine it runs on and from the other
+ * machines on the same network — a phone, a tablet, another laptop. This row
+ * therefore binds this machine's LAN address by default: every network the
+ * machine is attached to *other* than that one keeps its loopback-only posture,
+ * container bridges and virtual interfaces included. An operator who wants the
+ * old loopback-only posture sets `host: 127.0.0.1`; one who wants every
+ * interface sets `host: 0.0.0.0`.
  *
- * This row is the switch. It decides the bind host the web server reads, and it
- * refuses a host it cannot authenticate: a network-reachable bind requires a
- * token that outlives the process, which is resolved (and created when absent)
- * before the service is provided. The default host is loopback, so a tree that
- * mounts this row unchanged behaves exactly as one without it.
+ * A reachable address is reachable by anyone who can route to it, so this row
+ * refuses a bind it cannot authenticate: every non-loopback host requires the
+ * persistent access token, which is resolved (and created when the harness home
+ * has none) before the service is provided. The token is the only thing between
+ * the network and remote code execution, so a host that cannot establish one
+ * fails the boot instead of listening unauthenticated.
  *
- * Enabling exposure is therefore a one-line change to this row's `host` — in the
- * bundle patch or in an overlay — and returning to loopback is changing it back
- * or deleting the row: the web bundle reads the value through `ctx.get`, so an
- * absent row simply leaves the loopback default in place.
+ * Returning to loopback is one line — `host: 127.0.0.1` in this row — and
+ * removing the row entirely also works: the web bundle reads `lanAccess` through
+ * its own `inject` declaration, so a tree without the row never binds a
+ * network-reachable address.
  *
  * What this does not do: terminate TLS, set `Secure` on the cookie, or restrict
  * which network peers may connect. See the package README for the boundary.
@@ -23,6 +27,7 @@
  * @module @deepseek-ai/dsh-host-lan-access
  */
 
+import { networkInterfaces } from 'node:os'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { ACCESS_TOKEN_FILENAME, ensureAccessToken } from '@deepseek-ai/dsh-access-token'
@@ -34,27 +39,31 @@ export const name = 'lan-access'
 /** Service this row provides and the web bundle reads for its bind host. */
 export const LAN_ACCESS_SERVICE = 'lanAccess'
 
-/** The bind host this row admits: loopback, or every interface. */
-export type LanAccessHost = '127.0.0.1' | '0.0.0.0'
+/** The loopback literal every non-exposed posture binds. */
+export const LOOPBACK_HOST = '127.0.0.1'
+
+/** Hosts that name this machine alone. */
+const LOOPBACK_HOSTS = new Set([LOOPBACK_HOST, 'localhost', '::1', '[::1]'])
 
 /** What this row publishes through {@link LAN_ACCESS_SERVICE}. */
 export interface LanAccessValues {
   /** The host the web server should bind. */
-  readonly host: LanAccessHost
+  readonly host: string
 }
 
 export interface Config {
   /**
-   * The address the web server binds. `127.0.0.1` (the default) keeps the
-   * loopback-only posture; `0.0.0.0` exposes the harness to every network the
-   * machine is attached to, and requires a persistent access token.
+   * Explicit bind host. Omit it to bind this machine's LAN address — the first
+   * non-internal IPv4 interface, which falls back to loopback when the machine
+   * has none. `127.0.0.1` restores the loopback-only posture; `0.0.0.0` binds
+   * every interface.
    */
-  host: LanAccessHost
+  host?: string
 }
 
-/** Row configuration; the default keeps the harness on loopback. */
+/** Row configuration; the default binds this machine's LAN address. */
 export const Config: z<Config> = z.object({
-  host: z.union([z.const('0.0.0.0'), z.const('127.0.0.1')]).default('127.0.0.1'),
+  host: z.string(),
 })
 
 declare module '@deepseek-ai/cordis' {
@@ -68,26 +77,58 @@ declare module '@deepseek-ai/cordis' {
 }
 
 /**
- * Decide whether this host may bind a network-reachable address.
+ * The first non-internal IPv4 address this machine holds.
+ * @returns the address, or undefined on a machine with only loopback (an
+ *   isolated container, for example).
+ */
+export function detectLanAddress(): string | undefined {
+  for (const iface of Object.values(networkInterfaces()).flat()) {
+    if (iface !== undefined && iface.family === 'IPv4' && !iface.internal) return iface.address
+  }
+  return undefined
+}
+
+/**
+ * Whether a host names this machine alone.
+ * @param host - the configured or detected bind host.
+ * @returns true for loopback literals and `localhost`.
+ */
+export function isLoopbackHost(host: string): boolean {
+  return LOOPBACK_HOSTS.has(host)
+}
+
+/**
+ * Resolve the host this row binds. The detected address is a parameter rather
+ * than a default so a caller — and a test — can state "this machine has none"
+ * distinctly from "do not look".
+ * @param configured - the row's explicit host, when it named one.
+ * @param detected - this machine's LAN address, from {@link detectLanAddress}.
+ * @returns the configured host, else the detected address, else loopback.
+ */
+export function resolveBindHost(configured: string | undefined, detected: string | undefined): string {
+  if (configured !== undefined && configured.length > 0) return configured
+  return detected ?? LOOPBACK_HOST
+}
+
+/**
+ * Decide whether this host may bind the address it resolved.
  *
  * A loopback bind is reachable only from this machine, so it needs nothing
  * beyond the process-local authentication the connection half already applies.
  * Any other bind is reachable by everything that can route to it, so this row
  * requires the persistent token to exist first — resolving it creates one when
- * the harness home has none — and the failure to establish it refuses the bind
+ * the harness home has none — and a failure to establish it refuses the bind
  * rather than starting an unauthenticated one.
  *
  * @param ctx - plugin context the web bundle reads the value from.
  * @param config - the resolved row configuration.
  */
 export async function apply(ctx: Context, config?: Config): Promise<void> {
-  const host = config?.host ?? '127.0.0.1'
-  if (host === '127.0.0.1') {
-    ctx.provide(LAN_ACCESS_SERVICE, { host })
-    return
+  const host = resolveBindHost(config?.host, detectLanAddress())
+  if (!isLoopbackHost(host)) {
+    // Refuse the exposure when nothing can authenticate it. The connection half
+    // exchanges this same token for the browser cookie.
+    await ensureAccessToken(dshHomePath(ACCESS_TOKEN_FILENAME))
   }
-  // Refuse the exposure when nothing can authenticate it. The connection half
-  // exchanges this same token for the browser cookie.
-  await ensureAccessToken(dshHomePath(ACCESS_TOKEN_FILENAME))
   ctx.provide(LAN_ACCESS_SERVICE, { host })
 }

@@ -1,5 +1,5 @@
 ---
-description: "Opt-in network exposure for the DeepSeek Harness web server: one row decides the bind host, and a network-reachable bind requires a persistent access token."
+description: "Network exposure for the DeepSeek Harness web server: the row binds this machine's LAN address by default and refuses any reachable bind it cannot authenticate."
 kind: "bundle-row"
 ---
 
@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`@deepseek-ai/dsh-host-lan-access` is the switch that decides whether the web server binds loopback or every interface. The web bundle reads its bind host from this row through `ctx.get`, so a tree that mounts the row with its default configuration behaves exactly like one without it. Setting the row's `host` to `0.0.0.0` exposes the harness to every network the machine is attached to — and a network-reachable bind requires a token that outlives the process, which this row resolves (creating one when the harness home has none) before the service is provided. Returning to loopback is changing that value back or deleting the row.
+`@deepseek-ai/dsh-host-lan-access` decides the address the web server binds, and it binds the machine's LAN address by default: the harness is reachable from a phone, a tablet, or another machine on the same network, while container bridges and every other interface keep their loopback-only posture. A reachable address is reachable by anyone who can route to it, so the row refuses a bind it cannot authenticate — every non-loopback host requires the persistent access token, which the row resolves (creating one when the harness home has none) before the service is provided. Setting `host: 127.0.0.1` returns the tree to loopback only.
 
 ## Table of Contents
 
@@ -24,60 +24,61 @@ English | [中文](README.zh.md)
 <a id="use-this-package"></a>
 ## Use this package
 
-### Exposing the harness on the local network
+### Choosing the bind address
 
-Change the row's host in the bundle patch, or override it from an overlay:
+The row is mounted without a `host`, which means "this machine's LAN address". An overlay changes it:
 
 ```yaml
 - id: lan-access
   name: '@deepseek-ai/dsh-host-lan-access'
   config:
-    host: 0.0.0.0
+    host: 127.0.0.1
 ```
 
-The printed line then carries a LAN address next to the loopback one:
+| `host` | Posture |
+|---|---|
+| omitted | This machine's first non-internal IPv4 address, or loopback when it has none |
+| `127.0.0.1` | Loopback only — the harness is unreachable from the network |
+| `0.0.0.0` | Every interface, container bridges included |
+| `192.168.1.5` | One explicit address, which must be local to this machine |
+
+The printed line carries the address the server bound:
 
 ```
-dsh web: http://127.0.0.1:3080/?token=… (LAN: http://192.168.1.5:3080/?token=…)
+dsh web: http://192.168.1.5:3080/?token=…
 ```
 
 ### Returning to loopback
 
-Set `host` back to `127.0.0.1`, or delete the row entirely. The web bundle reads the value with `ctx.get`, so an absent row leaves its own loopback default in place.
-
-### Configuration
-
-| Field | Default | Meaning |
-|---|---|---|
-| `host` | `127.0.0.1` | The address the web server binds |
+Set `host: 127.0.0.1`, or delete the row. The web bundle declares `lanAccess` as an injected dependency, so a tree that mounts the row with an explicit loopback host binds loopback, and the row's own default is the only thing that exposes the machine.
 
 ## Understand the implementation
 
-### Why this is a row rather than a flag
+### Why the default is the LAN address
 
-The command line refuses `--host 0.0.0.0`, because a flag is a per-invocation decision an operator can make without revisiting the posture they are choosing. A configuration row is a stated posture: it lives in the tree, it can be reviewed, and removing it is a revert. The row also owns the one precondition that makes exposure safe — the persistent token — so the posture and its requirement cannot drift apart.
+The loopback default protects a machine nobody asked to expose; a machine running this harness has usually already chosen to be reachable, and the operator's first question is how to open the UI from the device in their hand. Binding one address rather than every interface answers that without also listening on container bridges, virtual networks, and any other interface the machine happens to carry, so the exposure is as narrow as the request.
 
 ### What the refusal covers
 
-A loopback bind is reachable only from this machine, so the row provides the service without touching the token: the connection half already applies process-local authentication. Every other bind is reachable by anything that can route to the host, so the row resolves the persistent token first. A token that cannot be established — a harness home that cannot be written, a configured value below the length floor — rejects the row, so no web server binds a network address it could not authenticate.
+A loopback bind needs nothing beyond the process-local authentication the connection half already applies. Every other bind — detected or configured — requires the persistent token first: a harness home that cannot be written, or a configured value below the length floor, rejects the row, so no web server binds a network address it could not authenticate.
 
 ## Further Exploration
 
 - `@deepseek-ai/dsh-client-connection` exchanges the token for the signed browser cookie and owns the Host/Origin fence.
-- `@deepseek-ai/dsh-web-app` samples the LAN address into the trust fence and prints the LAN link.
+- `@deepseek-ai/dsh-web-app` samples the reachable address into the trust fence, prints it, and uses it as the application URL.
 
 ## Known Limitations and Deferred Work
 
-- **No TLS, no `Secure` cookie, no HSTS.** The token travels once in the printed URL, then becomes an `HttpOnly` cookie over plain HTTP. Exposure beyond a trusted network is expected to go through a reverse proxy or a virtual network.
-- **`0.0.0.0` means every interface.** There is no per-interface selection and no peer allow-list: the row admits the bind, and the token is what keeps unauthenticated requests out.
+- **No TLS, no `Secure` cookie, no HSTS.** The token travels once in the printed URL, then becomes an `HttpOnly` cookie over plain HTTP. Anyone who can observe the network path can read it; a reverse proxy or a virtual network is the answer for anything beyond a trusted LAN.
+- **The machine's first non-internal IPv4 address wins.** A host with several networks (a laptop on Wi-Fi and Ethernet) binds one of them; the choice is platform order, so an operator who cares which one sets `host` explicitly.
 - **The trust fence is not an authentication layer.** It refuses cross-site and DNS-rebinding requests; the token is the authentication.
 
 ## Dev Note
 
 ### Coverage
 
-`packages/*/*/src` carries a per-file 100% statement, branch, and function gate. The row's four paths — default loopback, explicit loopback, admitted network bind, refused network bind — are each pinned by a case in `tests/lan-access.spec.ts`, which drives the row against a private temporary harness home.
+`packages/*/*/src` carries a per-file 100% statement, branch, and function gate. `resolveBindHost` takes the detected address as an argument so every branch — configured, detected, and neither — is pinned without depending on the machine the tests run on.
 
 ### Tests
 
-The spec stubs `DSH_HOME` per case, so token creation, reuse, and refusal are all observed on the filesystem rather than assumed.
+`tests/lan-access.spec.ts` stubs `DSH_HOME` per case and observes token creation, reuse, and refusal on the filesystem. The default-host case asserts against the machine's own detection result rather than a fixed address, so it holds on a CI container with only loopback as well as on a workstation.

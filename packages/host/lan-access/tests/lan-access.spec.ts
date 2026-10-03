@@ -1,12 +1,20 @@
-/** The opt-in network bind: what it admits, and what it refuses. */
+/** The network-exposure row: what it binds by default, and what it refuses. */
 
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import { ACCESS_TOKEN_ENV, ACCESS_TOKEN_FILENAME } from '@deepseek-ai/dsh-access-token'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { apply, LAN_ACCESS_SERVICE, type LanAccessValues } from '../src/index.ts'
+import {
+  apply,
+  detectLanAddress,
+  isLoopbackHost,
+  LAN_ACCESS_SERVICE,
+  LOOPBACK_HOST,
+  resolveBindHost,
+  type LanAccessValues,
+} from '../src/index.ts'
 
 let home: string
 let tokenPath: string
@@ -17,6 +25,8 @@ const newContext = (): Context => {
   contexts.push(ctx)
   return ctx
 }
+
+const provided = (ctx: Context): LanAccessValues | undefined => ctx.get(LAN_ACCESS_SERVICE)
 
 beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), 'dsh-lan-access-'))
@@ -30,36 +40,97 @@ afterEach(async () => {
   await rm(home, { recursive: true, force: true })
 })
 
+describe('detectLanAddress', () => {
+  it('reports a non-internal IPv4 address or nothing at all', () => {
+    const detected = detectLanAddress()
+    if (detected === undefined) return
+    expect(detected).toMatch(/^\d+\.\d+\.\d+\.\d+$/u)
+    expect(detected.startsWith('127.')).toBe(false)
+  })
+})
+
+describe('isLoopbackHost', () => {
+  it('recognizes every loopback spelling', () => {
+    for (const host of ['127.0.0.1', 'localhost', '::1', '[::1]']) {
+      expect(isLoopbackHost(host)).toBe(true)
+    }
+  })
+
+  it('treats any other address as reachable', () => {
+    for (const host of ['0.0.0.0', '192.168.1.5', '10.0.0.1']) {
+      expect(isLoopbackHost(host)).toBe(false)
+    }
+  })
+})
+
+describe('resolveBindHost', () => {
+  it('prefers the configured host over the detected one', () => {
+    expect(resolveBindHost('10.0.0.9', '192.168.1.5')).toBe('10.0.0.9')
+  })
+
+  it('binds the detected LAN address when the row names none', () => {
+    expect(resolveBindHost(undefined, '192.168.1.5')).toBe('192.168.1.5')
+  })
+
+  it('falls back to loopback when the machine has no LAN address', () => {
+    expect(resolveBindHost(undefined, undefined)).toBe(LOOPBACK_HOST)
+  })
+
+  it('treats an empty configured value as unset', () => {
+    expect(resolveBindHost('', '192.168.1.5')).toBe('192.168.1.5')
+  })
+})
+
 describe('lan-access', () => {
-  it('admits loopback and asks for no token', async () => {
+  it('binds the detected addresses by default and authenticates them', async () => {
     const ctx = newContext()
     await apply(ctx)
-    expect((ctx.get(LAN_ACCESS_SERVICE) as LanAccessValues).host).toBe('127.0.0.1')
-    await expect(stat(tokenPath)).rejects.toMatchObject({ code: 'ENOENT' })
+    const expected = detectLanAddress() ?? LOOPBACK_HOST
+    expect(provided(ctx)?.host).toBe(expected)
+    if (isLoopbackHost(expected)) {
+      // A machine with only loopback needs no token, exactly like an explicit
+      // loopback configuration.
+      await expect(stat(tokenPath)).rejects.toMatchObject({ code: 'ENOENT' })
+    } else {
+      expect((await readFile(tokenPath, 'utf8')).trim()).toMatch(/^[0-9a-f]{64}$/u)
+    }
   })
 
-  it('admits an explicit loopback configuration without a token', async () => {
+  it('asks nothing of an explicit loopback bind', async () => {
     const ctx = newContext()
     await apply(ctx, { host: '127.0.0.1' })
-    expect((ctx.get(LAN_ACCESS_SERVICE) as LanAccessValues).host).toBe('127.0.0.1')
+    expect(provided(ctx)?.host).toBe('127.0.0.1')
     await expect(stat(tokenPath)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
-  it('creates the persistent token a network bind requires', async () => {
+  it('admits every interface when asked, and creates the token it needs', async () => {
     const ctx = newContext()
     await apply(ctx, { host: '0.0.0.0' })
-    expect((ctx.get(LAN_ACCESS_SERVICE) as LanAccessValues).host).toBe('0.0.0.0')
+    expect(provided(ctx)?.host).toBe('0.0.0.0')
     expect((await readFile(tokenPath, 'utf8')).trim()).toMatch(/^[0-9a-f]{64}$/u)
     expect((await stat(tokenPath)).mode & 0o777).toBe(0o600)
   })
 
-  it('reuses a token a configured environment already supplies', async () => {
-    const configured = 'd'.repeat(64)
-    vi.stubEnv(ACCESS_TOKEN_ENV, configured)
+  it('admits one explicit network address with the same requirement', async () => {
     const ctx = newContext()
-    await apply(ctx, { host: '0.0.0.0' })
-    expect((ctx.get(LAN_ACCESS_SERVICE) as LanAccessValues).host).toBe('0.0.0.0')
+    await apply(ctx, { host: '192.168.1.5' })
+    expect(provided(ctx)?.host).toBe('192.168.1.5')
+    expect((await stat(tokenPath)).mode & 0o777).toBe(0o600)
+  })
+
+  it('reuses a token the environment already supplies', async () => {
+    vi.stubEnv(ACCESS_TOKEN_ENV, 'd'.repeat(64))
+    const ctx = newContext()
+    await apply(ctx, { host: '192.168.1.5' })
+    expect(provided(ctx)?.host).toBe('192.168.1.5')
     await expect(stat(tokenPath)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('refuses a network bind whose configured token is too short', async () => {
+    vi.stubEnv(ACCESS_TOKEN_ENV, 'short')
+    const ctx = newContext()
+    await expect(apply(ctx, { host: '192.168.1.5' })).rejects.toThrow(/at least 32 characters/u)
+    expect(provided(ctx)).toBeUndefined()
   })
 
   it('refuses a network bind whose token cannot be established', async () => {
@@ -69,22 +140,7 @@ describe('lan-access', () => {
     await writeFile(blocked, 'file')
     vi.stubEnv('DSH_HOME', blocked)
     const ctx = newContext()
-    await expect(apply(ctx, { host: '0.0.0.0' })).rejects.toThrow()
-    expect(ctx.get(LAN_ACCESS_SERVICE)).toBeUndefined()
-  })
-
-  it('refuses a network bind whose configured token is too short', async () => {
-    vi.stubEnv(ACCESS_TOKEN_ENV, 'short')
-    const ctx = newContext()
-    await expect(apply(ctx, { host: '0.0.0.0' })).rejects.toThrow(/at least 32 characters/u)
-    expect(ctx.get(LAN_ACCESS_SERVICE)).toBeUndefined()
-  })
-
-  it('reads an existing token from the harness home', async () => {
-    await mkdir(home, { recursive: true })
-    await writeFile(tokenPath, `${'e'.repeat(64)}\n`)
-    const ctx = newContext()
-    await apply(ctx, { host: '0.0.0.0' })
-    expect((ctx.get(LAN_ACCESS_SERVICE) as LanAccessValues).host).toBe('0.0.0.0')
+    await expect(apply(ctx, { host: '192.168.1.5' })).rejects.toThrow()
+    expect(provided(ctx)).toBeUndefined()
   })
 })

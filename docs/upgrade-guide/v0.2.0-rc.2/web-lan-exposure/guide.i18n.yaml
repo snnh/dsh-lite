@@ -1,0 +1,19 @@
+# Bilingual-pair consistency record for guide.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/upgrade-guide/v0.2.0-rc.2/web-lan-exposure/guide.md
+/:
+  en: bfd3f3d0ce3aee55
+  zh: f41c590318229b8f
+/web-profile-reachable-from-the-local-network-by-default:
+  en: 94cba4aff6f8704e
+  zh: 15da47234a4fbebb
+/web-profile-reachable-from-the-local-network-by-default/change:
+  en: 2cfcb1ed24dc8707
+  zh: 2bc504c465b6f9ca
+/web-profile-reachable-from-the-local-network-by-default/migration:
+  en: c454a0853c4d9f11
+  zh: f45589ce70b65b8f
+/web-profile-reachable-from-the-local-network-by-default/migration/security-boundary:
+  en: ec6f43c452b7ad0e
+  zh: 326e28b0dccc527d
