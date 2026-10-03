@@ -5,7 +5,6 @@ import { watchConfig as watchExactConfig } from './watch-config.ts'
 import { Context, Inject, Service, type Fiber, type Plugin } from '@deepseek-ai/cordis'
 import type { ModuleLoader, ModuleJob, ResolveResult } from '@deepseek-ai/cordis-plugin-loader'
 import type { Include } from '@deepseek-ai/cordis-plugin-include'
-import { FSWatcher, watch, type ChokidarOptions } from 'chokidar'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { readFileSync, realpathSync } from 'node:fs'
 import { readProfileManifest, readProfilePatches, reconcileProfilePatches, PROFILE_PATCH_FILENAME } from '@deepseek-ai/dsh-app-boot'
@@ -15,6 +14,7 @@ import { PackageManifests } from './package-manifest.ts'
 import type {} from '@deepseek-ai/cordis-plugin-timer'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
+import { createWatcher, waitForReady, type Watcher, type WatchOptions } from '@deepseek-ai/dsh-fs-watcher'
 import picomatch from 'picomatch'
 import z from '@deepseek-ai/schemastery'
 
@@ -50,7 +50,7 @@ function canonicalPath(filename: string): string {
 }
 
 /** Module roots and watcher timing, with Chokidar deployment options. */
-export interface HmrConfig extends ChokidarOptions {
+export interface HmrConfig extends WatchOptions {
   /** Directory resolved against the owning context's base URL. */
   base?: string
   /** Module watch roots; an empty list leaves only explicit configuration watches. */
@@ -226,7 +226,7 @@ class Hmr extends Service {
 
   private readonly ownerContext: Context
   private internal: ModuleLoader
-  private watcher: FSWatcher | undefined
+  private watcher: Watcher | undefined
 
   /**
    * Changes from externals will always trigger a full reload.
@@ -371,7 +371,7 @@ class Hmr extends Service {
       this.externals = new Set()
     }
 
-    this.watcher = watch(root, {
+    this.watcher = createWatcher(root, {
       ...this.config,
       cwd: watchBaseDir,
       ignored: path => match(relative(watchBaseDir, path)),
@@ -423,25 +423,12 @@ class Hmr extends Service {
     }, this.config.debounce)
     this.watcher.on('change', (path) => { changed.add(path); dispatch() })
 
-    const ready = Promise.withResolvers<void>()
-    let readyState: 'pending' | 'resolved' | 'rejected' = root.length === 0 ? 'resolved' : 'pending'
-    if (root.length === 0) {
-      ready.resolve()
-    } else {
-      this.watcher.once('ready', () => {
-        readyState = 'resolved'
-        ready.resolve()
-      })
-    }
-    this.watcher.on('error', (error) => {
-      if (readyState === 'pending') {
-        readyState = 'rejected'
-        ready.reject(error)
-      } else {
-        this.ctx.logger.warn(error)
-      }
+    // An empty root list still gets a watcher whose failures must be reported;
+    // there is simply no initial scan to wait for.
+    await waitForReady(this.watcher, {
+      awaitReady: root.length > 0,
+      onError: (error) => { this.ctx.logger.warn(error) },
     })
-    await ready.promise
   }
 
   /** Omit internal HMR frames from module import diagnostics.

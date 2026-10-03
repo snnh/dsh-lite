@@ -6,11 +6,10 @@
 
 import { Context } from '@deepseek-ai/cordis'
 import { constants as bufferConstants } from 'node:buffer'
-import { once } from 'node:events'
-import { watch } from 'chokidar'
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import z from '@deepseek-ai/schemastery'
+import { createWatcher, waitForReady } from '@deepseek-ai/dsh-fs-watcher'
 import { FileSystem, FsError, FsVersion } from '@deepseek-ai/dsh-fs'
 import type {
   FsDirEntry,
@@ -72,7 +71,7 @@ export class LocalFileSystem extends FileSystem {
     const directory = (await this.stat(target, signal))?.type === 'directory'
     signal.throwIfAborted()
     const root = directory ? path : dirname(path)
-    const watcher = watch(root, {
+    const watcher = createWatcher(root, {
       ignoreInitial: true, depth: 0,
       ignored: entry => !directory && resolve(entry) !== root && resolve(entry) !== path,
     })
@@ -81,7 +80,7 @@ export class LocalFileSystem extends FileSystem {
     })
     watcher.on('error', (error) => { changed(error instanceof Error ? error : new Error(String(error))) })
     try {
-      await once(watcher, 'ready', { signal })
+      await waitForReady(watcher, { signal })
       return () => watcher.close()
     } catch (error) {
       await watcher.close()

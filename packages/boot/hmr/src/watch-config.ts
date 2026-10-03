@@ -1,7 +1,7 @@
 /** Exact-path watching for live profile patch files outside Cordis module roots. */
 import { dirname, relative, resolve } from 'node:path'
 import { realpath, stat } from 'node:fs/promises'
-import { watch, type ChokidarOptions } from 'chokidar'
+import { createWatcher, waitForReady, type WatchOptions } from '@deepseek-ai/dsh-fs-watcher'
 import type { Context } from '@deepseek-ai/cordis'
 
 const registrations = new WeakMap<Context, Set<string>>()
@@ -35,7 +35,7 @@ async function findWatchRoot(filename: string): Promise<{ filename: string; root
  * @throws When path resolution, watcher startup, or effect registration fails.
  */
 export async function watchConfig(
-  ctx: Context, filename: string, options: ChokidarOptions, refresh: () => Promise<void> | void,
+  ctx: Context, filename: string, options: WatchOptions, refresh: () => Promise<void> | void,
   inTransaction: () => boolean = () => false,
 ): Promise<() => Promise<void>> {
   const target = await findWatchRoot(filename)
@@ -43,7 +43,7 @@ export async function watchConfig(
   registrations.set(ctx, paths)
   if (paths.has(target.filename)) throw new Error(`config path already registered: ${filename}`)
   const { cwd: _cwd, ignored: _ignored, ...watchOptions } = options
-  const watcher = watch(target.root, {
+  const watcher = createWatcher(target.root, {
     // Stabilized events bypass Chokidar's lossy 50 ms change-event throttle.
     awaitWriteFinish: true, ...watchOptions, depth: target.depth, ignoreInitial: false,
   })
@@ -71,19 +71,13 @@ export async function watchConfig(
   watcher.on('add', onChange)
   watcher.on('change', onChange)
   watcher.on('unlink', onChange)
-  const ready = Promise.withResolvers<void>()
-  let pending = true
-  watcher.once('ready', () => { pending = false; ready.resolve() })
-  watcher.on('error', (error) => {
-    if (pending) { pending = false; ready.reject(error) } else { ctx.logger.warn(error) }
-  })
   const dispose = async () => {
     await watcher.close()
     paths.delete(target.filename)
     if (!inTransaction()) await running
   }
   try {
-    await ready.promise
+    await waitForReady(watcher, { onError: (error) => { ctx.logger.warn(error) } })
     return ctx.effect(() => dispose, 'hmr.watchConfig()')
   } catch (error) {
     await dispose()

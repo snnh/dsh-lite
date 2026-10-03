@@ -33,11 +33,11 @@
     "@deepseek-ai/cordis-plugin-loader": "workspace:~",
     "@deepseek-ai/cordis-plugin-include": "workspace:~",
     "@deepseek-ai/dsh-app-boot": "workspace:*",
-    "@deepseek-ai/dsh-cmdline": "workspace:*"
+    "@deepseek-ai/dsh-cmdline": "workspace:*",
+    "@deepseek-ai/dsh-fs-watcher": "workspace:*"
   },
   "dependencies": {
     "@babel/code-frame": "^7.29.0",
-    "chokidar": "^4.0.3",
     "node-addon-require-builtin": "^0.1.6",
     "picomatch": "^4.0.3",
     "@deepseek-ai/schemastery": "workspace:~"
@@ -52,6 +52,8 @@
     "@deepseek-ai/cordis-plugin-include": "workspace:~",
     "@deepseek-ai/dsh-app-boot": "workspace:*",
     "@deepseek-ai/dsh-cmdline": "workspace:*",
-    "@deepseek-ai/dsh-atomic-write": "workspace:*"
+    "@deepseek-ai/dsh-atomic-write": "workspace:*",
+    "@deepseek-ai/dsh-fs-watcher": "workspace:*",
+    "chokidar": "^4.0.3"
   }
 }

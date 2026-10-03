@@ -28,6 +28,9 @@
     },
     {
       "path": "../cmdline"
+    },
+    {
+      "path": "../../util/fs-watcher"
     }
   ]
 }

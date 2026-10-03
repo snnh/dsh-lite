@@ -93,6 +93,7 @@ const PACKAGE_LIBRARIES: Readonly<Record<string, string>> = {
   'packages/util/deque': 'Zero-dependency circular deque utility.',
   'packages/util/chunked-list': 'Persistent collection operations and checkpoint validation without a plugin surface.',
   'packages/util/code-language': 'Zero-dependency file-extension to syntax-highlighting language table.',
+  'packages/util/fs-watcher': 'Chokidar watcher lifecycle: plain module exports with no plugin entry.',
   'packages/util/home-paths': 'Zero-dependency harness-home path resolver.',
   'packages/util/launch-environment': 'Zero-dependency environment resolver.',
   'packages/util/lazy-require': 'Caller-relative CommonJS-compatible dependency loader.',

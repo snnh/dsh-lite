@@ -378,6 +378,7 @@
       "@deepseek-ai/dsh-fs-observation-policy": ["./packages/fs/fs-observation-policy/src"],
       "@deepseek-ai/dsh-fs-sandbox": ["./packages/fs/fs-sandbox/src"],
       "@deepseek-ai/dsh-fs-ssh": ["./packages/ssh/fs-ssh/src"],
+      "@deepseek-ai/dsh-fs-watcher": ["./packages/util/fs-watcher/src"],
       "@deepseek-ai/dsh-goal": ["./packages/goal/goal/src"],
       "@deepseek-ai/dsh-goal-round-driver": ["./packages/goal/goal-round-driver/src"],
       "@deepseek-ai/dsh-headless": ["./packages/bundle/headless/src"],

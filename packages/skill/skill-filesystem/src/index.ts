@@ -14,12 +14,12 @@ import { unwatchFile, watchFile, type Stats } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { homedir } from 'node:os'
 import type { Context } from '@deepseek-ai/cordis'
-import chokidar from 'chokidar'
 import z from '@deepseek-ai/schemastery'
 import type Schema from '@deepseek-ai/schemastery'
 import { parse as parseYaml } from 'yaml'
 import type { FileSystem, FsDirEntry, FsTarget } from '@deepseek-ai/dsh-fs'
 import { canonicalizeWatchPath, resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import { createWatcher, waitForReady } from '@deepseek-ai/dsh-fs-watcher'
 import {
   BUNDLED_SKILL_RANK,
   isSkillName,
@@ -489,7 +489,7 @@ class SkillWatchManager {
   }
 
   private async openRootWatcher(state: RootWatchState, mode: Extract<RootWatchMode, { kind: 'root' }>): Promise<WatchHandle> {
-    const watcher = chokidar.watch(mode.anchor, {
+    const watcher = createWatcher(mode.anchor, {
       // Chokidar owns late native fs.watch errors only for persistent watchers;
       // this provider's effect explicitly closes every handle at teardown.
       persistent: true,
@@ -508,37 +508,22 @@ class SkillWatchManager {
       mode,
       close: () => watcher.close(),
     }
-    let ready = false
-    const readiness = Promise.withResolvers<undefined>()
     const signal = this.lifecycle.signal
     if (signal.aborted) {
       await this.closeWatcher(handle)
       signal.throwIfAborted()
     }
-    const onAbort = (): void => { readiness.reject(signal.reason) }
-    signal.addEventListener('abort', onAbort, { once: true })
-    const onError = (error: unknown): void => {
-      if (!ready) {
-        readiness.reject(error)
-        return
-      }
-      this.handleWatcherError(state, error)
-    }
-    watcher.on('error', onError)
-    watcher.once('ready', () => {
-      ready = true
-      readiness.resolve(undefined)
-    })
     for (const event of ['add', 'addDir', 'change', 'unlink', 'unlinkDir'] as const) {
       watcher.on(event, (path) => { this.handleWatchEvent(state, mode, event, path) })
     }
     try {
-      await readiness.promise
+      await waitForReady(watcher, {
+        signal,
+        onError: (error) => { this.handleWatcherError(state, error) },
+      })
     } catch (error) {
       await this.closeWatcher(handle)
       throw error
-    } finally {
-      signal.removeEventListener('abort', onAbort)
     }
     return handle
   }

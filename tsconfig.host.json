@@ -276,6 +276,7 @@
     { "path": "./packages/util/output-retention" },
     { "path": "./packages/util/access-token" },
     { "path": "./packages/util/atomic-write" },
+    { "path": "./packages/util/fs-watcher" },
     { "path": "./packages/attachment/attachment" },
     { "path": "./packages/attachment/attachment-local" },
     { "path": "./packages/client/file-upload/tsconfig.host.json" },

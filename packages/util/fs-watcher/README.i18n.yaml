@@ -1,0 +1,46 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/util/fs-watcher/README.md
+/:
+  en: f35ec9c74c0b0a6a
+  zh: 7683898294a43039
+/deepseek-ai-dsh-fs-watcher:
+  en: 13c8d24123c31a6b
+  zh: ab686bf864a4f2cd
+/deepseek-ai-dsh-fs-watcher/summary:
+  en: d79a0f5d3b1b87e4
+  zh: a4a67c153a22bc5a
+/deepseek-ai-dsh-fs-watcher/table-of-contents:
+  en: d152484eb41ac6b4
+  zh: 09388d293f9be9cb
+/deepseek-ai-dsh-fs-watcher/use-this-package:
+  en: bbff250eba0f1b89
+  zh: 0a618f05cc88ee2b
+/deepseek-ai-dsh-fs-watcher/use-this-package/when-to-use-it:
+  en: 3fd4330acf21c4c0
+  zh: 665970751db8fb4f
+/deepseek-ai-dsh-fs-watcher/use-this-package/entry-point:
+  en: 2b7d8d1422dc4f3a
+  zh: 3a68bb405e8b606d
+/deepseek-ai-dsh-fs-watcher/understand-the-implementation:
+  en: 15807add570482db
+  zh: c6d762c6a0639842
+/deepseek-ai-dsh-fs-watcher/understand-the-implementation/source-map:
+  en: 98ad8794e37a5d7a
+  zh: 5c26f6455627df1a
+/deepseek-ai-dsh-fs-watcher/further-exploration:
+  en: db23fd8f356b5888
+  zh: e77f151899cbb8f5
+/deepseek-ai-dsh-fs-watcher/model-experience:
+  en: 9b57d6a8558c7884
+  zh: b04862a4cb28e489
+/deepseek-ai-dsh-fs-watcher/model-experience/kv-cache-effect:
+  en: e7ba08477bf22c4e
+  zh: f365439c69beb722
+/deepseek-ai-dsh-fs-watcher/known-limitations-and-deferred-work:
+  en: e3bf0cbbc6090def
+  zh: 33280b8a1f017434
+/deepseek-ai-dsh-fs-watcher/known-limitations-and-deferred-work/dev-note:
+  en: e67f633dc6fe7773
+  zh: 3bb0c20c93f16f98
