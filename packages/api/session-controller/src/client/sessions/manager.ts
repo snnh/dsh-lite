@@ -70,6 +70,29 @@ interface ProjectionInflight {
   readonly controller: AbortController
 }
 
+/**
+ * Default bound on retained list-entry identities
+ * ({@link SessionManagerOptions.entryCacheMaxEntries}). Comfortably above any
+ * catalog a sidebar lists at once, so ordinary sessions never lose entry
+ * identity, while a pathological catalog cannot pin one entry object per
+ * session for the lifetime of the Client.
+ */
+const DEFAULT_ENTRY_CACHE_MAX_ENTRIES = 500
+
+/** Construction options for {@link SessionManager}. */
+export interface SessionManagerOptions {
+  /**
+   * Maximum number of list-entry identities retained for reference stability.
+   * The cache is LRU-ordered: once admission exceeds the bound, the identity no
+   * list rebuild has reused for the longest is dropped first, so the rows a
+   * user actually looks at keep their entry objects. Values are floored and
+   * raised to 1 — a cache that retains nothing would defeat the very
+   * reference-stability contract it exists for.
+   * @default 500
+   */
+  entryCacheMaxEntries?: number
+}
+
 type ProjectionLoad = Omit<SessionProjectionSnapshot, 'values'>
 
 type SessionListMutation =
@@ -115,15 +138,26 @@ export class SessionManager {
   private listSnapshotCache: SessionListSnapshot
   /** Entry-identity cache (reference stability): list rebuilds reuse the previous entry
    *  object when every field matches — wire refreshes mint all-new summary objects, so identity
-   *  must be recovered by value or every SessionListItem memo misses on every refresh. */
-  private entryCache = new Map<SessionId, SessionListEntry>()
+   *  must be recovered by value or every SessionListItem memo misses on every refresh.
+   *  Bounded by {@link entryCacheMaxEntries} as an LRU: Map iteration order is the recency
+   *  order (head = least recently reused), because reuse and fresh admission re-insert the id. */
+  private readonly entryCache = new Map<SessionId, SessionListEntry>()
+  /** Admitted-entry bound; see {@link SessionManagerOptions.entryCacheMaxEntries}. */
+  private readonly entryCacheMaxEntries: number
   private itemsCache: readonly SessionListEntry[] = []
   private readonly notifier = new Notifier(() => {
     this.listSnapshotCache = this.buildListSnapshot()
   })
 
-  /** @param remote - generated Remote namespaces used by catalog and history readers. */
-  constructor(private readonly remote: SessionRemotes) {
+  /**
+   * @param remote - generated Remote namespaces used by catalog and history readers.
+   * @param options - construction knobs; see {@link SessionManagerOptions}.
+   */
+  constructor(private readonly remote: SessionRemotes, options: SessionManagerOptions = {}) {
+    this.entryCacheMaxEntries = Math.max(
+      1,
+      Math.floor(options.entryCacheMaxEntries ?? DEFAULT_ENTRY_CACHE_MAX_ENTRIES),
+    )
     this.listSnapshotCache = this.buildListSnapshot()
   }
 
@@ -775,8 +809,11 @@ export class SessionManager {
         && prev.parentSessionId === entry.parentSessionId && prev.cwd === entry.cwd
         && prev.origin === entry.origin && prev.title === entry.title && prev.depth === entry.depth
         && prev.projectionValues === entry.projectionValues
-      ) return prev
-      this.entryCache.set(entry.sessionId, entry)
+      ) {
+        this.touchEntry(entry.sessionId, prev)
+        return prev
+      }
+      this.storeEntry(entry.sessionId, entry)
       return entry
     })
     const itemIds = new Set(items.map(entry => entry.sessionId))
@@ -795,6 +832,34 @@ export class SessionManager {
         { values: store.values(), state: 'idle', error: null, ...this.projectionLoads.get(sessionId) },
       ])),
     }
+  }
+
+  /**
+   * Record a reused entry identity as the most recently used one.
+   * @param sessionId - reused identity.
+   * @param entry - the retained entry object; kept verbatim, since reference stability is the point.
+   */
+  private touchEntry(sessionId: SessionId, entry: SessionListEntry): void {
+    // Re-inserting an existing key moves it to the Map's iteration tail — this cache's
+    // recency order — while the stored value stays the very same object.
+    this.entryCache.delete(sessionId)
+    this.entryCache.set(sessionId, entry)
+  }
+
+  /**
+   * Admit one freshly built entry and evict least-recently-reused identities past the bound.
+   * @param sessionId - identity to admit.
+   * @param entry - freshly built entry object replacing any stale identity for the same id.
+   */
+  private storeEntry(sessionId: SessionId, entry: SessionListEntry): void {
+    // A changed row counts as a use of its identity: re-admitting moves it to the tail too.
+    this.touchEntry(sessionId, entry)
+    const excess = this.entryCache.size - this.entryCacheMaxEntries
+    if (excess <= 0) return
+    // The iteration head is the least recently reused identity. One admission moves a fixed
+    // bound past itself by one entry, but slicing keeps this correct if that ever changes.
+    const victims = [...this.entryCache.keys()].slice(0, excess)
+    for (const victim of victims) this.entryCache.delete(victim)
   }
 }
 
