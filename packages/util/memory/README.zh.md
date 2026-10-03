@@ -9,7 +9,7 @@ kind: "package-library"
 
 ## 摘要
 
-`@deepseek-ai/dsh-memory` 只负责长跑宿主需要、且仅需要的三件事：触达运行时垃圾收集器的查找、它外面的节流窗口，以及常驻集看门狗——后者在启动后收集一次，其后仅在超过阈值时再收集。**查找本身才是杠杆**。没有 `--expose-gc` 启动的构建根本没有收集器，所以查找会设置该 flag，并在一个新 context 里读出 `gc`；创建这个 context 会收集一次，随后 V8 把空闲页归还给操作系统——在构建产物 Web profile 上实测为 255.8 MB 对 152.3 MB。每个旋钮都有环境变量覆盖，`DSH_GC=0` 关闭整个策略。请把它当作直接的库依赖使用，而不是通过 `cordis.yml`。
+`@deepseek-ai/dsh-memory` 只负责长跑宿主需要的三件事：触达运行时垃圾收集器的查找、它外面的节流窗口，以及常驻集看门狗——后者在启动后收集一次，其后仅在超过阈值时再收集，并按自己的间隔输出内存指标行。**查找本身才是杠杆**：没有 `--expose-gc` 启动的构建根本没有收集器，所以查找会设置该 flag 并在新 context 里读出 `gc`，而创建这个 context 同时把空闲页归还给操作系统。每个旋钮都有环境变量覆盖，`DSH_GC=0` 关闭整个策略；它是直接的库依赖，而不是 `cordis.yml` 里的一行。
 
 ## 目录
 
@@ -37,7 +37,16 @@ if (options !== undefined) {
 }
 ```
 
-策略安排两个 `unref` 过的定时器：一个在 `initialDelayMs` 之后收集一次，另一个是每 `sampleIntervalMs` 一次的采样器——仅当读数达到或超过 `thresholdBytes`、且距上次收集已超过最小间隔时才收集。`stop()` 清除两者，且可安全地多次调用。
+策略安排三个 `unref` 过的定时器：一个在 `initialDelayMs` 之后收集一次；一个是每 `sampleIntervalMs` 一次的采样器——仅当读数达到或超过 `thresholdBytes`、且距上次收集已超过最小间隔时才收集；还有一个每 `metricsIntervalMs` 一次的内存指标行。`stop()` 清除三者，且可安全地多次调用；被清除的定时器不会再触发回调，因此每个回调都不需要检查某种 stopped 标志。
+
+指标行报告的是收集报告给不出的东西：**没有任何收集发生时，内存正在做什么**。它沿用收集报告的前缀，保持单行，便于 grep 与 awk：
+
+```text
+memory policy: metrics at 2026-10-03T21:14:11.482Z, rss 152.3 MB, heap 45.6/48.0 MB, external 1.2 MB, collections 3, last collection 295s ago
+memory policy: metrics at 2026-10-03T21:19:11.483Z, rss 154.1 MB, heap 47.2/49.0 MB, external 1.2 MB, collections 3, last collection 595s ago
+```
+
+时间戳为 ISO 8601 UTC，读的是挂钟，而不是调用方可能指向单调时钟的 `now`。`heap` 为已用/总量。`external` 是 C++ 对象持有的原生内存；由于它已包含 `arrayBuffers`，这里只报告这个超集。`collections` 统计本策略完成的收集次数（不含进程内别处调用的 `maybeGc`），`last collection` 是最近一次收集距今的整秒数——首次收集之前为 `never`。
 
 ### 在策略之外释放内存
 
@@ -61,6 +70,7 @@ maybeGc(true)    // collects now
 | `DSH_GC_MIN_INTERVAL_MS` | 300000 | 两次收集之间的最小间隔 |
 | `DSH_GC_SAMPLE_INTERVAL_MS` | 60000 | 常驻集采样间隔 |
 | `DSH_GC_INITIAL_DELAY_MS` | 10000 | 启动收集前的延迟 |
+| `DSH_GC_METRICS_INTERVAL_MS` | 300000 | 内存指标行的间隔；`0` 保留收集报告，关闭周期行 |
 
 格式非法的值会保留默认值，而不是让启动失败。
 
@@ -99,8 +109,8 @@ maybeGc(true)    // collects now
 
 ### 覆盖率
 
-`packages/*/*/src` 带有逐文件 100% 的语句、分支与函数门禁。本包在测试进程中无法触达的两条运行时分支——拒绝 flag 钩子的运行时，以及没有收集器的采样器——带有内联原因的 `v8 ignore` 注释。
+`packages/*/*/src` 带有逐文件 100% 的语句、分支与函数门禁。查找的失败路径——flag 钩子抛错的运行时，以及新 context 里看不到 `gc` 的情况——由 mock `node:v8` 与 `node:vm` 的测试覆盖。测试进程无法触达的那一条分支（没有收集器的运行时返回的惰性策略）带有内联原因的 `v8 ignore` 注释。
 
 ### 测试
 
-`tests/memory.spec.ts` 用假定时器、注入的收集器与时钟驱动策略，因此不会真的执行收集，也不会等待任何挂钟间隔。查找本身既通过 stub 过的 `globalThis.gc` 覆盖，也走它自己的 flag 路径。
+`tests/memory.spec.ts` 用假定时器、注入的收集器与时钟驱动策略，因此不会真的执行收集，也不会等待任何挂钟间隔。查找本身既通过 stub 过的 `globalThis.gc` 覆盖，也走它自己的 flag 路径。指标行同样由假定时器驱动，其断言钉住该行的确切形态（含时间戳），而不是钉某个测试无法预测的内存读数。

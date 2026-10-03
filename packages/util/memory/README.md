@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`@deepseek-ai/dsh-memory` owns three things a long-running host needs and nothing else: the lookup that reaches the runtime's garbage collector at all, a throttle window around it, and a resident-set watchdog that collects once after boot and afterwards only above a threshold. The lookup is the load-bearing part. A build launched without `--expose-gc` has no collector, so the lookup sets the flag and reads `gc` out of a fresh context; creating that context collects once and V8 then returns idle pages to the operating system — measured at 255.8 MB against 152.3 MB on a built Web profile. Every knob has an environment override, and `DSH_GC=0` turns the policy off. Use it as a direct library dependency, not through `cordis.yml`.
+`@deepseek-ai/dsh-memory` owns three things a long-running host needs: the lookup that reaches the runtime's garbage collector, a throttle window around it, and a resident-set watchdog that collects once after boot, afterwards only above a threshold, and logs a memory-metric line on its own interval. The lookup is the load-bearing part: a build without `--expose-gc` has no collector, so the lookup sets the flag and reads `gc` from a fresh context, which also returns idle pages to the OS. Every knob has an environment override, `DSH_GC=0` turns the policy off, and it is a library dependency, not a `cordis.yml` row.
 
 ## Table of Contents
 
@@ -37,7 +37,16 @@ if (options !== undefined) {
 }
 ```
 
-The policy schedules two `unref`'d timers: one collection after `initialDelayMs`, and a sampler every `sampleIntervalMs` that collects only when the reading is at or above `thresholdBytes` and the minimum interval has elapsed. `stop()` clears both and is safe to call more than once.
+The policy schedules three `unref`'d timers: one collection after `initialDelayMs`, a sampler every `sampleIntervalMs` that collects only when the reading is at or above `thresholdBytes` and the minimum interval has elapsed, and a memory-metric line every `metricsIntervalMs`. `stop()` clears all three and is safe to call more than once; a cleared timer never fires its callback, which is why no callback checks a stopped flag of its own.
+
+The metric line reports what the collection reports cannot: what memory is doing while nothing collects. It keeps the collection reports' prefix and stays on one line, shaped for grep and for the awk that reads it:
+
+```text
+memory policy: metrics at 2026-10-03T21:14:11.482Z, rss 152.3 MB, heap 45.6/48.0 MB, external 1.2 MB, collections 3, last collection 295s ago
+memory policy: metrics at 2026-10-03T21:19:11.483Z, rss 154.1 MB, heap 47.2/49.0 MB, external 1.2 MB, collections 3, last collection 595s ago
+```
+
+The timestamp is ISO 8601 UTC, read from the wall clock rather than through a `now` a caller may have pointed at a monotonic source. `heap` is used/total. `external` is the native memory held by C++ objects, and since it already includes `arrayBuffers` it is reported once as that superset. `collections` counts the collections this policy ran, `maybeGc` calls elsewhere in the process excepted, and `last collection` is the age of the last of them in whole seconds — `never` before the first one.
 
 ### Releasing memory outside a policy
 
@@ -61,6 +70,7 @@ maybeGc(true)    // collects now
 | `DSH_GC_MIN_INTERVAL_MS` | 300000 | Minimum spacing between two collections |
 | `DSH_GC_SAMPLE_INTERVAL_MS` | 60000 | Spacing between resident-set samples |
 | `DSH_GC_INITIAL_DELAY_MS` | 10000 | Delay before the startup collection |
+| `DSH_GC_METRICS_INTERVAL_MS` | 300000 | Interval between memory-metric lines; `0` keeps the collection reports and turns the periodic line off |
 
 A malformed value keeps its default rather than failing a boot.
 
@@ -99,8 +109,8 @@ A runtime that refuses the flag hook yields an inert policy: it logs one line an
 
 ### Coverage
 
-`packages/*/*/src` carries a per-file 100% statement, branch, and function gate. The two runtime branches this package cannot reach in a test process — a runtime that refuses the flag hook, and a sampler with no collector — carry `v8 ignore` comments with the reason inline.
+`packages/*/*/src` carries a per-file 100% statement, branch, and function gate. The lookup's refusal paths — a runtime whose flag hook throws, and a fresh context that exposes no `gc` — are covered by tests that mock `node:v8` and `node:vm`. The branch a test process cannot reach, the inert policy a runtime with no collector returns, carries a `v8 ignore` comment with the reason inline.
 
 ### Tests
 
-`tests/memory.spec.ts` drives the policy with fake timers and an injected collector and clock, so no collection actually runs and no wall-clock interval is waited. The lookup itself is exercised both through a stubbed `globalThis.gc` and through its own flag path.
+`tests/memory.spec.ts` drives the policy with fake timers and an injected collector and clock, so no collection actually runs and no wall-clock interval is waited. The lookup itself is exercised both through a stubbed `globalThis.gc` and through its own flag path. The metric line is driven the same way, and its assertions pin the exact shape of the line — timestamp included — instead of a memory reading that no test can predict.
