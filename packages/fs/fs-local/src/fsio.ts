@@ -273,6 +273,14 @@ export async function probeNoFollow(absolutePath: string): Promise<PathLinkInfo 
 
 // --- Directory listing ---
 
+/**
+ * Children resolved concurrently per listing window. Each child costs one
+ * target resolution plus one stat, so a serial walk pays 2N round trips; a
+ * window bounds the fan-out (file descriptors, kernel work) while keeping the
+ * per-window result order and the error order deterministic.
+ */
+const LIST_CONCURRENCY = 32
+
 function listingIoError(displayPath: string, error: unknown): FsError {
   /* v8 ignore next -- defensive pass-through for races where a child resolver has already produced a structured FsError. */
   if (error instanceof FsError) return error
@@ -319,23 +327,31 @@ export async function listDirectory(target: LocalTarget, signal?: AbortSignal): 
   const result: LocalDirEntry[] = []
   // Code-unit order: `readdir` order is arbitrary, these names carry no locale
   // rules, and ICU collation costs an order of magnitude more per comparison.
-  for (const entry of entries.sort((left, right) => Number(left.name > right.name) - Number(left.name < right.name))) {
+  const ordered = entries.sort((left, right) => Number(left.name > right.name) - Number(left.name < right.name))
+  // Resolve each window concurrently, then emit it in order. `Promise.all`
+  // reports the first failure in window order, which is the order a serial walk
+  // would have failed in; children after it in the same window still run.
+  for (let start = 0; start < ordered.length; start += LIST_CONCURRENCY) {
     throwIfAborted(signal, 'list')
-    try {
-      const childTarget = await resolveListedChildTarget(target, entry.name)
-      const childInfo = await probe(childTarget.targetKey)
-      result.push({
-        name: entry.name,
-        type: childInfo?.type ?? 'other',
-        target: childTarget,
-        ...(childInfo ? { version: childInfo.version } : {}),
-        ...(childInfo?.type === 'file' ? { size: childInfo.size } : {}),
-      })
-    } catch (error: unknown) {
-      throw listingIoError(localDisplayPath(target.displayPath, entry.name), error)
-    }
-    throwIfAborted(signal, 'list')
+    const batch = ordered.slice(start, start + LIST_CONCURRENCY)
+    const listed = await Promise.all(batch.map(async (entry): Promise<LocalDirEntry> => {
+      try {
+        const childTarget = await resolveListedChildTarget(target, entry.name)
+        const childInfo = await probe(childTarget.targetKey)
+        return {
+          name: entry.name,
+          type: childInfo?.type ?? 'other',
+          target: childTarget,
+          ...(childInfo ? { version: childInfo.version } : {}),
+          ...(childInfo?.type === 'file' ? { size: childInfo.size } : {}),
+        }
+      } catch (error: unknown) {
+        throw listingIoError(localDisplayPath(target.displayPath, entry.name), error)
+      }
+    }))
+    result.push(...listed)
   }
+  throwIfAborted(signal, 'list')
   return result
 }
 
