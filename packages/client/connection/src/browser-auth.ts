@@ -178,9 +178,13 @@ async function initializeSecret(credentials: CredentialProvider): Promise<Buffer
 }
 
 /**
- * Process launch-token exchange and persistent signed-cookie verification.
+ * Access-token exchange and persistent signed-cookie verification.
+ *
  * Connection loads the credential provider's signing secret during activation
- * and retains it for synchronous request authentication.
+ * and retains it for synchronous request authentication. The token side is
+ * whichever {@link BrowserAuth.create} was handed: a persistent token keeps
+ * every printed URL valid across restarts, while an absent one falls back to a
+ * value generated for this process alone.
  */
 export class BrowserAuth {
   private readonly launchToken: string
@@ -190,8 +194,11 @@ export class BrowserAuth {
     processOwner: object,
     private readonly secret: Buffer,
     maxAgeDays: number,
+    accessToken?: string,
   ) {
-    this.launchToken = processLaunchToken(processOwner)
+    // A caller that resolved a persistent token keeps it across restarts; one
+    // that passes none keeps the process-local token this activation generated.
+    this.launchToken = accessToken ?? processLaunchToken(processOwner)
     this.maxAgeMilliseconds = maxAgeDays * DAY_MILLISECONDS
     if (!Number.isSafeInteger(this.maxAgeMilliseconds)
       || !Number.isSafeInteger(Date.now() + this.maxAgeMilliseconds)) {
@@ -205,20 +212,23 @@ export class BrowserAuth {
    * @param processOwner - root application context retaining one token across Connection reloads.
    * @param credentials - persistent credential provider for the Web profile.
    * @param maxAgeDays - positive absolute browser-cookie lifetime in days.
-   * @returns initialized authentication owner with the process owner's launch token.
+   * @param accessToken - persistent token this activation authenticates with, or
+   *   undefined to generate one for this process only.
+   * @returns initialized authentication owner.
    */
   static async create(
     processOwner: object,
     credentials: CredentialProvider,
     maxAgeDays: number,
+    accessToken?: string,
   ): Promise<BrowserAuth> {
-    return new BrowserAuth(processOwner, await initializeSecret(credentials), maxAgeDays)
+    return new BrowserAuth(processOwner, await initializeSecret(credentials), maxAgeDays, accessToken)
   }
 
   /**
-   * Add this process's launch token to the caller's application URL.
+   * Add this activation's access token to the caller's application URL.
    * @param baseUrl - clean browser URL whose authority and mount are preserved.
-   * @returns the same URL carrying the process token as its sole authentication input.
+   * @returns the same URL carrying the access token as its sole authentication input.
    */
   authenticatedUrl(baseUrl: string): string {
     const url = new URL(baseUrl)
