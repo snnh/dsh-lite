@@ -1,0 +1,52 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/util/memory/README.md
+/:
+  en: 375eb6ad921c32a8
+  zh: 57dc9b8aee27a393
+/deepseek-ai-dsh-memory:
+  en: 68f2ed4cad01d868
+  zh: 3ded3b4a3be4cfff
+/deepseek-ai-dsh-memory/summary:
+  en: ae37ce5c773344a3
+  zh: 784c49af516caf1f
+/deepseek-ai-dsh-memory/table-of-contents:
+  en: 80b31a934611cb4a
+  zh: 3c9647af7a8067c3
+/deepseek-ai-dsh-memory/use-this-package:
+  en: bbff250eba0f1b89
+  zh: 0a618f05cc88ee2b
+/deepseek-ai-dsh-memory/use-this-package/boot-policy:
+  en: 1354a243eb2e1a9c
+  zh: b3dd1354928be1a5
+/deepseek-ai-dsh-memory/use-this-package/releasing-memory-outside-a-policy:
+  en: 1ae2c5473814e41c
+  zh: 1a35e74ee4ffed45
+/deepseek-ai-dsh-memory/use-this-package/tuning:
+  en: fd9cd70e9f08ebd4
+  zh: a3a082a69fb5dd88
+/deepseek-ai-dsh-memory/understand-the-implementation:
+  en: ee4615a04fa6503d
+  zh: ee2c5fb2204a43cf
+/deepseek-ai-dsh-memory/understand-the-implementation/the-collector-lookup-is-the-lever:
+  en: bac286a626b54eac
+  zh: 0f4623e45c2537df
+/deepseek-ai-dsh-memory/understand-the-implementation/inert-when-there-is-no-collector:
+  en: 5e201a3bff313342
+  zh: ceb7283dca7dd437
+/deepseek-ai-dsh-memory/further-exploration:
+  en: 2e1ef1a1f107bb1b
+  zh: 0c2bd85481f7836f
+/deepseek-ai-dsh-memory/known-limitations-and-deferred-work:
+  en: 0e6b1f5bdab7e40d
+  zh: f8827efcf61c47f8
+/deepseek-ai-dsh-memory/dev-note:
+  en: 7410b003a5057dc2
+  zh: 1432e59879b44e2d
+/deepseek-ai-dsh-memory/dev-note/coverage:
+  en: 4ca1ff3d25673ba3
+  zh: b08da61c592aa8a2
+/deepseek-ai-dsh-memory/dev-note/tests:
+  en: 6bfe5c6f8f3eeeb2
+  zh: 5c1d76a194a52e7a

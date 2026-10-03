@@ -54,6 +54,9 @@
       "path": "../../packages/util/home-paths"
     },
     {
+      "path": "../../packages/util/memory"
+    },
+    {
       "path": "../../packages/mcp/mcp-client"
     },
     {

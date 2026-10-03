@@ -292,6 +292,9 @@ importers:
       '@deepseek-ai/dsh-launch-environment':
         specifier: workspace:*
         version: link:../../packages/util/launch-environment
+      '@deepseek-ai/dsh-memory':
+        specifier: workspace:*
+        version: link:../../packages/util/memory
       '@deepseek-ai/dsh-mcp-client':
         specifier: workspace:*
         version: link:../../packages/mcp/mcp-client
@@ -13720,6 +13723,12 @@ importers:
         version: link:../../../vendor/cordis
 
   packages/util/home-paths:
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:~
+        version: link:../../../vendor/cordis
+
+  packages/util/memory:
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: workspace:~
