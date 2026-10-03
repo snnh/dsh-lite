@@ -9,6 +9,14 @@
  * old loopback-only posture sets `host: 127.0.0.1`; one who wants every
  * interface sets `host: 0.0.0.0`.
  *
+ * The address it picks is the first interface that carries a network of its
+ * own. Docker bridges, veth pairs, hypervisor switches, and tunnels are
+ * addresses a phone cannot reach and an operator did not mean, and on a
+ * container host they are often reported *before* the physical interface, so
+ * they rank last rather than winning by enumeration order. They are ranked,
+ * never excluded: a machine whose only address is a VPN interface still binds
+ * it.
+ *
  * A reachable address is reachable by anyone who can route to it, so this row
  * refuses a bind it cannot authenticate: every non-loopback host requires the
  * persistent access token, which is resolved (and created when the harness home
@@ -27,7 +35,7 @@
  * @module @deepseek-ai/dsh-host-lan-access
  */
 
-import { networkInterfaces } from 'node:os'
+import { networkInterfaces, type NetworkInterfaceInfo } from 'node:os'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { ACCESS_TOKEN_FILENAME, ensureAccessToken } from '@deepseek-ai/dsh-access-token'
@@ -45,6 +53,20 @@ export const LOOPBACK_HOST = '127.0.0.1'
 /** Hosts that name this machine alone. */
 const LOOPBACK_HOSTS = new Set([LOOPBACK_HOST, 'localhost', '::1', '[::1]'])
 
+/**
+ * Interface-name prefixes that carry no LAN of their own: container bridges,
+ * veth pairs, hypervisor switches, and tunnels.
+ *
+ * These addresses are real, routable, and reachable — from inside the
+ * container network and nowhere else. Binding one exposes the harness to the
+ * wrong network and hides it from the one the operator meant, so they rank
+ * last. They are never excluded: a machine whose only address is a VPN
+ * interface still gets that address rather than no network at all.
+ */
+const VIRTUAL_INTERFACE_PREFIXES = [
+  'br-', 'docker', 'veth', 'virbr', 'vmnet', 'vboxnet', 'tun', 'tap', 'utun', 'wg', 'zt', 'tailscale',
+] as const
+
 /** What this row publishes through {@link LAN_ACCESS_SERVICE}. */
 export interface LanAccessValues {
   /** The host the web server should bind. */
@@ -54,9 +76,9 @@ export interface LanAccessValues {
 export interface Config {
   /**
    * Explicit bind host. Omit it to bind this machine's LAN address — the first
-   * non-internal IPv4 interface, which falls back to loopback when the machine
-   * has none. `127.0.0.1` restores the loopback-only posture; `0.0.0.0` binds
-   * every interface.
+   * interface carrying a network of its own, with bridges and tunnels ranked
+   * last and loopback as the fallback when the machine has none. `127.0.0.1`
+   * restores the loopback-only posture; `0.0.0.0` binds every interface.
    */
   host?: string
 }
@@ -77,15 +99,73 @@ declare module '@deepseek-ai/cordis' {
 }
 
 /**
- * The first non-internal IPv4 address this machine holds.
+ * Whether an interface name marks a bridge, container link, or tunnel.
+ *
+ * The name is the only signal available without platform I/O, and it is the
+ * signal the platforms agree on: every Docker bridge is `br-<id>` or
+ * `docker0`, every Linux veth pair is `veth<id>`.
+ *
+ * @param iface - the operating system's interface name.
+ * @returns true when the interface carries no LAN of its own.
+ */
+export function isVirtualInterface(iface: string): boolean {
+  return VIRTUAL_INTERFACE_PREFIXES.some(prefix => iface.startsWith(prefix))
+}
+
+/** An address this machine holds, and the interface that carries it. */
+export interface LanCandidate {
+  /** The IPv4 address. */
+  readonly address: string
+  /** The operating system's name for the interface carrying it. */
+  readonly iface: string
+  /** The interface is a bridge, container link, or tunnel. */
+  readonly virtual: boolean
+}
+
+/** Every non-internal IPv4 address this machine holds, in interface order. */
+function lanEntries(): readonly (NetworkInterfaceInfo & { readonly iface: string })[] {
+  return Object.entries(networkInterfaces())
+    .flatMap(([iface, list]) => (list ?? []).map(entry => ({ ...entry, iface })))
+    .filter(entry => entry.family === 'IPv4' && !entry.internal)
+}
+
+/**
+ * Every non-internal IPv4 address this machine holds, tagged with its
+ * interface and whether that interface is a bridge or tunnel.
+ * @returns the candidates in interface order; empty on a machine with only
+ *   loopback.
+ */
+export function listLanCandidates(): readonly LanCandidate[] {
+  return lanEntries().map(entry => ({
+    address: entry.address,
+    iface: entry.iface,
+    virtual: isVirtualInterface(entry.iface),
+  }))
+}
+
+/**
+ * Order candidates by how likely each address is the one peers can reach.
+ *
+ * Interfaces that carry a network of their own come first, container bridges
+ * and tunnels last. The sort is stable, so candidates that rank alike keep
+ * their interface order — on a machine with one wired and one wireless
+ * address, the first the operating system reports still wins.
+ *
+ * @param candidates - addresses from {@link listLanCandidates}.
+ * @returns a reordered copy; the input is not mutated.
+ */
+export function rankLanCandidates(candidates: readonly LanCandidate[]): readonly LanCandidate[] {
+  return [...candidates].sort((a, b) => Number(a.virtual) - Number(b.virtual))
+}
+
+/**
+ * The address this row binds when it names none: the best-ranked candidate,
+ * which is the first non-virtual interface's address when there is one.
  * @returns the address, or undefined on a machine with only loopback (an
  *   isolated container, for example).
  */
 export function detectLanAddress(): string | undefined {
-  for (const iface of Object.values(networkInterfaces()).flat()) {
-    if (iface !== undefined && iface.family === 'IPv4' && !iface.internal) return iface.address
-  }
-  return undefined
+  return rankLanCandidates(listLanCandidates())[0]?.address
 }
 
 /**

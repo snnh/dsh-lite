@@ -26,7 +26,11 @@ English | [中文](README.zh.md)
 
 ### Choosing the bind address
 
-The row is mounted without a `host`, which means "this machine's LAN address". An overlay changes it:
+The row is mounted without a `host`, which means "this machine's LAN address".
+
+That address is the first interface carrying a network of its own. Container bridges (`docker0`, `br-<id>`), veth pairs, hypervisor switches (`vmnet*`, `vboxnet*`), and tunnels (`tun*`, `utun*`, `wg*`, `tailscale*`) rank last: they are addresses a phone cannot reach and an operator did not mean, and a container host often reports them *before* the physical interface. They rank rather than disappear — a machine whose only address is a VPN interface still binds it.
+
+An overlay overrides the choice:
 
 ```yaml
 - id: lan-access
@@ -37,7 +41,7 @@ The row is mounted without a `host`, which means "this machine's LAN address". A
 
 | `host` | Posture |
 |---|---|
-| omitted | This machine's first non-internal IPv4 address, or loopback when it has none |
+| omitted | This machine's LAN address — its first interface carrying a network of its own, or loopback when it has none |
 | `127.0.0.1` | Loopback only — the harness is unreachable from the network |
 | `0.0.0.0` | Every interface, container bridges included |
 | `192.168.1.5` | One explicit address, which must be local to this machine |
@@ -70,7 +74,7 @@ A loopback bind needs nothing beyond the process-local authentication the connec
 ## Known Limitations and Deferred Work
 
 - **No TLS, no `Secure` cookie, no HSTS.** The token travels once in the printed URL, then becomes an `HttpOnly` cookie over plain HTTP. Anyone who can observe the network path can read it; a reverse proxy or a virtual network is the answer for anything beyond a trusted LAN.
-- **The machine's first non-internal IPv4 address wins.** A host with several networks (a laptop on Wi-Fi and Ethernet) binds one of them; the choice is platform order, so an operator who cares which one sets `host` explicitly.
+- **Ranking is by interface name, not by route.** Bridges and tunnels are demoted, but among interfaces that rank alike the operating system's enumeration order decides. A host with several such networks (a laptop on Wi-Fi and Ethernet) binds the first one it reports, so an operator who cares which one sets `host` explicitly.
 - **The trust fence is not an authentication layer.** It refuses cross-site and DNS-rebinding requests; the token is the authentication.
 
 ## Dev Note
