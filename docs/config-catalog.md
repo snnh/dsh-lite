@@ -1461,7 +1461,7 @@ export interface Config {
 
 ## `@deepseek-ai/dsh-host-lan-access`
 
-- `source`: [`packages/host/lan-access/src/index.ts:114`](../packages/host/lan-access/src/index.ts)
+- `source`: [`packages/host/lan-access/src/index.ts:128`](../packages/host/lan-access/src/index.ts)
 
 ```ts config-catalog
 /** Row configuration surface; see {@link Config.host} for the posture default. */
@@ -4177,7 +4177,7 @@ export interface WebRuntimeConfig {
 ## `@deepseek-ai/dsh-web-app`
 
 - `inject`: `webServer`
-- `source`: [`packages/bundle/web-app/src/index.ts:46`](../packages/bundle/web-app/src/index.ts)
+- `source`: [`packages/bundle/web-app/src/index.ts:47`](../packages/bundle/web-app/src/index.ts)
 
 ```ts config-catalog
 /** Plugin config: composed deployment settings plus per-invocation command-line values. */

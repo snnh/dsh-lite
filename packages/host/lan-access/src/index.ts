@@ -22,12 +22,13 @@
  *
  * `detectLanAddress()` picks the address a LAN-preferring fallback binds: the
  * first interface that carries a network of its own. Docker bridges, veth
- * pairs, hypervisor switches, and tunnels are addresses a phone cannot reach
- * and an operator did not mean, and on a container host they are often reported
- * *before* the physical interface, so they rank last rather than winning by
- * enumeration order. They are ranked, never excluded: a machine whose only
- * address is a VPN interface still binds it. `isLanHost()` answers the question
- * one step before it — whether this machine holds a LAN worth binding at all.
+ * pairs, hypervisor switches, tunnels, and the wireless shims each platform
+ * adds on top (macOS `awdl*`/`llw*`, a `bridge*` VM bridge, a Windows
+ * `vEthernet`) are addresses a phone cannot reach and an operator did not mean,
+ * and on a container host they are often reported *before* the physical
+ * interface, so they rank last rather than winning by enumeration order. A
+ * demoted address is ranked, never excluded: a machine whose only address is a
+ * VPN interface still binds it.
  *
  * Every address this row publishes is IPv4: `0.0.0.0` is the IPv4 wildcard and
  * never an IPv6 listener, and `detectLanAddress()` reads IPv4 addresses only. A
@@ -92,16 +93,29 @@ const LOOPBACK_HOSTS = new Set([LOOPBACK_HOST, 'localhost', '::1', '[::1]'])
 
 /**
  * Interface-name prefixes that carry no LAN of their own: container bridges,
- * veth pairs, hypervisor switches, and tunnels.
+ * veth pairs, hypervisor switches, tunnels, and the wireless shims a platform
+ * adds on top.
  *
  * These addresses are real, routable, and reachable — from inside the
  * container network and nowhere else. Binding one exposes the harness to the
  * wrong network and hides it from the one the operator meant, so they rank
  * last. They are never excluded: a machine whose only address is a VPN
  * interface still gets that address rather than no network at all.
+ *
+ * The list is the union of what the platforms name these interfaces, because a
+ * name that is virtual on one is a name the others never mint — and the
+ * desktop platforms this row serves are the ones it is written for. Linux
+ * answers with `docker0`, `br-<id>`, `veth*`, `virbr*`, `tun*`, `tap*`, `wg*`,
+ * and `zt*`; macOS with `bridge*` (its own `bridge0` VM bridge), `vmnet*`,
+ * `utun*`, `awdl*` and `llw*` (AirDrop and the low-latency WLAN companion,
+ * neither of which carries a routable LAN), and `tailscale*`; Windows with
+ * `vEthernet (<switch>)` for every Hyper-V switch it holds. A platform whose
+ * interface-name grammar this misses — a bridge an operator renamed, a
+ * virtualization product not listed — falls through to the physical answer.
  */
 const VIRTUAL_INTERFACE_PREFIXES = [
   'br-', 'docker', 'veth', 'virbr', 'vmnet', 'vboxnet', 'tun', 'tap', 'utun', 'wg', 'zt', 'tailscale',
+  'bridge', 'awdl', 'llw', 'vEthernet',
 ] as const
 
 /** What this row publishes through {@link LAN_ACCESS_SERVICE}. */
@@ -142,7 +156,12 @@ declare module '@deepseek-ai/cordis' {
  *
  * The name is the only signal available without platform I/O, and it is the
  * signal the platforms agree on: every Docker bridge is `br-<id>` or
- * `docker0`, every Linux veth pair is `veth<id>`.
+ * `docker0`, every Linux veth pair is `veth<id>`, every Hyper-V switch is a
+ * `vEthernet`, and macOS names its own bridge, AirDrop, and WiFi-companion
+ * interfaces `bridge<id>`, `awdl<id>`, and `llw<id>`. A name that matches
+ * nothing here is treated as a LAN interface, which is why the table above is
+ * a list rather than a heuristic. It carries no exemption: a name opening like
+ * a virtual interface is demoted, whatever machine minted it.
  *
  * @param iface - the operating system's interface name.
  * @returns true when the interface carries no LAN of its own.
@@ -263,26 +282,6 @@ export function rankLanCandidates(candidates: readonly LanCandidate[]): readonly
  */
 export function detectLanAddress(): string | undefined {
   return rankLanCandidates(listLanCandidates())[0]?.address
-}
-
-/**
- * Whether this machine holds a LAN worth binding: at least one non-internal,
- * non-virtual IPv4 address.
- *
- * The complement of {@link detectLanAddress}, which answers *which* address
- * the row binds by default; this answers whether there is a LAN to bind at
- * all, so a caller can tell "this machine has no LAN" apart from "the rank
- * picked one of several". A purely virtual machine is not a LAN host: a
- * container whose only address is its bridge, or a laptop whose only address
- * is its VPN tunnel, holds addresses that reach the container network or the
- * tunnel and nothing a peer on the local network could open. Loopback is not a
- * LAN either, and {@link listLanCandidates} excludes it already.
- *
- * @returns true when the candidate list holds an address carried by an
- *   interface that is not a bridge, container link, or tunnel.
- */
-export function isLanHost(): boolean {
-  return listLanCandidates().some(candidate => !candidate.virtual)
 }
 
 /**
