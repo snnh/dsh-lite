@@ -31,7 +31,7 @@ kind: "package-reference"
 
 `settings.openSettingsDocument()` 准备提供方持有的文档，并用原生文本编辑器打开；该方法不接受浏览器提供的文件系统目标。
 
-`webHost.status()` 报告一份监听地址姿态，并把各项事实分开：`bound` 是本进程实际绑定的地址，`persisted` 是 profile patch 声明的 host，`pinned` 是本次调用由 `--host` 指定的地址，`detected` 是本机的 LAN 地址，`candidates` 是本机持有的全部 IPv4 地址（按 lan-access 行自身的排序），`writable` 表示是否存在可写入的 profile patch。本部署没有的事实会被省略而不是以 `undefined` 发送，因此页面能区分 `rowFound: false`（没有组合 lan-access 行）与「未指定地址」。
+`webHost.status()` 报告一份监听地址姿态，并把各项事实分开：`bound` 是本进程实际绑定的地址，`persisted` 是 profile patch 声明的 host，`pinned` 是本次调用由 `--host` 指定的地址，`detected` 是本机的 LAN 地址，`writable` 表示是否存在可写入的 profile patch。本部署没有的事实会被省略而不是以 `undefined` 发送，因此页面能区分 `rowFound: false`（没有组合 lan-access 行）与「未指定地址」。
 
 `webHost.save(host)` 只写一行：profile 自身 patch 中组合 lan-access 行的 `config.host`，并与该行 patch 配置里已有的其他键合并；profile 未组合该行时则使用随包发行的行标识。除此之外没有任何后续动作：不 reconcile Loader、不重新绑定、不解析令牌，也不改动运行中服务器的 URL 或会话令牌，因此持久化一个非回环地址并不会创建下次启动所需的令牌。可接受的语法恰好是该行能绑定的内容——IPv4 字面量（含 `0.0.0.0` 通配地址）或 `localhost`——其余（含 IPv6 与主机名）都以 `web-host-rejected` 拒绝，并在 details 中携带该地址。没有 profile patch 的部署同样以该方式拒绝保存。
 

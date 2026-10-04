@@ -21,7 +21,7 @@
 import { isIPv4, isIPv6 } from 'node:net'
 import { Context } from '@deepseek-ai/cordis'
 import { writeProfileRowConfig } from '@deepseek-ai/dsh-config-editor'
-import { detectLanAddress, listLanCandidates, rankLanCandidates } from '@deepseek-ai/dsh-host-lan-access'
+import { detectLanAddress } from '@deepseek-ai/dsh-host-lan-access'
 import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import type { WebHostStatusValue } from './types.ts'
 
@@ -214,9 +214,6 @@ export class WebHostController extends TypertRemoteService {
       ...persisted === undefined ? {} : { persisted },
       ...pinned === undefined ? {} : { pinned },
       ...detected === undefined ? {} : { detected },
-      // Ranked the way the row itself ranks them, so the first candidate is the
-      // address `detected` names and the page's list matches the bind default.
-      candidates: rankLanCandidates(listLanCandidates()).map(candidate => candidate.address),
       writable: this.profile() !== undefined,
     }
   }

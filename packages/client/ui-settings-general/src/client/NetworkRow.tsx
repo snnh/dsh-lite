@@ -117,8 +117,8 @@ export function NetworkRow({ onHost, controller, useHost, t }: NetworkRowProps):
   // it has one, the running bind otherwise. The warning belongs to the address
   // an operator has committed to, not to whatever is being typed.
   const stated = view.persisted ?? view.bound
-  // Loopback, the wildcard, and this machine's detected address (the head of
-  // the Host's ranked list): the three worth one click, anything else typed.
+  // Loopback, the wildcard, and this machine's detected address: the three
+  // worth one click, anything else typed.
   const candidates = [...new Set([
     LOOPBACK_HOST, WILDCARD_HOST, ...view.detected === undefined ? [] : [view.detected],
   ])]

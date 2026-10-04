@@ -8186,7 +8186,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'WebHostStatusValue',
-    declaration: 'export interface WebHostStatusValue {\n    readonly rowFound: boolean;\n    readonly bound?: string;\n    readonly persisted?: string;\n    readonly pinned?: string;\n    readonly detected?: string;\n    readonly candidates: string[];\n    readonly writable: boolean;\n}',
+    declaration: 'export interface WebHostStatusValue {\n    readonly rowFound: boolean;\n    readonly bound?: string;\n    readonly persisted?: string;\n    readonly pinned?: string;\n    readonly detected?: string;\n    readonly writable: boolean;\n}',
   },
   {
     name: 'WebResultView',

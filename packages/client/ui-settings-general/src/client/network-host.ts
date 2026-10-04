@@ -43,8 +43,6 @@ export interface WebHostStatus {
   readonly pinned?: string
   /** This machine's detected LAN address, the fallback when no host is stated. */
   readonly detected?: string
-  /** Every IPv4 address this machine holds, best-ranked first. */
-  readonly candidates: readonly string[]
   /** A profile patch exists to persist into; the write itself may still be refused. */
   readonly writable: boolean
 }

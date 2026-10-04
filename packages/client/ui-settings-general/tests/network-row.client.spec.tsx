@@ -29,7 +29,7 @@ afterEach(cleanup)
 
 /** One posture with both machine facts stated, unless the case overrides them. */
 function posture(overrides: Partial<WebHostStatus> = {}): WebHostStatus {
-  return { rowFound: true, candidates: ['192.168.1.5', '127.0.0.1'], writable: true, ...overrides }
+  return { rowFound: true, writable: true, ...overrides }
 }
 
 /** A controller over a scripted `webHost` namespace: no assembly, one read/write at a time. */

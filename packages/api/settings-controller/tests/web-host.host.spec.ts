@@ -14,7 +14,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { boot, initProfile, readProfilePatches, type ProfileContext } from '@deepseek-ai/dsh-app-boot'
 import ConfigEditor from '@deepseek-ai/dsh-config-editor'
 import type { ProfilePatchTarget, RowConfig } from '@deepseek-ai/dsh-config-editor'
-import { detectLanAddress, listLanCandidates, rankLanCandidates } from '@deepseek-ai/dsh-host-lan-access'
+import { detectLanAddress } from '@deepseek-ai/dsh-host-lan-access'
 import { remoteErrorOf, remoteMethods } from '@deepseek-ai/dsh-typert-protocol'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import SettingsController from '../src/index.ts'
@@ -45,9 +45,9 @@ vi.mock('@deepseek-ai/dsh-config-editor', async (importOriginal) => {
 })
 
 /**
- * The interfaces `node:os` reports, so the candidate list and the detected
- * address are the same on every host: a physical LAN address, a container
- * bridge that ranks behind it, and loopback which is never a candidate.
+ * The interfaces `node:os` reports, so the detected address is the same on
+ * every host: a physical LAN address, a container bridge beside it, and
+ * loopback, which is never detected.
  */
 const state = vi.hoisted(() => ({ dict: {} as NodeJS.Dict<NetworkInterfaceInfo[]> }))
 
@@ -185,12 +185,10 @@ describe('the webHost Remote namespace a web-address page calls', () => {
       persisted: '10.0.0.9',
       pinned: '10.1.2.3',
       detected: '192.168.1.5',
-      candidates: ['192.168.1.5', '172.17.0.1'],
       writable: true,
     })
-    // The detection and the candidate list are the row's own answers, ranked the
-    // way the row ranks them, so `detected` is the first candidate.
-    expect(status.candidates).toEqual(rankLanCandidates(listLanCandidates()).map(candidate => candidate.address))
+    // The detection is the row's own answer: the page shows what this machine
+    // reports, not a copy the Host kept.
     expect(status.detected).toBe(detectLanAddress())
   })
 
@@ -201,7 +199,6 @@ describe('the webHost Remote namespace a web-address page calls', () => {
       rowFound: true,
       bound: '127.0.0.1',
       pinned: '10.1.2.3',
-      candidates: [],
       writable: true,
     })
   })
@@ -227,7 +224,6 @@ describe('the webHost Remote namespace a web-address page calls', () => {
       persisted: '0.0.0.0',
       pinned: '10.1.2.3',
       detected: '192.168.1.5',
-      candidates: ['192.168.1.5', '172.17.0.1'],
       writable: true,
     })
     expect(patchWriter.rows).toEqual([
@@ -272,7 +268,6 @@ describe('the webHost Remote namespace a web-address page calls', () => {
       bound: '127.0.0.1',
       pinned: '10.1.2.3',
       detected: '192.168.1.5',
-      candidates: ['192.168.1.5', '172.17.0.1'],
       writable: true,
     })
     // The row is still not composed, so no fact about it appears: the line is
@@ -295,7 +290,6 @@ describe('the webHost Remote namespace a web-address page calls', () => {
       bound: '127.0.0.1',
       pinned: '10.1.2.3',
       detected: '192.168.1.5',
-      candidates: ['192.168.1.5', '172.17.0.1'],
       writable: true,
     })
     await fixture.controller.save('192.168.1.5')
@@ -381,7 +375,6 @@ describe('the webHost Remote namespace a web-address page calls', () => {
     expect(controller.status()).toEqual({
       rowFound: false,
       detected: '192.168.1.5',
-      candidates: ['192.168.1.5', '172.17.0.1'],
       writable: false,
     })
     const failure = await controller.save('127.0.0.1').catch((error: unknown) => error)
