@@ -174,6 +174,24 @@ export class WorkspaceRegistry extends Service {
   private global?: DomainGlobal<WorkspaceDomainState>
   private state?: WorkspaceDomainState
   private readonly entities = new Map<WorkspaceId, WorkspaceEntity>()
+  /**
+   * Resident session index: the headers of every stored and live session this
+   * process indexed, with the canonical path their cwd resolves to — or, for a
+   * session that cannot join a project, the reason why.
+   *
+   * These three maps are one fact per id and are deliberately never budgeted.
+   * A count or byte bound would have to evict them as a unit (an id must not
+   * keep a header whose path left, nor a path whose header left), and the A3
+   * budget primitive drops its least recently used entry with no veto — so a
+   * budgeted index could drop a projected id's path, which is exactly what
+   * `WorkspaceEntity.sessionIds` reads synchronously to build the Workspace
+   * feed's session list, and hide a listed session from its project until the
+   * next full re-index (only a later miss of some other id triggers one). The
+   * only evictions that cannot do that are the ids no listing projects, which
+   * {@link forgetUnprojectedSession} drops at archive; the rest of the index is
+   * bounded by the durable account itself, exactly as the storage domain's
+   * resident tables are.
+   */
   private readonly headers = new Map<SessionId, SessionHeader>()
   private readonly sessionPaths = new Map<SessionId, string>()
   private readonly invalidSessionPaths = new Map<SessionId, string>()
@@ -354,8 +372,11 @@ export class WorkspaceRegistry extends Service {
    * to stop the session's work: the durable archive set is what a provider's
    * `agent/pre-step` gate reads, so every wake the stops induce is already
    * blocked. Archiving drops the session's pin in the same durable write
-   * (pinning and archival are mutually exclusive). An already archived id
-   * resolves without writing, asking, or stopping.
+   * (pinning and archival are mutually exclusive) and, once that write
+   * committed, drops the archived session's resident index trace through
+   * {@link forgetUnprojectedSession} — a memory-only step that can never fail
+   * the archive. An already archived id resolves without writing, asking,
+   * stopping, or clearing.
    * @param sessionId - The session to archive.
    * @param options - Whether running work is stopped instead of refusing.
    * @returns resolution after durability and, with `stopActivity`, after every stop request was issued.
@@ -380,6 +401,11 @@ export class WorkspaceRegistry extends Service {
         archivedSessionIds: [...state.archivedSessionIds, sessionId],
         pinnedSessionIds: state.pinnedSessionIds.filter(id => id !== sessionId),
       })
+      // Durability first: the archive set is the durable gate every provider
+      // reads, so the resident trace is dropped only once that set is
+      // committed — and dropping it is a memory decision that never rejects
+      // this call.
+      this.forgetUnprojectedSession(sessionId)
       if (options.stopActivity === true) await this.stopSessionActivity(sessionId)
     })
   }
@@ -799,6 +825,38 @@ export class WorkspaceRegistry extends Service {
 
   private async indexHeaders(headers: readonly SessionHeader[]): Promise<void> {
     for (const header of headers) await this.indexHeader(header)
+  }
+
+  /**
+   * Drop the resident trace of a session whose just-committed archive leaves it
+   * invisible to every listing.
+   *
+   * `Workspace.sessionIds` — the projection the Workspace feed serves — keeps a
+   * durable account id exactly while `sessionPaths.get(id)` resolves to the
+   * record's own canonical path, and it answers synchronously. So an id whose
+   * canonical path is absent from the index is projected by no listing at all:
+   * its cached header and its invalid-cwd reason are the only resident traces
+   * left, and they leave together (the header index, the path table, and the
+   * invalid-path table never disagree about one id).
+   *
+   * An id whose path *is* indexed keeps both, archived or not, because that
+   * path is the display state of a session a project still lists: dropping it
+   * would drop the session out of `list()` until some later full re-index, and
+   * no synchronous refill exists (re-reading a header goes through
+   * `sessionPersistence`), which is also why `unarchiveSession` — which
+   * deliberately reads no persistence — could not restore it.
+   *
+   * The step is memory-only and cannot fail the archive it follows: it reads
+   * two in-process Maps and writes those same two, touches no medium and no
+   * durable row, and an id the index never held (or no longer holds) simply
+   * drops nothing.
+   * @param sessionId - The session whose archive just became durable.
+   */
+  private forgetUnprojectedSession(sessionId: SessionId): void {
+    // A session a listing projects: its path is that listing's membership fact.
+    if (this.sessionPaths.has(sessionId)) return
+    this.headers.delete(sessionId)
+    this.invalidSessionPaths.delete(sessionId)
   }
 
   private async indexHeader(header: SessionHeader): Promise<void> {
