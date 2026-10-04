@@ -227,6 +227,17 @@ class ClientSessionReference implements SessionReference {
   }
 }
 
+/** Construction options for {@link ClientSessions}. */
+export interface ClientSessionsOptions {
+  /**
+   * Idle threshold handed to the instance cluster, in milliseconds; `0` keeps
+   * every retained Session resident. See
+   * `SessionManagerOptions.sessionIdleTtlMs`.
+   * @default 3600000
+   */
+  sessionIdleTtlMs?: number
+}
+
 /** Host catalog and local reference allocator; view selection remains outside the Controller. */
 export class ClientSessions implements ISessions {
   /**
@@ -249,12 +260,17 @@ export class ClientSessions implements ISessions {
   /**
    * @param ctx - client root context (scope fibers mount under it).
    * @param remote - generated Remote namespaces shared with every Session.
+   * @param options - construction knobs; see {@link ClientSessionsOptions}.
    */
   constructor(
     private readonly rootCtx: Context,
     remote: SessionRemotes,
+    options: ClientSessionsOptions = {},
   ) {
-    this.manager = new SessionManager(remote)
+    this.manager = new SessionManager(remote, {
+      ...(options.sessionIdleTtlMs === undefined ? {} : { sessionIdleTtlMs: options.sessionIdleTtlMs }),
+      onSessionEvicted: (sessionId, session) => { this.retireEvictedScope(sessionId, session) },
+    })
     this.list = createSnapshotStore<SessionListState>({
       ids: [], byId: {}, phase: 'pending', projectionsBySession: {},
     })
@@ -571,6 +587,22 @@ export class ClientSessions implements ISessions {
     if (observer === undefined || observer.published === snapshot) return
     observer.published = snapshot
     notifySubscribers(observer.listeners, '[session-controller] reference sources')
+  }
+
+  /**
+   * Withdraw the generation an idle eviction released. The manager already
+   * dropped and disposed the instance, so this only retires the scope fiber
+   * (rolling back every registration the generation carried) and its retention
+   * record; `drop` re-runs identity-checked and finds nothing left to dispose.
+   * Reference holders of that generation see it as disposed — the documented
+   * outcome of generation disposal — and a later `retain` mints a fresh one.
+   * @param sessionId - Session identity the released instance belonged to.
+   * @param session - the released instance; a newer generation is left alone.
+   */
+  private retireEvictedScope(sessionId: SessionId, session: Session): void {
+    const record = this.scopes.get(sessionId)
+    if (record === undefined || record.session !== session) return
+    this.retireScope(sessionId, record)
   }
 
   private retireScope(id: SessionId, record: ScopeRecord, disposeFiber = true): void {

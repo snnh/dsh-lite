@@ -127,6 +127,13 @@ export class Session implements SessionFace {
   private removed = false
   private promptError: PromptError | null = null
   private lastAgentError: string | null = null
+  /**
+   * Wall clock of the last event a residency policy counts as activity: a
+   * local or Host-accepted prompt, a turn edge, a durable or live event
+   * arriving on the window, or one sweep finding this instance observed or
+   * busy. Only {@link isIdleAt} reads it, and the instance dies with it.
+   */
+  private lastActiveAt = Date.now()
   /** Local submission echoes, insertion-ordered (see SessionSnapshot.pendingSubmissions). */
   private pendingSubmissions: readonly PendingSubmission[] = []
   /** Per-echo settlement state; `retiring` latches the first observation so a
@@ -237,7 +244,9 @@ export class Session implements SessionFace {
     }]
     this.submissionSettlements.set(requestId, { placement, onRetire: input.onRetire, retiring: false })
     // The blank → engaging edge flips here, ahead of prompt(): the composer
-    // docks and the echo renders on the click's own frame.
+    // docks and the echo renders on the click's own frame. A click is the
+    // user interaction a residency policy reads as activity.
+    this.lastActiveAt = Date.now()
     this.promptAttempted = true
     this.notifier.markDirty()
     return { requestId, abandon: () => { this.retireFailedSubmission(requestId) } }
@@ -310,6 +319,9 @@ export class Session implements SessionFace {
       this.blankBit = false
       this.notifier.markDirty()
     }
+    // Host acceptance is activity even without a local echo (a queued or
+    // programmatic prompt opens no {@link beginSubmission}).
+    this.lastActiveAt = Date.now()
     this.options.onEngaged?.(this)
     return result
   }
@@ -532,7 +544,38 @@ export class Session implements SessionFace {
     if (running) this.firstPromptPendingTurn = false
     if (this.running === running) return
     this.running = running
+    // Both turn edges are activity: the start keeps a long turn off the idle
+    // clock, and the end restarts it, so a turn never ends already-expired.
+    this.lastActiveAt = Date.now()
     this.notifier.markDirty()
+  }
+
+  /**
+   * Record manager-relayed Host activity (`api-session/activity`, a durable
+   * user message — including one another Client sent) as the idle clock's
+   * latest reading.
+   */
+  markActive(): void {
+    this.lastActiveAt = Date.now()
+  }
+
+  /**
+   * Whether a shared residency policy may release this instance at `now`:
+   * nothing observes its snapshot or event window, no turn, local echo, page
+   * load, or opening is in flight, and nothing counted as activity since
+   * `idleTtlMs` before `now`. Being observed and being busy both count as
+   * activity, so the clock restarts for as long as either is present — a
+   * watched or working Session is never idle.
+   * @param now - current wall clock.
+   * @param idleTtlMs - positive idle threshold from the policy.
+   * @returns true when releasing this instance interrupts no live reader.
+   */
+  isIdleAt(now: number, idleTtlMs: number): boolean {
+    if (this.observerCount() > 0 || this.hasInFlightWork()) {
+      this.lastActiveAt = now
+      return false
+    }
+    return now - this.lastActiveAt >= idleTtlMs
   }
 
   /**
@@ -612,6 +655,19 @@ export class Session implements SessionFace {
 
   // ---- Private ----
 
+  /** Readers of the snapshot or of the event window; either one pinning this instance is an observer. */
+  private observerCount(): number {
+    return this.notifier.listenerCount() + this.eventSource.listenerCount()
+  }
+
+  /** In-flight work: a running turn, an unsettled echo, or history I/O this instance owns. */
+  private hasInFlightWork(): boolean {
+    return this.running
+      || this.pendingSubmissions.length > 0
+      || this.loadingOlder
+      || this.openState === 'loading'
+  }
+
   /** @param generation - openGeneration at launch; stale passes cannot publish after replacement. */
   private async doOpen(generation: number): Promise<void> {
     this.openState = 'loading'
@@ -644,6 +700,10 @@ export class Session implements SessionFace {
 
   /** Apply one contiguous journal update already reconciled by the Remote stream. */
   private acceptEventChange(change: SessionJournalChange): void {
+    // Durable and live arrivals are Host activity: a child Agent still working
+    // through this window keeps the instance off the idle clock even though
+    // nothing observes it.
+    this.lastActiveAt = Date.now()
     switch (change.type) {
       case 'replace':
         this.installWindow(

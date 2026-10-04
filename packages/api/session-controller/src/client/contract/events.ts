@@ -131,6 +131,12 @@ export class MutableSessionEventSource implements SessionEventSource {
   getSnapshot(): SessionEventWindow { return this.snapshot }
 
   /**
+   * Live subscriber count, the observation test a residency policy reads.
+   * @returns how many listeners are currently attached.
+   */
+  listenerCount(): number { return this.listeners.size }
+
+  /**
    * Subscribe to synchronous window publication.
    * @param listener - invalidation callback.
    * @returns unsubscribe function.

@@ -80,6 +80,19 @@ interface ProjectionInflight {
  */
 const DEFAULT_ENTRY_CACHE_MAX_ENTRIES = 5000
 
+/**
+ * Default idle threshold after which an unobserved, idle Session instance is
+ * released; see {@link SessionManagerOptions.sessionIdleTtlMs}.
+ */
+const DEFAULT_SESSION_IDLE_TTL_MS = 60 * 60 * 1000
+
+/**
+ * Longest gap between residency sweeps; see
+ * {@link SessionManagerOptions.sessionIdleTtlMs}. A threshold shorter than this
+ * is swept at its own scale, so eviction lands within about one TTL.
+ */
+const SESSION_IDLE_SWEEP_MAX_MS = 5 * 60 * 1000
+
 /** Construction options for {@link SessionManager}. */
 export interface SessionManagerOptions {
   /**
@@ -92,6 +105,26 @@ export interface SessionManagerOptions {
    * @default 5000
    */
   entryCacheMaxEntries?: number
+  /**
+   * Idle threshold for releasing a resident Session instance, in milliseconds:
+   * once nothing observes the instance, nothing is in flight on it, and no
+   * activity has landed for this long, the manager drops it through the same
+   * path as any other release, and a later {@link SessionManager.get} rebuilds
+   * it. Only the instance goes: the list row, its projections, and the durable
+   * Session on the Host are untouched. `0` never releases, restoring the
+   * previous always-resident behavior; negative values are treated as `0`.
+   * @default 3600000
+   */
+  sessionIdleTtlMs?: number
+  /**
+   * Owner hook for a released idle Session: the composition withdraws the
+   * generation that owned the instance (its scope fiber, references, and
+   * retention row) so nothing keeps pointing at the disposed object. Every
+   * Session-scoped registration that generation carried rolls back here, and a
+   * later `retain` mints a fresh generation. Omitted, the instance is still
+   * dropped and disposed, and a later {@link SessionManager.get} rebuilds it.
+   */
+  onSessionEvicted?: (sessionId: SessionId, session: Session) => void
 }
 
 type ProjectionLoad = Omit<SessionProjectionSnapshot, 'values'>
@@ -145,6 +178,12 @@ export class SessionManager {
   private readonly entryCache = new Map<SessionId, SessionListEntry>()
   /** Admitted-entry bound; see {@link SessionManagerOptions.entryCacheMaxEntries}. */
   private readonly entryCacheMaxEntries: number
+  /** Idle threshold in milliseconds; `0` disables residency eviction. */
+  private readonly sessionIdleTtlMs: number
+  /** Generation owner told about one idle release; see {@link SessionManagerOptions.onSessionEvicted}. */
+  private readonly onSessionEvicted: SessionManagerOptions['onSessionEvicted']
+  /** Running residency sweep, armed while any instance is resident; see {@link armIdleSweep}. */
+  private idleSweep: ReturnType<typeof setInterval> | undefined
   private itemsCache: readonly SessionListEntry[] = []
   private readonly notifier = new Notifier(() => {
     this.listSnapshotCache = this.buildListSnapshot()
@@ -159,6 +198,11 @@ export class SessionManager {
       1,
       Math.floor(options.entryCacheMaxEntries ?? DEFAULT_ENTRY_CACHE_MAX_ENTRIES),
     )
+    this.sessionIdleTtlMs = Math.max(
+      0,
+      Math.floor(options.sessionIdleTtlMs ?? DEFAULT_SESSION_IDLE_TTL_MS),
+    )
+    this.onSessionEvicted = options.onSessionEvicted
     this.listSnapshotCache = this.buildListSnapshot()
   }
 
@@ -222,6 +266,7 @@ export class SessionManager {
     this.sessions.delete(sessionId)
     this.addresses.delete(sessionId)
     this.pruneEngagement(sessionId, this.retainedIds(this.summaries))
+    if (this.sessions.size === 0) this.disarmIdleSweep()
     return this.startSessionDisposal(session)
   }
 
@@ -231,6 +276,7 @@ export class SessionManager {
    */
   async dispose(): Promise<void> {
     this.disposed = true
+    this.disarmIdleSweep()
     this.listMutations = null
     this.listInflight = null
     this.engagedSessions.clear()
@@ -273,6 +319,7 @@ export class SessionManager {
     if (session === undefined) {
       session = this.createSession(sessionId)
       this.sessions.set(sessionId, session)
+      this.armIdleSweep()
       // Sync the running and blank bits from the list snapshot into the new
       // instance (consistency when the list precedes open).
       const summary = this.summaries.find(s => s.sessionId === sessionId)
@@ -320,6 +367,46 @@ export class SessionManager {
       },
       projections: this.projectionStore(sessionId),
     })
+  }
+
+  /**
+   * Arm the residency sweep once, as the first instance becomes resident. A
+   * disabled threshold never arms, so `0` costs no timer at all.
+   */
+  private armIdleSweep(): void {
+    if (this.sessionIdleTtlMs === 0 || this.idleSweep !== undefined) return
+    const timer = setInterval(
+      () => { this.releaseIdleSessions() },
+      Math.min(this.sessionIdleTtlMs, SESSION_IDLE_SWEEP_MAX_MS),
+    )
+    // A Node host must not be kept alive by this timer; a browser handle has no unref.
+    ;(timer as { unref?: () => void }).unref?.()
+    this.idleSweep = timer
+  }
+
+  /** Stop sweeping; the next admission arms a fresh timer. */
+  private disarmIdleSweep(): void {
+    if (this.idleSweep === undefined) return
+    clearInterval(this.idleSweep)
+    this.idleSweep = undefined
+  }
+
+  /**
+   * Release every resident instance that went idle past the threshold: nothing
+   * observes it, nothing is in flight on it, and its last activity is older
+   * than the TTL. The decision is retaken per sweep against the instance's live
+   * state, so a Session that started a turn, accepted a prompt, or picked up an
+   * observer since the last sweep is left alone. The release rides the same
+   * path as any other (`drop` → instance disposal), and the generation owner is
+   * told afterwards so it can withdraw the scope the instance was bound to.
+   */
+  private releaseIdleSessions(): void {
+    const now = Date.now()
+    for (const [sessionId, session] of [...this.sessions]) {
+      if (!session.isIdleAt(now, this.sessionIdleTtlMs)) continue
+      void this.drop(sessionId, session)
+      this.onSessionEvicted?.(sessionId, session)
+    }
   }
 
   private effectiveBlank(summary: SessionSummary): boolean {
@@ -750,6 +837,9 @@ export class SessionManager {
    * @param updatedAt - durable message timestamp.
    */
   handleSessionActivity(sessionId: SessionId, updatedAt: number): void {
+    // A durable user message — possibly one another Client sent — is activity
+    // for this Client's instance of that Session too.
+    this.sessions.get(sessionId)?.markActive()
     this.recordMutation({ kind: 'activity', sessionId, updatedAt })
   }
 

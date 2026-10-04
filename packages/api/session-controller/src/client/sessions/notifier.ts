@@ -16,6 +16,14 @@ export class Notifier {
   constructor(private readonly rebuild: () => void) {}
 
   /**
+   * Live subscriber count, the observation test a residency policy reads.
+   * @returns how many listeners are currently attached.
+   */
+  listenerCount(): number {
+    return this.listeners.size
+  }
+
+  /**
    * uSES subscription entry.
    * @param listener - change callback.
    * @returns the unsubscribe function.
