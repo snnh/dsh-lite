@@ -22,6 +22,7 @@ import z from '@deepseek-ai/schemastery'
 import { addHarnessSourceSection, auditStartupEntries } from '@deepseek-ai/dsh-app-boot'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import * as FrontendStatic from '@deepseek-ai/dsh-host-frontend-static'
+import { listLanCandidates, rankLanCandidates } from '@deepseek-ai/dsh-host-lan-access'
 import { launchedThroughSsh, launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 import { scrubbedParentEnv } from '@deepseek-ai/dsh-subprocess'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
@@ -77,9 +78,19 @@ export const Config: z<Config> = z.object({
 
 /** Bind-dependent Web values shared by the trust fence and URL display. */
 export interface WebRuntimeValues {
-  /** LAN IPv4 literals sampled once when the server binds all interfaces. */
+  /**
+   * Print-worthy LAN IPv4 literals sampled once when the server binds all
+   * interfaces, most reachable first: the row's own candidate ranking, minus
+   * the link-local and address-less records no peer can open. The first entry
+   * is the address the URL line names; the list is empty when this machine
+   * holds nothing but loopback, link-local, or address-less interfaces.
+   */
   lanAddresses: string[]
-  /** LAN literals followed by explicit invocation authorities. */
+  /**
+   * Every LAN literal the bind publishes followed by explicit invocation
+   * authorities — the trust fence's admission list, which is never narrowed by
+   * the display selection above.
+   */
   trustedHosts: string[]
 }
 
@@ -91,6 +102,12 @@ const DSH_WEB_URL = 'DSH_WEB_URL' as const
 const LOOPBACK_HOST = '127.0.0.1'
 /** The webserver schema's all-interfaces bind literal. */
 const ALL_INTERFACES_HOST = '0.0.0.0'
+/**
+ * The IPv4 link-local prefix (`169.254.0.0/16`, RFC 3927). A machine that
+ * cannot reach a DHCP server assigns itself one of these, and the network it
+ * names routes nowhere, so a printed link carrying it is a dead link.
+ */
+const LINK_LOCAL_PREFIX = '169.254.'
 
 const BROWSER_OPENER_MODULE = import.meta.resolve('open')
 
@@ -124,6 +141,33 @@ try {
 `
 
 /**
+ * The addresses worth naming in the printed LAN link, best first.
+ *
+ * Selection and ordering are the LAN row's own — `listLanCandidates` for what
+ * this machine holds and `rankLanCandidates` for which of them a peer is most
+ * likely to reach — so the URL line names the same address the row would bind
+ * and never disagrees with it by enumeration order. A physical interface
+ * outranks a bridge or tunnel: on a container host `docker0` is often reported
+ * first, and a token pointing at it is a token pointing at a network the
+ * operator's browser cannot route to.
+ *
+ * Two kinds of candidate are dropped rather than ranked, because both are
+ * addresses the line would hand the token to for nothing: an empty literal (an
+ * interface mid-teardown reports no address) and a link-local `169.254.*`
+ * literal, which is reachable from no interface but the one that invented it.
+ * Dropping them never narrows the trust fence, which keeps every address the
+ * bind publishes.
+ *
+ * @returns the candidate addresses, best first; empty when this machine holds
+ *   nothing worth printing.
+ */
+function printableLanAddresses(): string[] {
+  return rankLanCandidates(listLanCandidates())
+    .map(candidate => candidate.address)
+    .filter(address => address.length > 0 && !address.startsWith(LINK_LOCAL_PREFIX))
+}
+
+/**
  * Resolve one LAN-trust snapshot from the active server bind.
  *
  * Derived entries are port-less IP literals: DNS rebinding needs an
@@ -131,7 +175,7 @@ try {
  * an OS-assigned port is unknowable before bind.
  * @param bindHost - the active webserver bind host.
  * @param extra - explicit `--trusted-host` values, in argument order.
- * @returns the LAN display addresses and invocation-derived fence authorities.
+ * @returns the ranked LAN display addresses and invocation-derived fence authorities.
  */
 export function resolveLanTrust(bindHost: string, extra: readonly string[]): WebRuntimeValues {
   // A specific non-loopback address is itself the network address this host is
@@ -143,8 +187,11 @@ export function resolveLanTrust(bindHost: string, extra: readonly string[]): Web
       .map(iface => iface.address)
     : bindHost === LOOPBACK_HOST ? [] : [bindHost]
   // The LAN link is printed beside the application URL, so it is only worth
-  // reporting when the URL does not already carry the bound address.
-  const lanAddresses = bindHost === ALL_INTERFACES_HOST ? reachable : []
+  // reporting when the URL does not already carry the bound address — and only
+  // the best-ranked candidate is worth printing, since the token it carries is
+  // the one a peer will actually open. The fence above keeps every address the
+  // bind publishes: exposure is `0.0.0.0`'s decision, not this line's.
+  const lanAddresses = bindHost === ALL_INTERFACES_HOST ? printableLanAddresses() : []
   return { lanAddresses, trustedHosts: [...reachable, ...extra] }
 }
 
@@ -290,7 +337,9 @@ export function apply(ctx: Context, config: Config): void {
         if (ANNOUNCED_ROOTS.has(connectionCtx.root)) return
         const webUrl = appRootUrl(connectionCtx, publicUrl)
         const authenticatedUrl = connectionCtx.connection.authenticatedUrl(webUrl)
-        // Reuse the exact LAN snapshot provided to the /api trust fence.
+        // The snapshot's best-ranked candidate, sampled once at bind: the /api
+        // fence admits every address this bind publishes, while the line names
+        // the one a peer is most likely to reach.
         const lanCandidate = runtime.lanAddresses[0]
         const port = connectionCtx.webServer.port
         const lanUrl = lanCandidate === undefined

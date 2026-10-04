@@ -30,6 +30,9 @@
       "path": "../../host/frontend-static"
     },
     {
+      "path": "../../host/lan-access"
+    },
+    {
       "path": "../../host/webserver"
     },
     {
