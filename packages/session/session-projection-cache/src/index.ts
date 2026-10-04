@@ -11,27 +11,35 @@
  * is possibly stale (its `seq` says how stale) but never wrong, so every
  * write path is fail-soft (a lost write costs a longer tail replay on the
  * next cold read) and a `ver` mismatch discards the row instead of migrating
- * it. Design authority: the session-projection RFC
+ * it. Reads are served from this service's own budgeted copy of the domain's
+ * records (`residentMaxEntries`/`residentMaxBytes`); dropping a record from
+ * that copy is a memory-only decision that never touches the durable one, and
+ * the domain's table remains the source a dropped record is refilled from.
+ * Archiving a session is the one durable statement that its record is no
+ * longer worth keeping, so it deletes the record — resident and durable —
+ * while disposing a session only checkpoints it. Design authority: the
+ * session-projection RFC
  * (.agents/notes/proposed/architecture/2026-07-27-session-projection-and-command-log.md).
  * @module @deepseek-ai/dsh-session-projection-cache
  */
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
+import { createBoundedMap } from '@deepseek-ai/dsh-memory'
+import type { BoundedMap } from '@deepseek-ai/dsh-memory'
 import { snapshotJsonValue } from '@deepseek-ai/dsh-util-values'
-import { SessionLogOffset } from '@deepseek-ai/dsh-session'
+import { SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
 import type {
   Session,
   SessionEvent,
   SessionHeader,
-  SessionId,
 } from '@deepseek-ai/dsh-session'
 import type {
   ProjectionCheckpoint,
   ProjectionSnapshot,
   SessionProjectionMap,
 } from '@deepseek-ai/dsh-session-projection'
-import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
+import type { DomainChanged, KvTable } from '@deepseek-ai/dsh-storage-domain'
 import { projectionCacheDomainSpec } from './spec.ts'
 import type { CheckpointIdentity, CheckpointRecord } from './spec.ts'
 
@@ -56,6 +64,40 @@ type CurrentCheckpointIdentity = CheckpointIdentity & {
 
 const PREDECESSOR_TITLE_KEY = 'title' as Extract<keyof SessionProjectionMap, string>
 
+/**
+ * Entry bound of the resident copy ({@link Config.residentMaxEntries}) when the
+ * composition leaves it unset. A record carries one row per projection of one
+ * session — roughly 1–20 KB — so 5000 entries sit two orders of magnitude above
+ * the working set of any listing a host serves at once, while a catalog that
+ * grows with the session directory stops pinning one record per session for
+ * the lifetime of the process.
+ */
+const DEFAULT_RESIDENT_MAX_ENTRIES = 5000
+
+/**
+ * Byte bound of the resident copy ({@link Config.residentMaxBytes}) when the
+ * composition leaves it unset. Records are unevenly sized (a long schedule or
+ * subagent catalog in one session outweighs hundreds of quiet ones), so the
+ * byte account is what actually prices the copy; 64 MiB is a fraction of the
+ * 256 MiB resident-set threshold the memory policy reacts to, which keeps this
+ * cache from dominating the host's footprint. Both bounds are deliberately
+ * generous rather than tight: evicting a record that listing reads want costs a
+ * refill from the domain table, and eviction of the *durable* record would cost
+ * a cold refold (empty titles, slower first paint), which is why no bound ever
+ * deletes a record.
+ */
+const DEFAULT_RESIDENT_MAX_BYTES = 64 * 1024 * 1024
+
+/**
+ * The Workspace registry's domain (`packages/workspace/workspace/src/spec.ts`),
+ * whose global singleton carries `archivedSessionIds`. The cache watches that
+ * domain's commits through `domain/changed` instead of depending on the
+ * registry package: archiving is the one durable statement that a session's
+ * cached record is no longer worth keeping, and it arrives as a whole-set
+ * snapshot that this cache reads structurally.
+ */
+const WORKSPACE_DOMAIN = 'workspace'
+
 export { checkpointIdentity, checkpointRecord, checkpointRow, projectionCacheDomainSpec } from './spec.ts'
 export type { CheckpointIdentity, CheckpointRecord } from './spec.ts'
 
@@ -70,18 +112,34 @@ declare module '@deepseek-ai/cordis' {
  * universally correct value, so the composition states them explicitly
  * (cordis.yml); the three mandatory write points (session creation,
  * `turn/end`, and session disposal) are policy, not tunables, and always
- * fire.
+ * fire. The two resident bounds are the opposite kind of setting: they have
+ * conservative defaults a composition may tighten or lift, because a cache
+ * that grows with the session directory is what the bound exists to prevent.
  */
 export interface Config {
   /** Committed events per session that force a durable checkpoint write between mandatory points. */
   writeEveryEvents: number
   /** Longest time (milliseconds) a dirty checkpoint may stay unwritten between mandatory points. */
   writeIntervalMs: number
+  /**
+   * Session records the resident copy retains before it drops the least
+   * recently served ones; `0` leaves the entry count unbounded.
+   * @default 5000
+   */
+  residentMaxEntries?: number
+  /**
+   * Estimated bytes the resident copy retains before it drops the least
+   * recently served records; `0` leaves the byte account unbounded.
+   * @default 67108864
+   */
+  residentMaxBytes?: number
 }
 
 export const Config: z<Config> = z.object({
   writeEveryEvents: z.natural().min(1).required(),
   writeIntervalMs: z.natural().min(1).required(),
+  residentMaxEntries: z.natural().default(DEFAULT_RESIDENT_MAX_ENTRIES),
+  residentMaxBytes: z.natural().default(DEFAULT_RESIDENT_MAX_BYTES),
 })
 
 /** Per-session write-behind bookkeeping (live sessions only; dropped at retire). */
@@ -99,7 +157,11 @@ interface DirtyState {
  * session creation, `turn/end`, and session disposal (the live-to-cold
  * moment) — and serves the
  * cached rows for a session header. Every durable write is fail-soft:
- * failures log a warning and the cache self-heals on the next write.
+ * failures log a warning and the cache self-heals on the next write. Reads are
+ * served from a budgeted resident copy of the domain's records; the domain
+ * table is the authority that copy is refilled from, and archiving a session
+ * (observed through the Workspace registry's commits) deletes its record from
+ * both.
  */
 export class SessionProjectionCache extends Service {
   static inject = ['storageDomain', 'sessionProjections', 'sessions']
@@ -108,17 +170,82 @@ export class SessionProjectionCache extends Service {
 
   private table?: KvTable<SessionId, CheckpointRecord>
   private readonly dirty = new Map<Session, DirtyState>()
+  /**
+   * Resident copy of the records the read faces serve: the sessions a host
+   * reads most recently, under {@link Config.residentMaxEntries} and
+   * {@link Config.residentMaxBytes}. It starts empty and is admitted from the
+   * domain table, so it is always a subset of the domain's records — dropping
+   * an entry here costs one refill and never a durable delete. The invariant
+   * every read relies on is that this copy never holds a record older than the
+   * table's: a write invalidates its entry before the table can change and
+   * re-admits it once the write landed, and a deletion invalidates it before
+   * the record leaves the table.
+   */
+  private readonly resident: BoundedMap<SessionId, CheckpointRecord>
+  /** Effective entry bound of {@link resident}; `0` leaves the count unbounded. */
+  private readonly residentMaxEntries: number
+  /** Effective byte bound of {@link resident}; `0` leaves the byte account unbounded. */
+  private readonly residentMaxBytes: number
 
   constructor(ctx: Context, public config: Config) {
     super(ctx, 'sessionProjectionCache')
+    // A hand-built config may omit the bounds (the loader schema fills them in
+    // from `Config`), and the documented defaults are what an omitted bound
+    // must mean — never an unbounded copy.
+    this.residentMaxEntries = config.residentMaxEntries ?? DEFAULT_RESIDENT_MAX_ENTRIES
+    this.residentMaxBytes = config.residentMaxBytes ?? DEFAULT_RESIDENT_MAX_BYTES
+    this.resident = createBoundedMap<SessionId, CheckpointRecord>({
+      maxEntries: this.residentMaxEntries,
+      maxBytes: this.residentMaxBytes,
+    })
   }
 
-  /** Open the domain and install the write-behind listeners. */
+  /**
+   * Open the domain and install the write-behind listeners.
+   */
   protected async [Service.init](): Promise<void> {
     const domain = await this.ctx.storageDomain.open(projectionCacheDomainSpec)
     this.ctx.effect(() => () => domain.close(), 'sessionProjectionCache.domainClose')
     this.table = domain.table('sessions')
     this.installWritePath()
+    this.installArchivePurge()
+  }
+
+  /**
+   * The resident copy's own reading: the records it retains, the bytes it
+   * prices them at, and the bounds in force (`0` = that dimension unbounded).
+   * Diagnostics only — an eviction here never touches a durable record, and
+   * every record the domain table holds stays readable afterwards.
+   * @returns retained entry count, priced bytes, and the effective bounds.
+   */
+  get residentUsage(): {
+    readonly entries: number
+    readonly bytes: number
+    readonly maxEntries: number
+    readonly maxBytes: number
+  } {
+    return {
+      entries: this.resident.size,
+      bytes: this.resident.bytes,
+      maxEntries: this.residentMaxEntries,
+      maxBytes: this.residentMaxBytes,
+    }
+  }
+
+  /**
+   * The record the domain holds for one session, admitted to the resident copy
+   * on the way out. A copy hit is served directly (and re-stamped as the most
+   * recently used entry); a miss the domain table can answer refills the copy,
+   * and a miss in both is a session this cache holds no record for.
+   * @param id - the session whose record is read.
+   * @returns the stored record, or `undefined` when neither copy holds one.
+   */
+  private storedRecord(id: SessionId): CheckpointRecord | undefined {
+    const resident = this.resident.get(id)
+    if (resident !== undefined) return resident
+    const stored = this.requireTable().get(id)
+    if (stored !== undefined) this.resident.set(id, stored)
+    return stored
   }
 
   /**
@@ -126,15 +253,14 @@ export class SessionProjectionCache extends Service {
    * identity matches `expected`. A session id names a slot, not a lifecycle:
    * a recreated id or a persistence store swapped under a surviving cache
    * must not let an old record seed state folded from an unrelated log.
-   * Synchronous from the domain's in-memory state — the same state every
-   * write mutated, so a read can never go around the write chain to the
-   * medium.
+   * Synchronous from the resident copy, which the domain's in-memory state
+   * refills — never from the medium.
    * @param id - the session whose record is read.
    * @param expected - the log identity the caller holds (live or stored header).
    * @returns the identity-matching record, or `undefined` (absent or unrelated).
    */
   private recordFor(id: SessionId, expected: CurrentCheckpointIdentity): CheckpointRecord | undefined {
-    const record = this.requireTable().get(id)
+    const record = this.storedRecord(id)
     if (record === undefined) return undefined
     return identityMatches(record.identity, expected) ? record : undefined
   }
@@ -163,7 +289,7 @@ export class SessionProjectionCache extends Service {
     keys?: readonly Extract<keyof SessionProjectionMap, string>[],
   ): ProjectionSnapshot | undefined {
     const expected = lifecycleIdentityOf(meta)
-    const record = this.requireTable().get(meta.id)
+    const record = this.storedRecord(meta.id)
     if (record === undefined || !currentLifecycleMatches(record.identity, expected)) return undefined
     return this.viewRecord(record, keys)
   }
@@ -185,7 +311,7 @@ export class SessionProjectionCache extends Service {
    */
   cachedPredecessorTitle(meta: SessionHeader): ProjectionSnapshot | undefined {
     const expected = lifecycleIdentityOf(meta)
-    const record = this.requireTable().get(meta.id)
+    const record = this.storedRecord(meta.id)
     if (record === undefined || !predecessorIdentityMatches(record.identity, expected)) return undefined
     return this.viewRecord(record, [PREDECESSOR_TITLE_KEY])
   }
@@ -342,6 +468,10 @@ export class SessionProjectionCache extends Service {
     // this write the cold-read ladder serves the session from the cache.
     // flushSoft's synchronous prefix reads and resets the dirty state, so
     // dropping it (timer already cleared by markClean) right after is safe.
+    // Detach WRITES and never deletes: a detached session is still a listed
+    // session, and the checkpoint taken here is the value those listings read
+    // (deleting on detach would throw away the cut it just made). Only an
+    // archival removes a record — see `installArchivePurge`.
     this.ctx.on('session/disposed', (session: Session) => {
       void this.flushSoft(session, 'detach')
       this.markClean(session)
@@ -391,7 +521,68 @@ export class SessionProjectionCache extends Service {
     if (detached === undefined) {
       throw new TypeError('projection checkpoint is not losslessly JSON-serializable (a unit state violates the plain-JSON contract)')
     }
-    await this.requireTable().put(id, { identity, rows: detached as CheckpointRecord['rows'] })
+    const record: CheckpointRecord = { identity, rows: detached as CheckpointRecord['rows'] }
+    // The copy must never serve a record the table has already replaced, so it
+    // is invalidated before the table can change and re-admitted once the write
+    // landed (durability first, then memory — a rejected write leaves the copy
+    // empty for this id, and the next read refills it from the unchanged
+    // table).
+    this.resident.delete(id)
+    await this.requireTable().put(id, record)
+    this.resident.set(id, record)
+  }
+
+  /**
+   * Drop cached records whose sessions the Workspace registry has archived.
+   *
+   * Archiving is the durable statement that a session's cached record is no
+   * longer worth keeping (the archive set hides it from every listing surface,
+   * so its rows serve no reader), and the commit that carries it delivers the
+   * whole set — so one commit after boot is enough to learn every archival the
+   * process never saw. Nothing else deletes a record: disposal (the live-to-cold
+   * moment) only checkpoints, because a detached session is still listed and
+   * still serves its rows.
+   *
+   * The domain name and the archived-id field are read structurally rather
+   * than through an import of the registry package — this cache stays a
+   * storage-domain consumer, and a value it does not recognize is ignored
+   * instead of failing a cache path.
+   */
+  private installArchivePurge(): void {
+    this.ctx.on('domain/changed', (change: DomainChanged) => {
+      if (change.domain !== WORKSPACE_DOMAIN || change.table !== '' || change.operation !== 'put') return
+      const archived = archivedSessionIdsOf(change.value)
+      if (archived === undefined) return
+      for (const id of archived) {
+        void this.purgeArchived(SessionId(id)).catch((error: unknown) => {
+          this.ctx.logger.warn(`session projection cache: dropping archived session "${id}" failed (its record stays cached): ${String(error)}`)
+        })
+      }
+    })
+  }
+
+  /**
+   * Delete one archived session's record: the domain's record first (queued on
+   * the write chain, so it lands after any checkpoint write already committed
+   * and before later ones), then the resident copy. The copy is invalidated
+   * before the deletion so it can never serve a record the table has already
+   * dropped, and a rejected durable deletion leaves both the table and the
+   * medium unchanged — the next read simply refills the copy from the table.
+   * The record stays rebuildable from its own log whenever that session is read
+   * again after an unarchive.
+   * @param id - the archived session.
+   * @returns resolution after durability, or immediately when nothing is cached.
+   */
+  private async purgeArchived(id: SessionId): Promise<void> {
+    // One workspace commit carries the whole archive set, most of which this
+    // cache never held: an absent record must not spend a write-chain slot.
+    if (!this.resident.has(id) && this.requireTable().get(id) === undefined) return
+    this.resident.delete(id)
+    await this.requireTable().delete(id)
+    // A checkpoint that completed while this deletion sat on the write chain
+    // may have re-admitted its record: the archive state, not that write,
+    // decides whether the copy keeps an entry.
+    this.resident.delete(id)
   }
 
   private requireTable(): KvTable<SessionId, CheckpointRecord> {
@@ -399,6 +590,24 @@ export class SessionProjectionCache extends Service {
     if (this.table === undefined) throw new Error('session projection cache is not initialized')
     return this.table
   }
+}
+
+/**
+ * Read the archived-session ids out of a Workspace-registry global snapshot.
+ * The value crosses a package boundary this cache deliberately does not import,
+ * so it is read structurally and defensively: anything that is not an object
+ * carrying an array of string ids reports "no archive information" — ignoring
+ * a foreign or unreadable snapshot is always safer than failing a cache path
+ * that runs inside another package's commit.
+ * @param value - the `put` snapshot carried by `domain/changed`.
+ * @returns the archived ids (possibly empty), or `undefined` when the value
+ *   carries no archive set at all.
+ */
+function archivedSessionIdsOf(value: unknown): readonly string[] | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const archived = (value as { archivedSessionIds?: unknown }).archivedSessionIds
+  if (!Array.isArray(archived)) return undefined
+  return archived.filter((id): id is string => typeof id === 'string')
 }
 
 /** Project a header onto the identity fields a header alone can witness. */
