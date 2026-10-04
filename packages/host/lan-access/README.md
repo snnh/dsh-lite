@@ -28,14 +28,14 @@ English | [中文](README.zh.md)
 
 The row is mounted without a `host`, which means "every IPv4 interface this machine holds". The shipped Web composition mounts it inside a profile, and the first activation without a stated host persists `host: 0.0.0.0` into that profile's `cordis.patch.yml` (mode `0600`). Every later start reads that value back as the composed row config — a profile patch outranks every bundle default — so the posture outlives the release that set it. Deleting the key makes the next start state the shipped posture again.
 
-A host the operator states is bound as written and persists nothing. `--host` from the invocation comes first, then the row's own `host` config, so `--host 127.0.0.1` narrows one run and `host: 127.0.0.1` in the profile narrows every run.
+A host the operator states is bound as written and persists nothing. `--host` from the invocation comes first, then the row's own `host` config, so `--host 127.0.0.1` narrows one run and `host: 127.0.0.1` in the profile narrows every run. Both go through this row's one grammar authority, `classifyBindHost`, before the bind: a loopback spelling, the `0.0.0.0` wildcard, or an IPv4 literal is bound as stated, and anything else refuses the start and states the grammar back rather than falling back to the shipped posture.
 
 <a id="saving-an-address-from-the-settings-page"></a>
 ### Saving an address from the settings page
 
 The General Settings page's Listen address row writes this same key: `config.host` of the composed `lan-access` row in the profile's own patch, merged with whatever else that row's patch config already holds. One line, one meaning — an address saved from that page and one edited by hand are indistinguishable to the next start, and the page reads the persisted line back rather than keeping a copy of its own.
 
-The save is deliberately inert. It writes the file and stops there: the running server keeps the address it bound, no access token is created, the printed URL is not rewritten, and the Loader does not reconcile. The operator restarts to apply it, which is why the page shows the saved address beside the address in effect until they do. The write is accepted only for an address this row can bind — an IPv4 literal, the `0.0.0.0` wildcard and `localhost` included — so a typed IPv6 address or hostname is refused before it reaches the file instead of being persisted as a posture that cannot start; the refusal is the same one a hand-edit would earn on the next start, moved earlier, where it can still be corrected. A non-loopback address saved here is likewise only a request: the persistent access token it needs is created by the start that binds it, not by the save.
+The save is deliberately inert. It writes the file and stops there: the running server keeps the address it bound, no access token is created, the printed URL is not rewritten, and the Loader does not reconcile. The operator restarts to apply it, which is why the page shows the saved address beside the address in effect until they do. The write is accepted only for an address this row can bind, judged by the same grammar the bind uses (`classifyBindHost`): a loopback spelling (`127.0.0.1`, `localhost`, `::1`, `[::1]`), the `0.0.0.0` wildcard, or one IPv4 literal. A typed hostname, or a non-loopback IPv6 literal such as `::`, is refused before it reaches the file instead of being persisted as a posture that cannot start; the refusal is the same one a hand-edit would earn on the next start, moved earlier, where it can still be corrected. A non-loopback address saved here is likewise only a request: the persistent access token it needs is created by the start that binds it, not by the save.
 
 `--host` still outranks the saved line for the run that states it. The page reports that as a pinned posture: the address is stored, and it takes effect once the flag is removed.
 
@@ -43,7 +43,7 @@ With no profile to write into — an embedding that mounts this row directly —
 
 The candidate list keeps an interface's own addresses together as well. Entries sharing a MAC form one contiguous run, with the names inside a run in order, so the interfaces this selection reads are the platform's — and their running order is the order the platform reports them in, not the order `node:os` happened to enumerate entries in.
 
-Every host this row binds is IPv4. `0.0.0.0` is the IPv4 wildcard — all interfaces, container bridges included — and `detectLanAddress()` reads IPv4 addresses only, so a host that wants IPv6 exposure needs a face this row does not provide.
+Every host this row publishes is IPv4. `0.0.0.0` is the IPv4 wildcard — all interfaces, container bridges included — and `detectLanAddress()` reads IPv4 addresses only, so a host that wants IPv6 exposure needs a face this row does not provide. Loopback is the one spelling that reaches further: `::1` and `[::1]` are accepted because they name this machine alone exactly as `127.0.0.1` does, and they bind the IPv6 loopback rather than a network address.
 
 An overlay overrides the choice:
 
@@ -60,6 +60,9 @@ An overlay overrides the choice:
 | `127.0.0.1` | Loopback only — the harness is unreachable from the network |
 | `0.0.0.0` | Every IPv4 interface, container bridges included; no IPv6 listener |
 | `192.168.1.5` | One explicit address, which must be local to this machine |
+| `localhost`, `::1`, `[::1]` | The same loopback posture, spelled as a name or as the IPv6 loopback literal |
+
+Anything outside that grammar — a hostname other than `localhost`, a non-loopback IPv6 literal such as `::`, or a blank or space-padded value — is refused at startup, with the accepted shapes stated back.
 
 The printed line carries the addresses the server answers on, loopback first and the sampled LAN address beside it:
 
@@ -93,7 +96,7 @@ A loopback bind needs nothing beyond the process-local authentication the connec
 ## Known Limitations and Deferred Work
 
 - **No TLS, no `Secure` cookie, no HSTS.** The token travels once in the printed URL, then becomes an `HttpOnly` cookie over plain HTTP. Anyone who can observe the network path can read it; a reverse proxy or a virtual network is the answer for anything beyond trusted networks.
-- **The posture is IPv4 only.** `0.0.0.0` is the IPv4 wildcard, so a dual-stack machine is reachable on its IPv4 addresses and not on its IPv6 ones, and `detectLanAddress()` never returns an IPv6 address.
+- **The published posture is IPv4 only.** `0.0.0.0` is the IPv4 wildcard, so a dual-stack machine is reachable on its IPv4 addresses and not on its IPv6 ones, and `detectLanAddress()` never returns an IPv6 address. The grammar admits the IPv6 loopback spellings `::1` and `[::1]`, which bind this machine alone; no other IPv6 literal is accepted.
 - **A profile that cannot be written keeps the shipped posture without recording it.** The row logs the failed write and binds `0.0.0.0` anyway, so the operator sees both the exposure and the reason it was not persisted; a harness home that cannot hold the access token refuses the bind instead.
 - **Ranking is by interface name, not by route.** Bridges and tunnels are demoted, but among interfaces that rank alike the operating system's enumeration order decides. This selection only runs where no profile states a host, so an operator who cares which network is published sets `host` explicitly.
 - **The interface name is the only signal.** There is no platform I/O behind this table — no route lookup, no sysfs or WMI reading of the interface type — so a name the table does not carry is treated as a LAN interface: a bridge an operator renamed, a virtualization product with its own grammar (Parallels `enp*`/`vnic*`, say), or a platform whose switch names are not `virbr*`/`vmnet*`/`vEthernet*` ranks with the physical interfaces and may win the bind, bounded by the fact that a demoted address is still bound when nothing else exists, and by `host` stating the choice outright.

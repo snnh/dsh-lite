@@ -182,7 +182,12 @@
     # the bind when it cannot authenticate. Set `host: 127.0.0.1` for the
     # loopback-only posture, or this machine's LAN address for one network. See
     # that package's README for the TLS and peer-allow-list boundaries this does
-    # not provide.
+    # not provide. The row validates the host it is handed, through one grammar
+    # authority (`classifyBindHost`): a loopback spelling (`127.0.0.1`,
+    # `localhost`, `::1`, `[::1]`), `0.0.0.0`, or one IPv4 literal is bound as
+    # written, while a hostname and a non-loopback IPv6 literal — `--host ::`
+    # included, which used to bind an address every fenced request answered 403
+    # on — is refused instead, and the start fails rather than falling back.
     - id: lan-access
       name: '@deepseek-ai/dsh-host-lan-access'
       inject: [webStartup]

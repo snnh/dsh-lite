@@ -62,7 +62,12 @@ export interface Config {
    * is every interface; any other address binds that one local address, which
    * is how a host exposes itself on a single network without listening on the
    * others. The server carries no TLS, authentication, or origin policy of its
-   * own, so a reachable bind is the caller's security decision.
+   * own, so a reachable bind is the caller's security decision. The composing
+   * `lan-access` row decides this value, and its `classifyBindHost` is the one
+   * authority on the grammar the value has to be in (a loopback spelling, the
+   * `0.0.0.0` wildcard, or one IPv4 literal); this package only hands the
+   * string to `listen`, judges no grammar of its own, and accepts any non-empty
+   * string the caller states.
    */
   host: string
   /** Listen port; zero requests an OS-assigned port. */

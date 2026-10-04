@@ -63,7 +63,7 @@ dsh --profile web --no-open --port 8080
 
 默认情况下 GUI 发布本机持有的所有 IPv4 接口：随附的 `lan-access` 行解析为 `0.0.0.0`，且 profile 中的首次启动会把该 host 持久化进该 profile 的 `cordis.patch.yml`，因此之后每次启动绑定的都是这行持久化配置，而不是后续版本随附的值。接入的每个网络都能访问它，容器网桥也在其中，且不发布任何 IPv6 接口；在该行上设 `host: 127.0.0.1` 可恢复仅 loopback，写某个网络自己的地址则只发布那一个网络。对单次运行而言 `--host` 高于持久化姿态，`--host 0.0.0.0` 亦然。非回环绑定要求持久访问令牌，并在启动日志中写入一条暴露警告。可重复的 `--trusted-host` 会添加其 Host/Origin 栅栏接受的 authority，因此远端浏览器要么经由剥离前缀的代理访问，要么通过以可信主机名呈现的端口转发客户端访问。
 
-同一个姿态也可以不改文件就改掉：「通用」设置页的**监听地址**行把本进程实际绑定的地址与 profile 持久化的地址并排显示，保存只写入 profile patch。因此保存是在下次启动生效，而不是立即生效；在这里保存的非回环地址也只是一个请求——它所需的持久访问令牌由真正绑定它的那次启动创建。该行接受 `lan-access` 行能绑定的形式，即 IPv4 字面量或 `localhost`；IPv6 地址或主机名会被拒绝，而不会被持久化成一个无法启动的姿态。[lan-access 参考](../../host/lan-access/README.zh.md#saving-an-address-from-the-settings-page)拥有该约定，其背后的 namespace 由[设置控制器](../../api/settings-controller/README.zh.md)拥有。
+同一个姿态也可以不改文件就改掉：「通用」设置页的**监听地址**行把本进程实际绑定的地址与 profile 持久化的地址并排显示，保存只写入 profile patch。因此保存是在下次启动生效，而不是立即生效；在这里保存的非回环地址也只是一个请求——它所需的持久访问令牌由真正绑定它的那次启动创建。该行接受 `lan-access` 行能绑定的形式，判定用的是该行唯一的语法权威 `classifyBindHost`：回环拼写（`127.0.0.1`、`localhost`、`::1`、`[::1]`）、`0.0.0.0` 通配地址，或一个 IPv4 字面量。主机名与非回环 IPv6 字面量会被拒绝，而不会被持久化成一个无法启动的姿态；`--host` 在启动时能声明什么，同样由这套语法决定。[lan-access 参考](../../host/lan-access/README.zh.md#saving-an-address-from-the-settings-page)拥有该约定，其背后的 namespace 由[设置控制器](../../api/settings-controller/README.zh.md)拥有。
 
 `--public-url` 公告浏览器使用的 HTTP(S) 根——打印与打开的启动 URL、`DSH_WEB_URL` 与 web 表层定位。公告不授予任何信任：浏览器可见的 authority 还必须用 `--trusted-host` 点名。该 flag 不配置监听器、路由或 cookie 作用域，因为外部链路归代理所有：[在反向代理之后发布 Web UI](../../../docs/user/guide/public-deployments.zh.md)列出了这样的部署必须提供什么。
 

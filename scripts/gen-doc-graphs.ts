@@ -293,7 +293,7 @@ const SERVICE_ROLES: ServiceRole[] = [
     title: 'Host bind-host Remote controller',
     mode: 'core',
     consumers: ['client-ui-settings-general'],
-    note: 'Reports the bound, persisted, pinned, and detected addresses separately and validates the one an operator saves — an IPv4 literal or localhost — before writing it as the lan-access row\'s own `config.host`; nothing rebinds, reconciles, or resolves a token here.',
+    note: 'Reports the bound, persisted, pinned, and detected addresses separately and validates the one an operator saves with the lan-access row\'s own bind grammar — a loopback spelling, an IPv4 literal, or the `0.0.0.0` wildcard — before writing it as that row\'s `config.host`; nothing rebinds, reconciles, or resolves a token here.',
   },
   {
     key: 'workspaceFiles',

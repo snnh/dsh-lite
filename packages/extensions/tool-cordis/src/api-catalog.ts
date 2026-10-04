@@ -3532,7 +3532,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       {
         signature: '@Remote async save(host: string): Promise<WebHostStatusValue>',
         description: 'Persist one bind host for the next start.\n\nThe write is one row of the profile\'s own patch, merged with the config that row already states, so the address this page owns is the only key it changes. Nothing else follows from it: no Loader reconcile, no rebind, no token resolution, no URL rewrite. A non-loopback address therefore persists without creating the access token the next start will demand, which keeps this call free of side effects on the running harness.',
-        parameters: [{ name: 'host', description: 'the address to bind on the next start: an IPv4 literal or `localhost`.' }],
+        parameters: [{ name: 'host', description: 'the address to bind on the next start: an IPv4 literal or a loopback name.' }],
         returns: 'the posture after the write: `persisted` is the line just written when the composed row reads it back, and absent when no row in this profile does.',
         throws: ['RemoteError when the address is not one this row can bind, this deployment has no profile patch, or the patch cannot be written.'],
       },

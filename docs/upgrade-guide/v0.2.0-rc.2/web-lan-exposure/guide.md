@@ -11,11 +11,13 @@ English | [中文](guide.zh.md)
 
 Until this release, `dsh web` bound `127.0.0.1`, so only the machine running it reached the harness. The shipped `lan-access` row now publishes every IPv4 interface when nothing states a host, and the first start persists `host: 0.0.0.0` into the profile's `cordis.patch.yml` (mode `0600`). That persisted line — not this release's default — is what every later start binds, so a later release changing its default moves nothing for an operator who has started once; deleting the key re-pins it. `0.0.0.0` is the IPv4 wildcard, container bridges included, and nothing listens over IPv6.
 
-Every non-loopback host requires the persistent access token at `$DSH_HOME/access-token` (`0600`, created on first start, overridable with `DSH_ACCESS_TOKEN`); a host that cannot establish one fails the boot rather than listening unauthenticated. A read-only `DSH_HOME`, which the loopback default used to admit, can now stop the start.
+Every non-loopback host requires the persistent access token at `$DSH_HOME/access-token` (`0600`, created on first start, overridable with `DSH_ACCESS_TOKEN`); a host that cannot establish one fails the boot instead of listening unauthenticated — a read-only `DSH_HOME` can now stop the start.
 
-The bind follows `--host`, then the composed row config (where the persisted posture lives), then `detectLanAddress()`, then loopback. `--host 0.0.0.0` is accepted and reaches the bind, and a container host publishes its bridges rather than keeping them loopback-only. A non-loopback bind writes one startup-log warning — through the logger and the console, since the Web exporter filters `warn` — naming the bound address, the token as the only authenticator, and how to narrow the posture, and no Web banner asks for confirmation.
+The bind follows `--host`, then the composed row config (where the persisted posture lives), then `detectLanAddress()`, then loopback; a container host publishes its bridges, not just loopback. A non-loopback bind writes one startup-log warning — through the logger and the console, since the Web exporter filters `warn` — naming the bound address, the token as the only authenticator, and how to narrow the posture; no Web banner asks for confirmation.
 
-With no profile, an embedding mounting the row keeps the narrow fallback: `detectLanAddress()`'s answer for a machine with a LAN, loopback for one without, and nothing written.
+A stated host is validated before the bind, by one grammar the row owns (`classifyBindHost`): a loopback spelling (`127.0.0.1`, `localhost`, `::1`, `[::1]`), `0.0.0.0`, or one IPv4 literal. Every other IPv6 literal — `--host ::` included, which bound an IPv6 address the trust fence then answered 403 on — and every hostname now fails the start.
+
+With no profile, an embedding still gets the narrow fallback: `detectLanAddress()`, loopback for a machine with none, and nothing written.
 
 ## Migration
 
@@ -34,8 +36,8 @@ With no profile, an embedding mounting the row keeps the narrow fallback: `detec
 
 3. **To rotate the token**, delete `$DSH_HOME/access-token` (or change `DSH_ACCESS_TOKEN`) and restart. Every previously printed URL stops working.
 
-4. **Confirm**: the startup log carries the exposure warning with the bound address and its `patchPath`, and the URL line carries the loopback URL with the LAN one — `dsh web: http://127.0.0.1:3080/?token=… (LAN: http://192.168.1.5:3080/?token=…)`.
+4. **Confirm**: the startup log carries the exposure warning with the bound address and `patchPath`, and the URL line carries both URLs — `dsh web: http://127.0.0.1:3080/?token=… (LAN: http://192.168.1.5:3080/?token=…)`.
 
 ### Security boundary
 
-The server carries no TLS, sets no `Secure` attribute, and sends no HSTS header, so the token crosses the network in cleartext. Treat every attached network as trusted, or front the server with a TLS-terminating proxy or a restricting virtual network.
+The server carries no TLS, no `Secure` attribute, and no HSTS header, so the token crosses the network in cleartext. Treat every attached network as trusted, or front the server with a TLS-terminating proxy.

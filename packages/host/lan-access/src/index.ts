@@ -34,6 +34,18 @@
  * never an IPv6 listener, and `detectLanAddress()` reads IPv4 addresses only. A
  * host that wants IPv6 exposure needs a face this row does not provide.
  *
+ * The hosts this row will bind are one closed grammar, classified in one place
+ * ({@link classifyBindHost}): an IPv4 literal — `0.0.0.0` for every IPv4
+ * interface, any address this machine holds, or `127.0.0.1` — or one of the
+ * four loopback names `127.0.0.1`, `localhost`, `::1`, and `[::1]`. A shape
+ * outside that grammar names no address this row can bind, and the value a
+ * setting page shares the grammar with is refused before it is persisted. A
+ * host the operator states that falls outside it — an unqualified hostname, a
+ * non-loopback IPv6 literal such as `::` — is not settled to the shipped
+ * posture: the start fails and states the grammar back, because a silent
+ * fallback binds an address the operator did not ask for while the invocation
+ * still reads as though it had been honoured.
+ *
  * A reachable address is reachable by anyone who can route to it, so this row
  * refuses a bind it cannot authenticate: every non-loopback host requires the
  * persistent access token, which is resolved (and created when the harness home
@@ -56,6 +68,7 @@
  * @module @deepseek-ai/dsh-host-lan-access
  */
 
+import { isIPv4 } from 'node:net'
 import { networkInterfaces, type NetworkInterfaceInfo } from 'node:os'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
@@ -88,8 +101,15 @@ interface WebStartupHosts {
   readonly host?: string
 }
 
-/** Hosts that name this machine alone. */
+/** Hosts that name this machine alone, in every spelling an operator may state. */
 const LOOPBACK_HOSTS = new Set([LOOPBACK_HOST, 'localhost', '::1', '[::1]'])
+
+/**
+ * The longest bind host this grammar admits. `255.255.255.255` is 15
+ * characters and `[::1]` is 5, so this bound refuses a value long before any
+ * address could be read out of it; it never admits one on its own.
+ */
+const MAX_BIND_HOST_LENGTH = 45
 
 /**
  * Interface-name prefixes that carry no LAN of their own: container bridges,
@@ -284,13 +304,53 @@ export function detectLanAddress(): string | undefined {
   return rankLanCandidates(listLanCandidates())[0]?.address
 }
 
+/** How a bind host is shaped. */
+export type BindHostKind = 'loopback' | 'wildcard' | 'address'
+
+/**
+ * Classify one bind host, or reject it.
+ *
+ * This function is the one authority on the shape of a bind host: the row that
+ * binds it and the settings page that persists it both call it, so the grammar
+ * an operator reads in a refusal is the grammar that decides the bind. It
+ * judges the string as stated and never rewrites it — a padded value is
+ * refused rather than trimmed, because silently correcting the operator's input
+ * is the kind of hidden edit this row exists to keep visible.
+ *
+ * `loopback` names this machine alone: `127.0.0.1`, `localhost`, `::1`, and
+ * `[::1]`. The IPv6 spellings are accepted as loopback even though nothing this
+ * row binds is IPv6, because they mean exactly what the IPv4 literal means —
+ * this machine's own stack — and refusing them would make the same intent
+ * succeed or fail on the spelling alone.
+ *
+ * `wildcard` is `0.0.0.0`: every IPv4 interface this machine holds, and never
+ * an IPv6 one. `address` is any other IPv4 literal, which publishes exactly the
+ * interface that holds it.
+ *
+ * @param host - the value as stated by an operator or a settings page.
+ * @returns the kind, or undefined when the row cannot bind it.
+ */
+export function classifyBindHost(host: string): BindHostKind | undefined {
+  if (host.length === 0) return undefined
+  if (host.length > MAX_BIND_HOST_LENGTH) return undefined
+  if (host.trim() !== host) return undefined
+  if (LOOPBACK_HOSTS.has(host)) return 'loopback'
+  if (host === BIND_ALL_HOST) return 'wildcard'
+  return isIPv4(host) ? 'address' : undefined
+}
+
 /**
  * Whether a host names this machine alone.
+ *
+ * The answer comes from the same table {@link classifyBindHost} reads, so the
+ * choosers that ask this question and the bind that uses the answer cannot
+ * drift apart.
+ *
  * @param host - the configured or detected bind host.
  * @returns true for loopback literals and `localhost`.
  */
 export function isLoopbackHost(host: string): boolean {
-  return LOOPBACK_HOSTS.has(host)
+  return classifyBindHost(host) === 'loopback'
 }
 
 /**
@@ -367,14 +427,22 @@ function patchRow(ctx: Context): { id: string; name: string } {
  * in the profile patch so the posture outlives this release's default, and a
  * later start reads it back as the composed config rather than writing again.
  *
+ * An empty stated value is unstated, not illegal: `--host ''` and `host: ''`
+ * mean "name nothing", exactly as omitting them does, so the shipped posture
+ * still applies. Every other stated value must be one this row can bind, and
+ * one that is not — `::`, a hostname, a padded field — refuses the boot instead
+ * of falling back to the default, because a start that binds an address the
+ * operator did not state is the silent failure this row is written against.
+ *
  * @param ctx - plugin context; `webStartup` and `profileContext` are read when present.
  * @param config - the composed row configuration.
  * @returns the host to bind.
+ * @throws Error when a stated host is not one this row can bind.
  */
 async function resolveHost(ctx: Context, config?: Config): Promise<string> {
   const flagged = (ctx.get('webStartup') as WebStartupHosts | undefined)?.host
   const stated = flagged !== undefined && flagged.length > 0 ? flagged : config?.host
-  if (stated !== undefined && stated.length > 0) return stated
+  if (stated !== undefined && stated.length > 0) return bindableHost(stated)
   const profile = ctx.get('profileContext')
   if (profile === undefined) return resolveBindHost(undefined, detectLanAddress())
   try {
@@ -385,6 +453,33 @@ async function resolveHost(ctx: Context, config?: Config): Promise<string> {
     ctx.logger.warn(`lan-access: could not persist host ${BIND_ALL_HOST} in ${profile.patchPath}: ${String(error)}`)
   }
   return BIND_ALL_HOST
+}
+
+/**
+ * Admit a host an operator or a setting page stated, or refuse the boot.
+ *
+ * The grammar is {@link classifyBindHost}'s, and nothing here narrows or widens
+ * it: a value it classifies is bound exactly as written, and a value it cannot
+ * classify stops the start with the grammar stated back. There is deliberately
+ * no fallback to the shipped posture, because the operator's line is a
+ * statement about what to bind — quietly binding something else answers a
+ * question they did not ask.
+ *
+ * @param host - the non-empty host the invocation or the row config stated.
+ * @returns the same host, admitted.
+ * @throws Error stating the accepted shapes and where to correct the value.
+ */
+function bindableHost(host: string): string {
+  if (classifyBindHost(host) !== undefined) return host
+  throw new Error(
+    `lan-access: refusing to bind ${JSON.stringify(host)}: this row binds an IPv4 address or a loopback name only. `
+    + 'Accepted: 127.0.0.1, localhost, ::1, and [::1] for this machine alone; any IPv4 literal such as 192.168.1.5 for the one interface holding it; '
+    + `and ${BIND_ALL_HOST}, the IPv4 wildcard, for every IPv4 interface this machine holds — container bridges included, and never an IPv6 one. `
+    + 'A hostname other than localhost, an IPv6 literal that is not loopback (:: included), a blank or padded value, '
+    + `and anything longer than ${MAX_BIND_HOST_LENGTH} characters name no address here to bind. `
+    + 'Correct the "host:" configuration of this row — or pass --host 127.0.0.1 for one run — '
+    + 'or save a bindable host on the web-address settings page.',
+  )
 }
 
 /**

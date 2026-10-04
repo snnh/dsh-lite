@@ -329,12 +329,10 @@ describe('the webHost Remote namespace a web-address page calls', () => {
       [' 127.0.0.1', 'must be a non-empty address with no surrounding whitespace'],
       ['127.0.0.1 ', 'must be a non-empty address with no surrounding whitespace'],
       ['0'.repeat(46), 'a bind host is at most 45 characters'],
-      ['::1', 'is an IPv6 address: this row publishes IPv4 interfaces only'],
-      ['fe80::1', 'is an IPv6 address: this row publishes IPv4 interfaces only'],
-      ['[::1]', 'is neither an IPv4 address nor localhost'],
-      ['example.com', 'is neither an IPv4 address nor localhost'],
-      ['999.1.1.1', 'is neither an IPv4 address nor localhost'],
-      ['192.168.1.5:3080', 'is neither an IPv4 address nor localhost'],
+      ['fe80::1', 'is neither an IPv4 address nor a loopback name'],
+      ['example.com', 'is neither an IPv4 address nor a loopback name'],
+      ['999.1.1.1', 'is neither an IPv4 address nor a loopback name'],
+      ['192.168.1.5:3080', 'is neither an IPv4 address nor a loopback name'],
     ]
     for (const [host, reason] of cases) {
       const failure = await fixture.controller.save(host).catch((error: unknown) => error)

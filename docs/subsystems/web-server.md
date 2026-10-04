@@ -150,7 +150,7 @@ The namespace mounts whether or not a lan-access row is composed: the page must 
  * without creating the access token the next start will demand, which keeps
  * this call free of side effects on the running harness.
  *
- * @param host - the address to bind on the next start: an IPv4 literal or `localhost`.
+ * @param host - the address to bind on the next start: an IPv4 literal or a loopback name.
  * @returns the posture after the write: `persisted` is the line just written when the
  *   composed row reads it back, and absent when no row in this profile does.
  * @throws RemoteError when the address is not one this row can bind, this deployment

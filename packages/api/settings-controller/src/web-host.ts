@@ -18,10 +18,14 @@
  * @module @deepseek-ai/dsh-api-settings-controller/src/web-host.ts
  */
 
-import { isIPv4, isIPv6 } from 'node:net'
 import { Context } from '@deepseek-ai/cordis'
 import { writeProfileRowConfig } from '@deepseek-ai/dsh-config-editor'
-import { detectLanAddress } from '@deepseek-ai/dsh-host-lan-access'
+import {
+  BIND_ALL_HOST,
+  classifyBindHost,
+  detectLanAddress,
+  LOOPBACK_HOST,
+} from '@deepseek-ai/dsh-host-lan-access'
 import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import type { WebHostStatusValue } from './types.ts'
 
@@ -131,7 +135,7 @@ export class WebHostController extends TypertRemoteService {
    * without creating the access token the next start will demand, which keeps
    * this call free of side effects on the running harness.
    *
-   * @param host - the address to bind on the next start: an IPv4 literal or `localhost`.
+   * @param host - the address to bind on the next start: an IPv4 literal or a loopback name.
    * @returns the posture after the write: `persisted` is the line just written when the
    *   composed row reads it back, and absent when no row in this profile does.
    * @throws RemoteError when the address is not one this row can bind, this deployment
@@ -234,14 +238,23 @@ function persistedHost(mounted: MountedRow | undefined): string | undefined {
 /**
  * Validate one bind host the settings page sent.
  *
- * The accepted grammar is exactly what the lan-access row can bind: an IPv4
- * literal — the `0.0.0.0` wildcard, loopback, and every interface address this
- * machine holds included — or `localhost`. Everything else is refused with its
- * reason, because a hostname that never resolves, an IPv6 literal this row does
- * not publish, or a blank field would otherwise be persisted and read back as a
- * posture that cannot start. A padded value is refused rather than trimmed:
- * silently rewriting the operator's input is the kind of hidden edit this page
- * exists to make visible.
+ * The accepted grammar is exactly what the lan-access row can bind, and it is
+ * read from the row's own authority ({@link classifyBindHost}) rather than
+ * restated here: an address this function admits is an address that start can
+ * bind, so a saved posture can never fail on the bind's own terms. That
+ * vocabulary is every IPv4 literal — the `0.0.0.0` wildcard, loopback, and
+ * every interface address this machine holds included — plus the loopback
+ * names `127.0.0.1`, `localhost`, `::1`, and `[::1]`, whose IPv6 spellings name
+ * this machine alone even though nothing the row publishes is IPv6.
+ *
+ * Everything else is refused with its reason, because a hostname that never
+ * resolves, an IPv6 literal that is not loopback, or a blank field would
+ * otherwise be persisted and read back as a posture that cannot start. The
+ * whitespace and length answers are stated here rather than by the shared
+ * grammar so the operator reads what is wrong with the field, not merely that
+ * it was refused. A padded value is refused rather than trimmed: silently
+ * rewriting the operator's input is the kind of hidden edit this page exists to
+ * make visible.
  *
  * @param host - the address as it arrived over the wire.
  * @returns the accepted address, unchanged.
@@ -262,14 +275,14 @@ function checkHost(host: string): string {
       { host },
     )
   }
-  if (isIPv4(host) || host === 'localhost') return host
-  throw new RemoteError(
-    'web-host/rejected',
-    isIPv6(host)
-      ? `"${host}" is an IPv6 address: this row publishes IPv4 interfaces only`
-      : `"${host}" is neither an IPv4 address nor localhost`,
-    { host },
-  )
+  if (classifyBindHost(host) === undefined) {
+    throw new RemoteError(
+      'web-host/rejected',
+      `"${host}" is neither an IPv4 address nor a loopback name: the lan-access row binds ${LOOPBACK_HOST}, localhost, ::1, [::1], any IPv4 literal, or ${BIND_ALL_HOST} for every IPv4 interface`,
+      { host },
+    )
+  }
+  return host
 }
 
 /**
