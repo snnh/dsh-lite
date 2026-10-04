@@ -212,7 +212,12 @@ function webSurfacePrompt(webUrl: string): string {
 /** Resolve the canonical loopback URL from the active Web server. */
 function localWebUrl(ctx: Context): string {
   const webServer = ctx.get('webServer')
-  if (webServer === undefined) throw new Error('web-app: webServer service missing while resolving Web runtime')
+  // A webserver without a bound port — the service is gone, or the bind was
+  // torn down mid-request — names no URL a browser could open: formatting it
+  // would hand `http://127.0.0.1:undefined` to the prompt and the URL line.
+  if (webServer?.port === undefined) {
+    throw new Error('web-app: webServer service missing or unbound while resolving Web runtime')
+  }
   const port = webServer.port
   // `0.0.0.0` covers loopback as well but is not an address a browser can open,
   // so the printed URL keeps the loopback literal for it; a specific bind
