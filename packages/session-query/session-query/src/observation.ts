@@ -1,6 +1,8 @@
 /** Shared live/prepared observations for Session page and lifecycle consumers. */
 
 import type { Context } from '@deepseek-ai/cordis'
+import { createBoundedMap, createIdleCache } from '@deepseek-ai/dsh-memory'
+import type { BoundedMap, IdleCache } from '@deepseek-ai/dsh-memory'
 import { SessionLogOffset, SessionSeq } from '@deepseek-ai/dsh-session'
 import type { Session, SessionEvent, SessionHeader, SessionId , SessionLogOffset as SessionLogOffsetType , SessionSeqCursor } from '@deepseek-ai/dsh-session'
 import type SessionPersistence from '@deepseek-ai/dsh-session-persistence'
@@ -10,7 +12,12 @@ import type {
 } from '@deepseek-ai/dsh-session-persistence'
 import type { ProjectionSnapshot } from '@deepseek-ai/dsh-session-projection'
 import type {} from '@deepseek-ai/dsh-session-projection-cache'
-import { SESSION_QUERY_DEFAULT_PREPARED_SESSION_CACHE_SIZE, SessionQueryError } from './config.ts'
+import {
+  SESSION_QUERY_DEFAULT_PREPARED_SESSION_CACHE_BYTES,
+  SESSION_QUERY_DEFAULT_PREPARED_SESSION_CACHE_SIZE,
+  SESSION_QUERY_DEFAULT_PREPARED_SESSION_IDLE_TTL_MS,
+  SessionQueryError,
+} from './config.ts'
 import { readColdSessionLog, type ColdSessionLog } from './cold-read.ts'
 
 /** One exact immutable Session cut retained for the caller's read lifetime. */
@@ -62,8 +69,38 @@ interface PreparedEntry {
   readonly session: Session
   /** Immutable balanced log (stored events plus in-memory interrupted-turn closers). */
   readonly events: readonly SessionEvent[]
-  /** Active observation leases; a pinned entry (`refs > 0`) is never evicted. */
+  /**
+   * Active observation leases. An entry with `refs > 0` is held by at least one
+   * lease: it sits outside the reusable cache, so no budget and no idle sweep
+   * can reclaim it until the last lease releases.
+   */
   refs: number
+}
+
+/** Budget for the reusable cold-observation cache; every field has a default. */
+export interface SessionObservationCacheOptions {
+  /**
+   * Maximum reusable prepared observations retained. Entries held by a lease
+   * sit outside this bound until it releases them. Defaults to
+   * {@link SESSION_QUERY_DEFAULT_PREPARED_SESSION_CACHE_SIZE}.
+   */
+  readonly maxEntries?: number
+  /**
+   * Estimated retained bytes above which the least recently used reusable entry
+   * is dropped, priced over the restored Session and its frozen events by
+   * `estimateJsonBytes`. `0`, or any other non-positive or non-finite value,
+   * leaves the byte account unbounded. Defaults to
+   * {@link SESSION_QUERY_DEFAULT_PREPARED_SESSION_CACHE_BYTES}.
+   */
+  readonly maxBytes?: number
+  /**
+   * Idle window in milliseconds: an untouched reusable entry is dropped once it
+   * has been idle this long, reclaimed by a sweep that runs at most one window
+   * later. `0`, or any other non-positive value, keeps entries resident until a
+   * bound or a lease release drops them. Defaults to
+   * {@link SESSION_QUERY_DEFAULT_PREPARED_SESSION_IDLE_TTL_MS}.
+   */
+  readonly idleTtlMs?: number
 }
 
 /**
@@ -72,21 +109,64 @@ interface PreparedEntry {
  * Cold reads are cached per session id, keyed by the persistence instance and
  * the `stat` revision observed before the log read: an unchanged revision
  * reuses the restored Session without re-reading the log. The cache is bounded
- * (least-recently-used unpinned entries are evicted past the capacity), and
- * entries pinned by active leases survive eviction and replacement — a lease's
- * cut stays valid for the lease lifetime even after a newer revision lands.
+ * three ways — entry count, estimated bytes, and an idle window — and only
+ * entries that no lease holds are ever reclaimed.
+ *
+ * An entry with an active lease (`refs > 0`) leaves the reusable cache for the
+ * lease's lifetime and returns to it when the last lease releases, so a lease's
+ * cut stays valid even after a newer revision lands and a lease is never
+ * reclaimed to satisfy a budget. The cache can therefore hold more than the
+ * count or byte bound while leases are outstanding; the excess is exactly the
+ * leased entries, and it falls back to the bounds as those leases are released.
+ * A cold observation is reclaimed without ever touching the stored session.
  */
 export class SessionObservationReader {
-  private readonly cache = new Map<SessionId, PreparedEntry>()
+  /** Reusable entries under the count, byte, and idle budgets. */
+  private readonly cache: BoundedMap<SessionId, PreparedEntry>
+  /** Idle window behind {@link cache}, when one is configured; the sweep a dispose stops. */
+  private readonly idleCache: IdleCache<SessionId, PreparedEntry> | undefined
+  /** Unpinned-entry bound that a release settles; see {@link trimOverBound}. */
+  private readonly cacheCapacity: number
+  /**
+   * Leased entries by session id. One id holds at most one entry here: a newer
+   * revision replaces a lease-visible older one, whose own lease keeps it alive
+   * through the lease closure alone.
+   */
+  private readonly leased = new Map<SessionId, PreparedEntry>()
 
   /**
    * @param ctx - context carrying Session and optional persistence/projection services.
-   * @param cacheCapacity - maximum unpinned cold observations retained for reuse.
+   * @param cache - reusable-cache budget, or the maximum entry count alone.
    */
   constructor(
     private readonly ctx: Context,
-    private readonly cacheCapacity: number = SESSION_QUERY_DEFAULT_PREPARED_SESSION_CACHE_SIZE,
-  ) {}
+    cache: number | SessionObservationCacheOptions = {},
+  ) {
+    const options = typeof cache === 'number' ? { maxEntries: cache } : cache
+    this.cacheCapacity = options.maxEntries ?? SESSION_QUERY_DEFAULT_PREPARED_SESSION_CACHE_SIZE
+    const bounds = {
+      maxEntries: this.cacheCapacity,
+      maxBytes: options.maxBytes ?? SESSION_QUERY_DEFAULT_PREPARED_SESSION_CACHE_BYTES,
+    }
+    const idleTtlMs = options.idleTtlMs ?? SESSION_QUERY_DEFAULT_PREPARED_SESSION_IDLE_TTL_MS
+    if (idleTtlMs > 0) {
+      const idle = createIdleCache<SessionId, PreparedEntry>({ ...bounds, idleTtlMs })
+      this.idleCache = idle
+      this.cache = idle
+    } else {
+      // No idle window: a plain bounded cache, with no sweep timer at all.
+      this.idleCache = undefined
+      this.cache = createBoundedMap<SessionId, PreparedEntry>(bounds)
+    }
+  }
+
+  /**
+   * Stop the idle sweep. Safe to call more than once, and the retained entries
+   * stay readable — only reclamation stops.
+   */
+  [Symbol.dispose](): void {
+    this.idleCache?.stop()
+  }
 
   /**
    * Observe one live-preferred Session and retain a cold preparation until disposal.
@@ -206,36 +286,66 @@ export class SessionObservationReader {
     sessionId: SessionId,
     revision: SessionPersistenceRevision,
   ): PreparedEntry | undefined {
-    const cached = this.cache.get(sessionId)
-    if (cached === undefined || cached.persistenceIdentity !== persistenceIdentity || cached.revision !== revision) {
-      return undefined
+    const reusable = this.cache.get(sessionId)
+    if (reusable !== undefined) {
+      // A hit restamps recency and idle activity; a different revision is
+      // superseded by the one just observed, so it keeps no reuse value.
+      if (matchesRevision(reusable, persistenceIdentity, revision)) return reusable
+      this.cache.delete(sessionId)
     }
-    this.cache.delete(sessionId)
-    this.cache.set(sessionId, cached)
-    return cached
+    const leased = this.leased.get(sessionId)
+    return leased !== undefined && matchesRevision(leased, persistenceIdentity, revision)
+      ? leased
+      : undefined
   }
 
-  /** Insert or replace the entry for one id, then evict past the capacity. */
+  /** Insert or replace the entry for one id, leaving both bounds to the cache. */
   private store(sessionId: SessionId, entry: PreparedEntry): void {
-    // Replacing a stale revision only drops the map's reference; live leases
+    // Replacing a stale revision only drops the cache's reference; live leases
     // keep the old entry alive through their own references.
-    this.cache.delete(sessionId)
     this.cache.set(sessionId, entry)
-    this.evictPastCapacity(entry)
+  }
+
+  /** Take one lease reference, moving the first one out of the reusable cache. */
+  private pin(entry: PreparedEntry): void {
+    entry.refs += 1
+    if (entry.refs > 1) return
+    const sessionId = entry.session.id
+    // Whatever the cache holds under this id is either this entry or a
+    // revision the read that produced this entry has just superseded.
+    this.cache.delete(sessionId)
+    this.leased.set(sessionId, entry)
+  }
+
+  /** Drop one lease reference, returning the entry to the reusable cache at zero. */
+  private unpin(entry: PreparedEntry): void {
+    entry.refs -= 1
+    if (entry.refs > 0) return
+    const sessionId = entry.session.id
+    // A newer revision took this id over while the lease held it: the released
+    // cut has no reuse value, and the lease closure alone keeps it alive.
+    if (this.leased.get(sessionId) !== entry) return
+    this.leased.delete(sessionId)
+    if (!this.cache.has(sessionId)) this.cache.set(sessionId, entry)
+    this.trimOverBound()
   }
 
   /**
-   * Evict oldest unpinned entries until the cache fits its capacity again.
-   * Runs on store and whenever a lease release unpins an entry, so leases
-   * that pinned every candidate cannot leave the cache over budget for good.
-   * @param keep - the entry being stored, about to be leased; never evicted.
+   * Settle the count bound after a release returned an entry to the cache.
+   * Leased entries are not candidates: they are the reason the total may sit
+   * over the bound, and they fall back under it as their own leases release.
    */
-  private evictPastCapacity(keep?: PreparedEntry): void {
-    if (this.cache.size <= this.cacheCapacity) return
-    for (const [id, candidate] of this.cache) {
-      if (candidate === keep || candidate.refs > 0) continue
-      this.cache.delete(id)
-      if (this.cache.size <= this.cacheCapacity) return
+  private trimOverBound(): void {
+    while (this.leased.size + this.cache.size > this.cacheCapacity && this.cache.size > 0) {
+      this.evictLeastRecentlyUsed()
+    }
+  }
+
+  /** Drop the least recently used reusable entry; the caller proved one exists. */
+  private evictLeastRecentlyUsed(): void {
+    for (const oldest of this.cache.keys()) {
+      this.cache.delete(oldest)
+      return
     }
   }
 
@@ -245,7 +355,7 @@ export class SessionObservationReader {
     entry: PreparedEntry,
     projections: ProjectionSnapshot | undefined,
   ): SessionObservation {
-    entry.refs += 1
+    this.pin(entry)
     const lease = (): SessionObservation => {
       let disposed = false
       return {
@@ -258,14 +368,13 @@ export class SessionObservationReader {
         ...projections === undefined ? {} : { projections },
         retain: () => {
           if (disposed) throw new Error(`session observation "${sessionId}" is disposed`)
-          entry.refs += 1
+          this.pin(entry)
           return lease()
         },
         [Symbol.dispose]: () => {
           if (disposed) return
           disposed = true
-          entry.refs -= 1
-          if (entry.refs === 0) this.evictPastCapacity()
+          this.unpin(entry)
         },
       }
     }
@@ -323,6 +432,21 @@ export class SessionObservationReader {
       ? registry.hydrate(entry.session, {}, entry.events, SessionLogOffset(0))
       : cache.hydratePrepared(entry.session, entry.events)
   }
+}
+
+/**
+ * Whether one prepared entry answers a read of the given source revision.
+ * @param entry - the retained preparation.
+ * @param persistenceIdentity - persistence instance the read observed.
+ * @param revision - durable revision the read observed.
+ * @returns true when the entry is exactly that cut.
+ */
+function matchesRevision(
+  entry: PreparedEntry,
+  persistenceIdentity: symbol,
+  revision: SessionPersistenceRevision,
+): boolean {
+  return entry.persistenceIdentity === persistenceIdentity && entry.revision === revision
 }
 
 function throwIfObservationAborted(signal: AbortSignal | undefined): void {

@@ -128,7 +128,10 @@ export abstract class SessionQueryEngine extends Service {
       )
     }
     this._corpus = new SessionCorpus(ctx, persistedReadConcurrency)
-    this._observations = new SessionObservationReader(ctx, preparedSessionCacheSize)
+    this._observations = new SessionObservationReader(ctx, { maxEntries: preparedSessionCacheSize })
+    // The reader owns an idle sweep and the cache behind it; this service's
+    // fiber owns the reader.
+    ctx.effect(() => () => { this._observations[Symbol.dispose]() })
   }
 
   /**
