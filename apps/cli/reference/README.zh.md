@@ -116,7 +116,7 @@ dsh web --dump-config
 dsh web --help
 ```
 
-生产 Web 运行器需要已构建的包和前端产物（`pnpm run build`）。它默认发布所有 IPv4 接口——`lan-access` 行依次解析 `--host`、profile 中持久化的姿态，最后是 `0.0.0.0`，且非回环绑定要求持久访问令牌——而它打印并打开的 URL 仍是回环根 `http://127.0.0.1:3080`，旁边附上采样到的局域网 URL；`--host 0.0.0.0` 会被接受并按原样绑定。本机启动时，只在完整 Loader 配置树结算后才用默认浏览器打开该规范宿主机 URL（配置了 `--public-url` 时即为公告根）。继承的 `SSH_CONNECTION` 或 `SSH_TTY` 非空时会跳过浏览器交接，因为本地转发地址由 SSH 客户端或编辑器持有；宿主机 URL 仍会打印。本机交接前会打印英文提示 `dsh web: opening the default browser; pass --no-open to disable`；若操作系统交接失败，stderr 诊断会说明原因、给出 URL 供手动访问，服务器仍继续运行。`--trusted-host` 可添加 `/api` 浏览器信任围栏接受的具名 authority。
+生产 Web 运行器需要已构建的包和前端产物（`pnpm run build`）。它默认发布所有 IPv4 接口——`lan-access` 行依次解析 `--host`、profile 中持久化的姿态，最后是 `0.0.0.0`，且非回环绑定要求持久访问令牌——而它打印并打开的 URL 仍是回环根 `http://127.0.0.1:3080`，旁边附上采样到的局域网 URL；`--host 0.0.0.0` 会被接受并按原样绑定。「通用」设置页的监听地址行写入的就是同一份持久化姿态——IPv4 字面量或 `localhost`，在下次启动生效而不是作用于运行中的绑定——而对声明了该参数的那次运行，`--host` 依然高于它。本机启动时，只在完整 Loader 配置树结算后才用默认浏览器打开该规范宿主机 URL（配置了 `--public-url` 时即为公告根）。继承的 `SSH_CONNECTION` 或 `SSH_TTY` 非空时会跳过浏览器交接，因为本地转发地址由 SSH 客户端或编辑器持有；宿主机 URL 仍会打印。本机交接前会打印英文提示 `dsh web: opening the default browser; pass --no-open to disable`；若操作系统交接失败，stderr 诊断会说明原因、给出 URL 供手动访问，服务器仍继续运行。`--trusted-host` 可添加 `/api` 浏览器信任围栏接受的具名 authority。
 
 进程关闭时，插件树最多有 5 秒完成 dispose。首次收到 `SIGINT` 或 `SIGTERM` 时会开始优雅排空：`SIGTERM` 是监督进程发出的常规停止请求，在所有运行模式下都以 0 退出；`SIGINT` 则报告 130。第二次收到信号时会立即强制退出。如果一次性运行在正常结束时已经卡在 dispose 阶段，第一次按下 `Ctrl+C` 就会直接升级为强制退出，而不会被忽略。
 

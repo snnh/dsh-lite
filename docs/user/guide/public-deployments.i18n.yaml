@@ -3,14 +3,17 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/user/guide/public-deployments.md
 /deploy-the-web-ui-exposure-and-trust-boundaries:
-  en: c184fe4b781a3da9
-  zh: 6573d587f0b87784
+  en: e6cccae63a78d551
+  zh: f588ec9fc33facf1
 /deploy-the-web-ui-exposure-and-trust-boundaries/what-the-default-exposes:
   en: 268524601c784ea2
   zh: ad78688ba30f5dcb
 /deploy-the-web-ui-exposure-and-trust-boundaries/choose-a-posture:
   en: 45dda2820d22d1c6
   zh: e3d8713749fa048d
+/deploy-the-web-ui-exposure-and-trust-boundaries/choose-a-posture/change-the-posture-without-editing-a-file:
+  en: 887ebbb61452f54b
+  zh: 196c3eb7b8055e82
 /deploy-the-web-ui-exposure-and-trust-boundaries/behind-a-reverse-proxy:
   en: 1be11391edea3f66
   zh: 97500201d0caba2c
@@ -30,5 +33,5 @@
   en: 53fa669ff8492bfe
   zh: 7bbe9fa21e9e3c3b
 /deploy-the-web-ui-exposure-and-trust-boundaries/reach-it-without-exposing-it:
-  en: fa2223cad394f9ec
-  zh: 4ebf66c774d125a4
+  en: 9713a929321e9f41
+  zh: 27d3c65dd70a9fec

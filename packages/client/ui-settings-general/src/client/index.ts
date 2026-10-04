@@ -3,8 +3,9 @@
  * `sidebar.settings` occupant — panel chrome, section navigation, and the
  * onboarding stage — and registers everything on the Settings pages that
  * belongs to no single feature: the trigger/header chrome content,
- * local-document action, General section, and `settings` dictionaries.
- * Feature-owned rows and sections stay with their features.
+ * local-document action, General section, the bind-address row, and the
+ * `settings` dictionaries. Feature-owned rows and sections stay with their
+ * features.
  * Export discipline: packages/client/AGENTS.md.
  */
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
@@ -34,10 +35,12 @@ import { CloseLabel, HeaderContent, TriggerContent } from './chrome.tsx'
 import { GeneralSection } from './GeneralSection.tsx'
 import { CurrentVersionRow } from './CurrentVersionRow.tsx'
 import { DeveloperToolsRow, type DeveloperToolsRowInjected } from './DeveloperToolsRow.tsx'
+import { NetworkHostController } from './network-host.ts'
+import { NetworkRow, NetworkToast, type NetworkRowInjected, type NetworkToastInjected } from './NetworkRow.tsx'
 import { SettingsDocumentAction } from './SettingsDocumentAction.tsx'
 import type { SettingsDocumentActionInjected } from './SettingsDocumentAction.tsx'
 import { SettingsDocumentStore } from './settings-document-store.ts'
-import { en, zh, type SettingsKey } from './locales.ts'
+import { en, zh, enNetwork, zhNetwork, type NetworkKey, type SettingsKey } from './locales.ts'
 
 export type {
   CloseLabelProps, HeaderContentProps, TriggerContentProps,
@@ -48,17 +51,28 @@ export type {
 export type { SettingsDocumentActionInjected, SettingsDocumentActionProps } from './SettingsDocumentAction.tsx'
 export type { SettingsDocumentState } from './settings-document-store.ts'
 export { SettingsDocumentStore } from './settings-document-store.ts'
-export type { SettingsKey } from './locales.ts'
+export type { NetworkRowInjected, NetworkRowProps, NetworkToastInjected, NetworkToastProps } from './NetworkRow.tsx'
+export type { NetworkHostController, NetworkNoticeKey, NetworkNoticeState, NetworkRowState, WebHostStatus } from './network-host.ts'
+export type { NetworkKey, SettingsKey } from './locales.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
     /** Shell chrome + shell-owned General section copy. */
     settings: SettingsKey
+    /** Bind-address row copy, owned by this package's own row. */
+    'settings.network': NetworkKey
   }
 }
 
 /** Dictionary namespace owned by this plugin (shell chrome + General copy). */
 const NS = 'settings'
+
+/**
+ * The bind-address row's own dictionary namespace. Kept apart from {@link NS}
+ * so the shell's vocabulary stays the chrome's and the row's words stay
+ * greppable next to the row.
+ */
+const NETWORK_NS = 'settings.network'
 
 /**
  * Required services (cordis fiber inject). The target slots are declared by
@@ -84,7 +98,38 @@ export function apply(ctx: ClientContext): void {
   ctx.slots.inject('settings.general.item', () => ctx.slots.register({
     name: 'settings.general.item', id: 'current-version', order: 100, locale: NS,
   }, CurrentVersionRow))
+  // The bind address sits between them: a startup preference the operator
+  // states for the next start, with its save outcome reported by the overlay.
+  // Both seats hang off a child fiber that requires the `webHost` namespace —
+  // the dependency the traceable `ctx.remote.<ns>` read is gated on — so the
+  // row exists exactly where the Client assembly mounts the namespace it
+  // reads, and a page whose build has none simply shows no row. The row's own
+  // read replaces the effective line, so the notice and the row cannot
+  // disagree about what was saved.
+  ctx.inject(['remote.webHost'], (network) => {
+    const controller = new NetworkHostController(network)
+    const onHost = network.remote.$host.isLoopback
+    network.slots.inject('settings.general.item', () => network.slots.register({
+      name: 'settings.general.item', id: 'network-host', order: 20, locale: NETWORK_NS,
+      inject: (): NetworkRowInjected => ({
+        onHost,
+        controller,
+        hooks: { host: controller.store },
+      }),
+    }, NetworkRow))
+    network.slots.inject('shell.overlay', () => network.slots.register({
+      name: 'shell.overlay', id: 'network-host-toast', locale: NETWORK_NS,
+      inject: (): NetworkToastInjected => ({
+        hooks: { notice: controller.notice },
+        dismiss: () => { controller.dismiss() },
+      }),
+    }, NetworkToast))
+  })
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-settings-general: dictionaries')
+  ctx.effect(
+    () => ctx.locale.register(NETWORK_NS, { zh: zhNetwork, en: enNetwork }),
+    'ui-settings-general: bind-address dictionary',
+  )
   const connection = ctx.get('connection') as ConnectionHandle
   const carrier = (globalThis as typeof globalThis & { dshDesktop?: { protocolVersion: number; updates?: DesktopUpdateBridge } }).dshDesktop
   const desktopUpdate = new DesktopUpdateSource(carrier?.protocolVersion === 1 ? carrier.updates : undefined)

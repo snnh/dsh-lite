@@ -1,5 +1,5 @@
 ---
-description: "Settings shell, ownerless copy, and durable product-onboarding namespace for the dsh web client: the General section, trigger chrome, and onboarding ledger projection."
+description: "Settings shell, ownerless copy, and durable product-onboarding namespace for the dsh web client: the General section, the persisted listen-address row, trigger chrome, and onboarding ledger projection."
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-Use this package to give the dsh web client a Settings panel, connection-recovery control, feature-contributed navigation, and sequential first-run onboarding. Users can open it from the sidebar, retry a failed connection immediately, and access a local configuration file when the Host makes one available on a loopback browser. Feature packages supply their own settings rows, sections, and onboarding steps; this package supplies their shared presentation and the Coding Tools switch without adding onboarding copy.
+Use this package to give the dsh web client a Settings panel, connection-recovery control, feature-contributed navigation, and sequential first-run onboarding. Users can open it from the sidebar, retry a failed connection immediately, and access a local configuration file when the Host makes one available on a loopback browser. Feature packages supply their own settings rows, sections, and onboarding steps; this package supplies their shared presentation, the Coding Tools switch, and the listen-address row without adding onboarding copy.
 
 ## Table of Contents
 
@@ -45,6 +45,8 @@ The Coding Tools switch controls the shared `ui-settings.enabled` preference des
 
 The General section holds the built-in Coding Tools and Current version rows alongside rows registered into `settings.general.item` by feature packages. Each registrant owns its row copy and behavior. The Appearance row, for example, lives in ui-theme.
 
+The Listen address row is the shell's own, and unlike the other General rows it hangs off a child fiber that requires the `webHost` namespace, so it exists exactly where the Client assembly mounts that namespace and a build without one shows no row at all. The row keeps the two addresses an operator has to tell apart side by side: what the running process bound, and what the profile persists for the next start. While those differ, the row shows its **After restart** marker, and it offers the addresses worth one click — loopback, `0.0.0.0`, and this machine's detected LAN address — beside a free-text field for any other one. Saving writes the profile patch and nothing else, so the row says the change lands after a restart instead of pretending the running bind moved; the outcome is announced through a shell overlay, because Settings may well be closed before the restart that applies it. Validation, the refusal a bad address earns, the token a non-loopback start requires, and what `--host` pins for this invocation all belong to the [settings controller](../../api/settings-controller/README.md) and the [lan-access row](../../host/lan-access/README.md); the row renders that posture and owns only its copy and its pending-write state — it computes no address and judges no grammar of its own. Off the Host's own machine, in a deployment with no writable profile, and in a composition with no lan-access row, the row states that reason instead of offering controls: one address per machine, changed on the machine that runs the harness.
+
 ### Opening the configuration file
 
 On a loopback browser, the shell renders **Open configuration file** only when the Host confirms that a provider-owned local document can be prepared. The action opens that document in the native text editor (bypassing the browser file association on macOS). Remote browsers never register the action and never issue the privileged settings read.
@@ -63,7 +65,7 @@ The shell declares settings.launcher for an account-owned sidebar menu and retai
 <details>
 <summary>Implementation internals — click to expand</summary>
 
-The shell owns the chrome and the projections; it contributes the Coding Tools and Current version rows, while feature registrants own their additional content and copy.
+The shell owns the chrome and the projections; it contributes the Coding Tools, Current version, and Listen address rows, while feature registrants own their additional content and copy. The Listen address row reads and writes through the generated `ctx.remote.webHost` namespace its child fiber injects, and renders the posture that namespace returns field by field rather than deriving any of it: the row never computes an address, never judges which addresses may be bound, and re-reads the posture after a save so the saved line it shows is the Host's own answer.
 
 ### Ledger projections
 
@@ -93,6 +95,8 @@ These pages cover the settings surface family and the composition model.
 - [ui-settings](../ui-settings/README.md) — the domain base whose slot types and scope service this shell builds on.
 - [ui-sidebar](../ui-sidebar/README.md) — the sidebar shell hosting the `sidebar.settings` seat.
 - [ui-settings-models](../ui-settings-models/README.md) — the feature package contributing the DeepSeek onboarding step.
+- [settings controller](../../api/settings-controller/README.md) — the Host namespace behind the Listen address row: the posture it reports and the write that persists one address.
+- [lan-access](../../host/lan-access/README.md) — the binding row whose persisted `config.host` the saved address lands in, and the default it publishes.
 - [settings](../../settings/README.md) — the durable user-settings seam and its file provider.
 - [Slot system standard](../../../.agents/notes/implemented/architecture/2026-07-22-slot-type-chain-implementation.md) — the composition model behind the ledgers.
 
@@ -114,7 +118,8 @@ None; this package neither assembles nor sends a provider request.
 
 These limits define what the shell itself provides versus what features must supply; they are current package constraints.
 
-- **Additional General rows require their feature plugins** — the shell supplies Coding Tools and Current version; feature plugins supply the remaining preferences.
+- **Additional General rows require their feature plugins** — the shell supplies Coding Tools, Current version, and the listen address; feature plugins supply the remaining preferences.
+- **A saved listen address needs a restart** — the row persists the next start's address. The running server keeps the address it bound, no live listener is rebound, the printed URL is not rewritten, and no access token is created by the save itself.
 - **The Windows caption badge keeps a side-opening bubble** — `DesktopUpdateBadge` occupies `sidebar.toggle.badge` in the caption and requests `side="right"`, so the Desktop-owned menu text can cover its bubble while the sidebar is collapsed on Windows; the sidebar toggle and New Session bubbles open below the caption instead (#4688).
 
 <a id="dev-note"></a>

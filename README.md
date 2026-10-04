@@ -24,7 +24,7 @@ Install `Node.js`, then run:
 npx @deepseek-ai/dsh web
 ```
 
-The command publishes the Web UI on every IPv4 interface this machine holds, records that posture in the profile on the first start, and requires the persistent access token for the network-reachable bind; it prints the loopback URL `http://127.0.0.1:3080` with the sampled LAN URL beside it and opens the loopback one in the default browser for a local launch. Pass `--host 127.0.0.1` to keep the server loopback-only. An SSH launch only prints the host URL because the SSH client or editor owns the local forwarded address. Pass `--no-open` to run the server without opening a browser. See [Web UI guide](docs/user/guide/index.md).
+The command publishes the Web UI on every IPv4 interface this machine holds, records that posture in the profile on the first start, and requires the persistent access token for the network-reachable bind; it prints the loopback URL `http://127.0.0.1:3080` with the sampled LAN URL beside it and opens the loopback one in the default browser for a local launch. Pass `--host 127.0.0.1` to keep the server loopback-only for one run, or save the same address from the General Settings page's Listen address row to keep every later start on loopback; a saved address applies on the next start. An SSH launch only prints the host URL because the SSH client or editor owns the local forwarded address. Pass `--no-open` to run the server without opening a browser. See [Web UI guide](docs/user/guide/index.md).
 
 ### Run from source
 

@@ -1,4 +1,8 @@
-/** Shell chrome and General-nav dictionaries; feature rows own their copy. */
+/**
+ * Shell chrome and General-nav dictionaries. Feature rows own their copy; the
+ * bind-address row is the exception — its own row ships with this package, so
+ * its dictionary does too, in a namespace of its own.
+ */
 
 /** Simplified Chinese dictionary (the key-set source of truth). */
 export const zh = {
@@ -78,3 +82,59 @@ export const en = {
   'connection.reconnect': 'Disconnected, reconnect now',
   'connection.restart': 'Reconnecting, reconnect now',
 } satisfies Record<SettingsKey, string>
+
+/**
+ * Bind-address row dictionary (the `settings.network` namespace). The row owns
+ * a namespace of its own rather than the shell's: the words are the row's,
+ * and the shell's dictionary stays the chrome/section vocabulary. Simplified
+ * Chinese (the key-set source of truth).
+ */
+export const zhNetwork = {
+  'network.title': '监听地址',
+  'network.description': '修改后写入配置文件，在下次启动 harness 时生效。',
+  'network.active': '已生效',
+  'network.restart': '重启后生效',
+  'network.bound': '当前生效',
+  'network.persisted': '已保存',
+  'network.notSet': '未指定',
+  'network.loading': '正在读取监听地址…',
+  'network.loadFailed': '无法读取监听地址，请重试。',
+  'network.custom': '自定义监听地址',
+  'network.customPlaceholder': 'IPv4 地址或 localhost',
+  'network.save': '保存',
+  'network.saved': '监听地址已保存，重启后生效。',
+  'network.saveFailed': '保存监听地址失败，请重试。',
+  'network.pinned': '本次启动由 --host 指定为 {host}：保存已写入，去掉该参数后才会生效。',
+  'network.wildcardWarning': '0.0.0.0 会监听所有 IPv4 接口（含容器网桥），且不包含 IPv6。',
+  'network.nonLoopbackWarning': '非回环地址会对局域网开放，下次启动需要持久访问令牌。',
+  'network.readOnly.remoteHost': '此页面运行在远端 harness 上，监听地址只能在运行 harness 的机器上修改。',
+  'network.readOnly.noProfile': '此部署没有可写入的配置文件，监听地址只能在运行 harness 的机器上修改。',
+  'network.readOnly.noRow': '当前组合没有 lan-access 配置行，无法在这里修改监听地址。',
+} satisfies Record<string, string>
+
+/** The `settings.network` key union. */
+export type NetworkKey = keyof typeof zhNetwork
+
+/** English bind-address dictionary, checked complete against the zh key set. */
+export const enNetwork = {
+  'network.title': 'Listen address',
+  'network.description': 'Writes to the configuration file and takes effect when the harness next starts.',
+  'network.active': 'In effect',
+  'network.restart': 'After restart',
+  'network.bound': 'In effect now',
+  'network.persisted': 'Saved',
+  'network.notSet': 'Not set',
+  'network.loading': 'Reading the listen address…',
+  'network.loadFailed': 'Could not read the listen address. Please try again.',
+  'network.custom': 'Custom listen address',
+  'network.customPlaceholder': 'IPv4 address or localhost',
+  'network.save': 'Save',
+  'network.saved': 'Listen address saved. It takes effect after a restart.',
+  'network.saveFailed': 'Could not save the listen address. Please try again.',
+  'network.pinned': 'This start was pinned to {host} by --host: the save is stored, and takes effect once that flag is removed.',
+  'network.wildcardWarning': '0.0.0.0 listens on every IPv4 interface (container bridges included), and publishes no IPv6.',
+  'network.nonLoopbackWarning': 'A non-loopback address is reachable from the local network, and the next start requires a persistent access token.',
+  'network.readOnly.remoteHost': 'This page runs on a remote harness; the listen address can only be changed on the machine running the harness.',
+  'network.readOnly.noProfile': 'This deployment has no writable configuration file; the listen address can only be changed on the machine running the harness.',
+  'network.readOnly.noRow': 'This composition has no lan-access row, so the listen address cannot be changed here.',
+} satisfies Record<NetworkKey, string>

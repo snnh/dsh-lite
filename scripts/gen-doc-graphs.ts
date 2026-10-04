@@ -288,6 +288,14 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Projects the user-settings seam onto the generated Remote namespace: the read is always redacted and every refusal is classified here, not on the seam Definition.',
   },
   {
+    key: 'webHostController',
+    pkg: 'api-settings-controller',
+    title: 'Host bind-host Remote controller',
+    mode: 'core',
+    consumers: ['client-ui-settings-general'],
+    note: 'Reports the bound, persisted, pinned, and detected addresses separately and validates the one an operator saves — an IPv4 literal or localhost — before writing it as the lan-access row\'s own `config.host`; nothing rebinds, reconciles, or resolves a token here.',
+  },
+  {
     key: 'workspaceFiles',
     pkg: 'api-workspace-files',
     title: 'Host workspace file Remote service',
@@ -798,6 +806,14 @@ const SERVICE_ROLES: ServiceRole[] = [
     mode: 'core',
     consumers: ['client-connection', 'client-modules', 'client-hmr'],
     note: 'Plain node:http carrier: named-route registry, index transform taps, and the static dist fallback; web-transport plugins register their own routes.',
+  },
+  {
+    key: 'lanAccess',
+    pkg: 'host-lan-access',
+    title: 'Web bind-address posture',
+    mode: 'core',
+    consumers: ['web-app'],
+    note: 'Resolves the host the web server binds — `--host`, then the composed or persisted value, then the detected LAN address, then loopback — and persists a first-run `0.0.0.0` into the profile patch; every non-loopback bind needs the persistent access token first, and a saved address takes effect on the next start.',
   },
   {
     key: 'clientModules',

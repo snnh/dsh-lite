@@ -3,20 +3,20 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/api/settings-controller/README.md
 /:
-  en: a3cc85cfbefc88fe
-  zh: 67550210b403fe0d
+  en: 619468284d6292d2
+  zh: af9a48d698d03ef9
 /settings-controller:
   en: 7fecb4d8800e8f97
   zh: 3e2c3fdb29b73cd0
 /settings-controller/summary:
-  en: e5068267079e62d0
-  zh: 9e2d663a6ca02c58
+  en: 252899b464a8c11e
+  zh: 95edf4d8db1bd1ab
 /settings-controller/table-of-contents:
   en: 3a654e12f423946b
   zh: 4e3a19aaee58f8a7
 /settings-controller/use-this-package:
-  en: cf2f4de5bee8be55
-  zh: b2630dcba4be5ae8
+  en: 778929ad8f81a38f
+  zh: 4fd30c731e1ac765
 /settings-controller/configuration:
   en: e0297f144b649af7
   zh: e70ed56edffd97f0

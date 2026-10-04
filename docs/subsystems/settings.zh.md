@@ -2,7 +2,7 @@
 
 [English](settings.md) | 中文
 
-[设置服务](../../packages/settings/settings/README.zh.md) 从活动 profile 条目投影 volatile Config 字段。[配置编辑器](../../packages/boot/config-editor/README.zh.md) 通过 Cordis patch 持久化编辑。业务消费者对自己的 Config 引用调用 `.get()`。
+[设置服务](../../packages/settings/settings/README.zh.md) 从活动 profile 条目投影 volatile Config 字段。[配置编辑器](../../packages/boot/config-editor/README.zh.md) 通过 Cordis patch 持久化编辑。业务消费者对自己的 Config 引用调用 `.get()`。「通用」设置页的监听地址行是有意为之的例外：它通过 `ctx.remote.webHost` 把 `lan-access` 行的 `config.host` 持久化进 profile patch，而不是经由表单 namespace；该约定由 [HTTP 服务器](web-server.zh.md)拥有。
 
 ## 标识与值
 

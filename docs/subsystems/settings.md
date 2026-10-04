@@ -2,7 +2,7 @@
 
 English | [中文](settings.zh.md)
 
-The [settings service](../../packages/settings/settings/README.md) projects volatile Config fields from active profile entries. The [configuration editor](../../packages/boot/config-editor/README.md) persists edits through Cordis patches. Business consumers read `.get()` on their own Config references.
+The [settings service](../../packages/settings/settings/README.md) projects volatile Config fields from active profile entries. The [configuration editor](../../packages/boot/config-editor/README.md) persists edits through Cordis patches. Business consumers read `.get()` on their own Config references. The General settings page's Listen address row is the deliberate exception: it persists the `lan-access` row's `config.host` in the profile patch through `ctx.remote.webHost` rather than through a form namespace, and [HTTP server](web-server.md) owns that contract.
 
 ## Identity and values
 

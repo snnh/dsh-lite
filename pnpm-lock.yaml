@@ -1467,6 +1467,12 @@ importers:
 
   packages/api/settings-controller:
     dependencies:
+      '@deepseek-ai/dsh-config-editor':
+        specifier: workspace:*
+        version: link:../../boot/config-editor
+      '@deepseek-ai/dsh-host-lan-access':
+        specifier: workspace:*
+        version: link:../../host/lan-access
       '@deepseek-ai/schemastery':
         specifier: link:../../../vendor/schemastery
         version: link:../../../vendor/schemastery

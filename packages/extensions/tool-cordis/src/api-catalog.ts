@@ -1381,6 +1381,18 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'lanAccess',
+    summary: 'What this row publishes through LAN_ACCESS_SERVICE.',
+    description: 'What this row publishes through LAN_ACCESS_SERVICE.',
+    methods: [
+      {
+        signature: 'readonly host: string',
+        description: 'The host the web server should bind.',
+        parameters: [],
+      },
+    ],
+  },
+  {
     key: 'llm',
     summary: 'The abstract `llm` service: an adapter registry plus a streaming model-call API, interceptable via the `llm/stream` waterfall.',
     description: 'The abstract `llm` service: an adapter registry plus a streaming model-call API, interceptable via the `llm/stream` waterfall.',
@@ -2136,7 +2148,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
   {
     key: 'sessionProjectionCache',
     summary: 'The persisted projection cache service.',
-    description: 'The persisted projection cache service. Opens the `session_projcache` domain at init, checkpoints live sessions on a throttled write-behind (count/interval triggers from Config) plus three mandatory points — session creation, `turn/end`, and session disposal (the live-to-cold moment) — and serves the cached rows for a session header. Every durable write is fail-soft: failures log a warning and the cache self-heals on the next write.',
+    description: 'The persisted projection cache service. Opens the `session_projcache` domain at init, checkpoints live sessions on a throttled write-behind (count/interval triggers from Config) plus three mandatory points — session creation, `turn/end`, and session disposal (the live-to-cold moment) — and serves the cached rows for a session header. Every durable write is fail-soft: failures log a warning and the cache self-heals on the next write. Reads are served from a budgeted resident copy of the domain\'s records; the domain table is the authority that copy is refilled from, and archiving a session (observed through the Workspace registry\'s commits) deletes its record from both.',
     methods: [
       {
         signature: 'cachedSnapshot( meta: SessionHeader, keys?: readonly Extract<keyof SessionProjectionMap, string>[], ): ProjectionSnapshot | undefined',
@@ -3507,6 +3519,26 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'webHostController',
+    summary: 'Host service backing the generated `ctx.remote.webHost` namespace: the read side reports each fact that decides the next start\'s bind address separately — what this process bound, what the profile persists, what the invocation pinned, what this machine detects — and the write side persists an operator\'s address into the profile patch.',
+    description: 'Host service backing the generated `ctx.remote.webHost` namespace: the read side reports each fact that decides the next start\'s bind address separately — what this process bound, what the profile persists, what the invocation pinned, what this machine detects — and the write side persists an operator\'s address into the profile patch.\n\nThe namespace mounts whether or not a lan-access row is composed: the page must be able to render the posture and to receive the actionable refusal, not a missing-namespace failure.',
+    methods: [
+      {
+        signature: '@Remote status(): WebHostStatusValue',
+        description: 'Describe the bind-host posture: every layered fact a page shows beside the field, so the operator sees what a save will change and what nothing here can change (`--host` is resolved at startup, and the running bind is not this page\'s to move).',
+        parameters: [],
+        returns: 'the posture; absent facts are omitted rather than sent as `undefined`.',
+      },
+      {
+        signature: '@Remote async save(host: string): Promise<WebHostStatusValue>',
+        description: 'Persist one bind host for the next start.\n\nThe write is one row of the profile\'s own patch, merged with the config that row already states, so the address this page owns is the only key it changes. Nothing else follows from it: no Loader reconcile, no rebind, no token resolution, no URL rewrite. A non-loopback address therefore persists without creating the access token the next start will demand, which keeps this call free of side effects on the running harness.',
+        parameters: [{ name: 'host', description: 'the address to bind on the next start: an IPv4 literal or `localhost`.' }],
+        returns: 'the posture after the write: `persisted` is the line just written when the composed row reads it back, and absent when no row in this profile does.',
+        throws: ['RemoteError when the address is not one this row can bind, this deployment has no profile patch, or the patch cannot be written.'],
+      },
+    ],
+  },
+  {
     key: 'webServer',
     summary: 'The browser HTTP carrier service.',
     description: 'The browser HTTP carrier service. Activation listens immediately. Route registration order does not affect requests because configured named routes must be distinct, and the fallback handler answers anything not yet claimed during startup with 404 until its owner registers. A listen failure rejects initialization, and the boot process reports the failed fiber.',
@@ -3742,7 +3774,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'archiveSession(sessionId: SessionId, options: ArchiveSessionOptions = {}): Promise<void>',
-        description: 'Archive one session durably. The session must exist (live or in session persistence); its workspace accounting — or lack of one — is irrelevant. Without `stopActivity` the session must also be inactive: the `workspace/session-activity` waterfall is asked once, and any reported activity rejects with WorkspaceActiveSessionError before anything is written. With `stopActivity` the archive is written without an activity check, and the `workspace/session-stop` providers are then asked to stop the session\'s work: the durable archive set is what a provider\'s `agent/pre-step` gate reads, so every wake the stops induce is already blocked. Archiving drops the session\'s pin in the same durable write (pinning and archival are mutually exclusive). An already archived id resolves without writing, asking, or stopping.',
+        description: 'Archive one session durably. The session must exist (live or in session persistence); its workspace accounting — or lack of one — is irrelevant. Without `stopActivity` the session must also be inactive: the `workspace/session-activity` waterfall is asked once, and any reported activity rejects with WorkspaceActiveSessionError before anything is written. With `stopActivity` the archive is written without an activity check, and the `workspace/session-stop` providers are then asked to stop the session\'s work: the durable archive set is what a provider\'s `agent/pre-step` gate reads, so every wake the stops induce is already blocked. Archiving drops the session\'s pin in the same durable write (pinning and archival are mutually exclusive) and, once that write committed, drops the archived session\'s resident index trace through forgetUnprojectedSession — a memory-only step that can never fail the archive. An already archived id resolves without writing, asking, stopping, or clearing.',
         parameters: [{ name: 'sessionId', description: 'The session to archive.' }, { name: 'options', description: 'Whether running work is stopped instead of refusing.' }],
         returns: 'resolution after durability and, with `stopActivity`, after every stop request was issued.',
       },
@@ -8151,6 +8183,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'WebhookSourceId',
     declaration: 'export type WebhookSourceId = Branded<\'WebhookSourceId\'>;',
+  },
+  {
+    name: 'WebHostStatusValue',
+    declaration: 'export interface WebHostStatusValue {\n    readonly rowFound: boolean;\n    readonly bound?: string;\n    readonly persisted?: string;\n    readonly pinned?: string;\n    readonly detected?: string;\n    readonly candidates: string[];\n    readonly writable: boolean;\n}',
   },
   {
     name: 'WebResultView',

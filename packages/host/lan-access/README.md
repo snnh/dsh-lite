@@ -30,6 +30,15 @@ The row is mounted without a `host`, which means "every IPv4 interface this mach
 
 A host the operator states is bound as written and persists nothing. `--host` from the invocation comes first, then the row's own `host` config, so `--host 127.0.0.1` narrows one run and `host: 127.0.0.1` in the profile narrows every run.
 
+<a id="saving-an-address-from-the-settings-page"></a>
+### Saving an address from the settings page
+
+The General Settings page's Listen address row writes this same key: `config.host` of the composed `lan-access` row in the profile's own patch, merged with whatever else that row's patch config already holds. One line, one meaning — an address saved from that page and one edited by hand are indistinguishable to the next start, and the page reads the persisted line back rather than keeping a copy of its own.
+
+The save is deliberately inert. It writes the file and stops there: the running server keeps the address it bound, no access token is created, the printed URL is not rewritten, and the Loader does not reconcile. The operator restarts to apply it, which is why the page shows the saved address beside the address in effect until they do. The write is accepted only for an address this row can bind — an IPv4 literal, the `0.0.0.0` wildcard and `localhost` included — so a typed IPv6 address or hostname is refused before it reaches the file instead of being persisted as a posture that cannot start; the refusal is the same one a hand-edit would earn on the next start, moved earlier, where it can still be corrected. A non-loopback address saved here is likewise only a request: the persistent access token it needs is created by the start that binds it, not by the save.
+
+`--host` still outranks the saved line for the run that states it. The page reports that as a pinned posture: the address is stored, and it takes effect once the flag is removed.
+
 With no profile to write into — an embedding that mounts this row directly — the fallback is `detectLanAddress()`: the first interface carrying a network of its own. Container bridges (`docker0`, `br-<id>`), veth pairs, hypervisor switches (`vmnet*`, `vboxnet*`), and tunnels (`tun*`, `utun*`, `wg*`, `tailscale*`) rank last: they are addresses a phone cannot reach and an operator did not mean, and a container host often reports them *before* the physical interface. They rank rather than disappear — a machine whose only address is a VPN interface still binds it — and a machine with no such address binds loopback.
 
 The same distinction answers one question earlier, in code: `isLanHost()` reports whether this machine holds a LAN worth binding at all — at least one non-internal IPv4 address on an interface that is not a bridge or a tunnel. It is the complement of the address above: a machine whose only address is a tunnel is not a LAN host, and the row still binds that tunnel.
@@ -64,7 +73,7 @@ A reachable bind also writes one warning into the startup log, stating what is b
 
 ### Returning to loopback
 
-Set `host: 127.0.0.1` — in the profile's `cordis.patch.yml`, or through `--host 127.0.0.1` for a single run. The key an earlier start persisted is the same key, so editing or deleting it is the whole migration; nothing else records the posture. Removing the row is not a way back to loopback, because the shipped `webserver` row reads `ctx.lanAccess.host` and the bundle default without the row publishes every interface.
+Set `host: 127.0.0.1` — in the profile's `cordis.patch.yml`, from the General Settings page's Listen address row, or through `--host 127.0.0.1` for a single run. The key an earlier start persisted is the same key, so editing or deleting it is the whole migration; nothing else records the posture. Removing the row is not a way back to loopback, because the shipped `webserver` row reads `ctx.lanAccess.host` and the bundle default without the row publishes every interface.
 
 ## Understand the implementation
 

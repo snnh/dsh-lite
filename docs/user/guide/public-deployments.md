@@ -2,7 +2,7 @@
 
 English | [中文](public-deployments.zh.md)
 
-`dsh --profile web` publishes a network address by default — every IPv4 interface this machine holds — so a phone, a tablet, or another computer on any attached network opens the Web UI without any configuration, and the first start records that posture in the profile. This page states what that default exposes, what a deployment adds in front of it, and which parts of the boundary remain the deployer's. The [Web app reference](../../../packages/bundle/web-app/README.md#public-deployments) owns the `--public-url` and `--trusted-host` command-line contract and the `publicUrl` and `trustedHosts` fields, and the [lan-access reference](../../../packages/host/lan-access/README.md) owns the bind-address row.
+`dsh --profile web` publishes a network address by default — every IPv4 interface this machine holds — so a phone, a tablet, or another computer on any attached network opens the Web UI without any configuration, and the first start records that posture in the profile. This page states what that default exposes, what a deployment adds in front of it, and which parts of the boundary remain the deployer's. The [Web app reference](../../../packages/bundle/web-app/README.md#public-deployments) owns the `--public-url` and `--trusted-host` command-line contract and the `publicUrl` and `trustedHosts` fields, and the [lan-access reference](../../../packages/host/lan-access/README.md) owns the bind-address row — including the line the General Settings page's Listen address row saves.
 
 ## What the default exposes
 
@@ -16,6 +16,10 @@ The token is a process credential, not a per-user one. It appears once in the UR
 
 - **Treat the network as trusted.** Leave the default and accept that every device able to route to any published address is an operator of this process. The harness cannot tell those devices apart, so this is a statement about the networks the machine is attached to rather than a control it enforces.
 - **Put something in front.** Terminate TLS at a reverse proxy, or join the server to a virtual network that decides who can reach the port. That layer is where peer and user restriction can exist, because this one provides none.
+
+### Change the posture without editing a file
+
+The General Settings page's **Listen address** row names what the running process bound beside what the profile persists, and saves the address the next start should bind — the same `host` key in the profile's `cordis.patch.yml` a first start writes. The save is that one line and nothing else: the running server keeps the address it bound, the printed URL keeps naming it, no listener is rebound, and the access token a non-loopback start needs is created by the start that binds it rather than by the save. The row accepts what this row can bind — an IPv4 literal, `0.0.0.0` and `localhost` included — so an IPv6 address or a hostname is refused instead of being persisted as a posture that cannot start; the rejection is the same one a hand-edit would earn on the next start, moved to where it can still be corrected. It states `0.0.0.0`'s meaning beside the field: every IPv4 interface, container bridges included, and no IPv6 listener. When the invocation names `--host`, the row says the save is stored and takes effect once that flag is removed, because `--host` outranks the persisted line.
 
 ## Behind a reverse proxy
 
@@ -62,4 +66,4 @@ Terminating TLS in a proxy, carrying the connection over a VPN or overlay networ
 
 ## Reach it without exposing it
 
-For work that never needs another device, return the row to loopback with `host: 127.0.0.1` and forward a port over SSH: `ssh -L 3080:127.0.0.1:3080 host`. A loopback posture forwards the loopback endpoint, and the `127.0.0.1:3080` authority the browser then uses is one the fence accepts. The shipped default answers on loopback as well, because `0.0.0.0` covers it, so that forward reaches the server before the row is narrowed; the printed line keeps the loopback URL and adds the LAN one beside it.
+For work that never needs another device, return the row to loopback — `host: 127.0.0.1`, or the same address saved from the General Settings page's Listen address row — and forward a port over SSH: `ssh -L 3080:127.0.0.1:3080 host`. A loopback posture forwards the loopback endpoint, and the `127.0.0.1:3080` authority the browser then uses is one the fence accepts. The shipped default answers on loopback as well, because `0.0.0.0` covers it, so that forward reaches the server before the row is narrowed; the printed line keeps the loopback URL and adds the LAN one beside it.

@@ -15,6 +15,12 @@
       "path": "../../../vendor/schemastery"
     },
     {
+      "path": "../../boot/config-editor"
+    },
+    {
+      "path": "../../host/lan-access"
+    },
+    {
       "path": "../../preset/agent-preset-registry"
     },
     {

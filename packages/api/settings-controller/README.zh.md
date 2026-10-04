@@ -1,5 +1,5 @@
 ---
-description: "settings 与凭据配置界面的 Host Remote owner，涵盖脱敏读取、写入、凭据引用与原生文档打开。"
+description: "settings、凭据与监听地址配置界面的 Host Remote owner，涵盖脱敏读取、写入、凭据引用、持久化的监听地址与原生文档打开。"
 kind: "package-reference"
 ---
 # Settings Controller
@@ -8,7 +8,7 @@ kind: "package-reference"
 
 ## 概述
 
-`@deepseek-ai/dsh-api-settings-controller` 为浏览器配置界面提供生成的 `ctx.remote.settings` 与 `ctx.remote.credentials` namespace。它返回脱敏的 settings 与凭据元数据，支持 settings 与凭据写入而不返回机密值，并在 Host 桌面打开由提供方持有的 settings 或 Agent preset 位置。提供方缺失时，namespace 仍会注册，并返回可操作的配置错误。
+`@deepseek-ai/dsh-api-settings-controller` 为浏览器配置界面提供生成的 `ctx.remote.settings`、`ctx.remote.credentials` 与 `ctx.remote.webHost` namespace。它返回脱敏的 settings 与凭据元数据，支持 settings 与凭据写入而不返回机密值，持久化页面为下次启动保存的监听地址，并在 Host 桌面打开由提供方持有的 settings 或 Agent preset 位置。提供方缺失时，namespace 仍会注册，并返回可操作的配置错误。
 
 ## 目录
 
@@ -23,13 +23,17 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
-请把本包作为 Loader entry 挂载到提供浏览器配置的 profile 中。本 entry 不依赖提供方是否存在而注册两个 namespace，因此缺少提供方会在调用时产生具名配置错误。它生成的 descriptor 进入严格 Typert 注册表，而 settings 与凭据 Definition 仍是普通 Cordis 服务，自身不承担任何 wire 义务。
+请把本包作为 Loader entry 挂载到提供浏览器配置的 profile 中。本 entry 不依赖提供方是否存在而注册全部三个 namespace，因此缺少提供方会在调用时产生具名配置错误。它生成的 descriptor 进入严格 Typert 注册表，而 settings 与凭据 Definition 仍是普通 Cordis 服务，自身不承担任何 wire 义务。
 
 `describe(refs)` 以请求的名字为键返回一份 map，因此设置页描述其各行携带的全部引用时，这些行会一起落定。单次调用最多接受 64 个名字，无效名字或空写入值报告为 `bad-request`，并逐字段复制每个答案——提供方返回超出 `CredentialInfo` 声明的内容也无法扩大跨越 wire 的字段。有效的 `set(ref, value)` 与 `unset(ref)` 调用把提供方拒绝报告为 `credential-rejected`，携带提供方的消息，details 中只有该引用。机密值只在这个方向跨越 wire：这里没有任何方法会返回它。
 
 `settings.describe()` 返回部署信息，以及在 `redactSecrets: true` 下读取的所有 namespace。`settings.update`、`settings.replace` 与 `settings.mutate` 暴露 settings 服务的三种写入操作，并返回该 namespace 的新脱敏视图；陈旧写入使用 `settings-conflict`，其他提供方拒绝使用 `settings-rejected`。
 
 `settings.openSettingsDocument()` 准备提供方持有的文档，并用原生文本编辑器打开；该方法不接受浏览器提供的文件系统目标。
+
+`webHost.status()` 报告一份监听地址姿态，并把各项事实分开：`bound` 是本进程实际绑定的地址，`persisted` 是 profile patch 声明的 host，`pinned` 是本次调用由 `--host` 指定的地址，`detected` 是本机的 LAN 地址，`candidates` 是本机持有的全部 IPv4 地址（按 lan-access 行自身的排序），`writable` 表示是否存在可写入的 profile patch。本部署没有的事实会被省略而不是以 `undefined` 发送，因此页面能区分 `rowFound: false`（没有组合 lan-access 行）与「未指定地址」。
+
+`webHost.save(host)` 只写一行：profile 自身 patch 中组合 lan-access 行的 `config.host`，并与该行 patch 配置里已有的其他键合并；profile 未组合该行时则使用随包发行的行标识。除此之外没有任何后续动作：不 reconcile Loader、不重新绑定、不解析令牌，也不改动运行中服务器的 URL 或会话令牌，因此持久化一个非回环地址并不会创建下次启动所需的令牌。可接受的语法恰好是该行能绑定的内容——IPv4 字面量（含 `0.0.0.0` 通配地址）或 `localhost`——其余（含 IPv6 与主机名）都以 `web-host-rejected` 拒绝，并在 details 中携带该地址。没有 profile patch 的部署同样以该方式拒绝保存。
 
 -----
 

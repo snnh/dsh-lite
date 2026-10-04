@@ -1,8 +1,9 @@
 /**
  * Host Remote owner for the configuration surfaces over the settings-domain
- * seams. Two namespaces: `settings`, the redacted reads and writes of
- * `ctx.settings`, owned by the class below; and `credentials`, mounted from
- * here as its own plugin.
+ * seams. Three namespaces, all mounted from here: `settings`, the redacted
+ * reads and writes of `ctx.settings`, owned by the class below; `credentials`,
+ * the reference seam as a configuration page reads and writes it; and
+ * `webHost`, the bind address a page persists for the next start.
  *
  * @module @deepseek-ai/dsh-api-settings-controller
  */
@@ -20,8 +21,10 @@ import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import { z } from 'zod'
 import { CredentialsController } from './credentials.ts'
 import type { SettingsDocumentOpenValue } from './types.ts'
+import { WebHostController } from './web-host.ts'
 
 export { CredentialsController } from './credentials.ts'
+export { WebHostController } from './web-host.ts'
 export type * from './types.ts'
 
 const settingsNamespaceRequestSchema = z.object({ ns: z.string().min(1) })
@@ -77,15 +80,18 @@ export class SettingsController extends TypertRemoteService {
   private readonly openTextFile: (path: string, signal: AbortSignal) => Promise<void>
 
   /**
-   * Register the settings namespace and mount the credentials namespace beside
-   * it. Both namespaces stay registered when a provider is absent so calls can
-   * return the configuration API's actionable missing-provider diagnostic.
-   * @param ctx - Host context where settings and credential providers may be mounted.
+   * Register the settings namespace and mount the credentials and bind-host
+   * namespaces beside it. All three stay registered when a provider is absent —
+   * no credential provider, no profile, no lan-access row — so calls can return
+   * the configuration API's actionable diagnostic instead of a missing
+   * namespace.
+   * @param ctx - Host context where the settings, credential, profile, and lan-access providers may be mounted.
    */
   constructor(ctx: Context, internals: SettingsControllerInternals = {}) {
     super(ctx, 'settingsController', { namespace: 'settings' })
     this.openTextFile = internals.openTextFile ?? openNativeTextFile
     ctx.plugin(CredentialsController)
+    ctx.plugin(WebHostController)
   }
 
   /**

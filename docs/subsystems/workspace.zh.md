@@ -552,8 +552,11 @@ insertBefore(id: WorkspaceId, beforeId?: WorkspaceId): Promise<readonly Workspac
  * to stop the session's work: the durable archive set is what a provider's
  * `agent/pre-step` gate reads, so every wake the stops induce is already
  * blocked. Archiving drops the session's pin in the same durable write
- * (pinning and archival are mutually exclusive). An already archived id
- * resolves without writing, asking, or stopping.
+ * (pinning and archival are mutually exclusive) and, once that write
+ * committed, drops the archived session's resident index trace through
+ * {@link forgetUnprojectedSession} — a memory-only step that can never fail
+ * the archive. An already archived id resolves without writing, asking,
+ * stopping, or clearing.
  * @param sessionId - The session to archive.
  * @param options - Whether running work is stopped instead of refusing.
  * @returns resolution after durability and, with `stopActivity`, after every stop request was issued.

@@ -13,7 +13,7 @@ Desktop analytics schedules partial batches every 30 seconds, with a 15-second e
 
 ## Summary
 
-Run `dsh --profile web` for browser chat, model and settings management, and session history, using the same model access, tools, and safety defaults as other dsh surfaces. Startup prints a tokenized URL and normally opens the default browser; SSH sessions and `--no-open` require manual opening. You can change the port and allow extra hosts, but cannot bind all network interfaces. Remote access supports an advertised public HTTP(S) URL behind a prefix-stripping proxy. For one-shot command-line tasks, use `dsh-headless`.
+Run `dsh --profile web` for browser chat, model and settings management, and session history, using the same model access, tools, and safety defaults as other dsh surfaces. Startup prints a tokenized URL and normally opens the default browser; SSH sessions and `--no-open` require manual opening. You can change the port and the listen address — the shipped posture publishes every IPv4 interface, and the General Settings page's Listen address row saves a narrower one — and allow extra hosts. Remote access supports an advertised public HTTP(S) URL behind a prefix-stripping proxy. For one-shot command-line tasks, use `dsh-headless`.
 
 ## Table of Contents
 
@@ -62,6 +62,8 @@ The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-a
 ### Listening, trust, and public deployments
 
 By default the GUI publishes every IPv4 interface this machine holds: the shipped `lan-access` row resolves to `0.0.0.0`, and the first start in a profile persists that host into the profile's `cordis.patch.yml`, so every later start binds the persisted value rather than whatever a later release ships. Every attached network reaches it, container bridges included, and no IPv6 interface is published; `host: 127.0.0.1` on that row restores loopback-only, and one network's own address publishes just that network. `--host` outranks the persisted posture for a single run, `--host 0.0.0.0` included. A non-loopback bind requires the persistent access token and writes one exposure warning into the startup log. Repeatable `--trusted-host` adds the authorities its Host/Origin fence accepts, so a remote browser reaches it behind a prefix-stripping proxy or through a port-forwarding client that presents a trusted hostname.
+
+The same posture can be changed without editing a file: the General Settings page's **Listen address** row shows what this process bound beside what the profile persists, and saving one writes the profile patch alone. A save therefore takes effect on the next start, not immediately, and a non-loopback address saved there is just a request — the persistent access token it needs is created by the start that binds it. The row accepts what the `lan-access` row can bind, an IPv4 literal or `localhost`; an IPv6 address or a hostname is refused rather than persisted as a posture that cannot start. The [lan-access reference](../../host/lan-access/README.md#saving-an-address-from-the-settings-page) owns that contract, and the [settings controller](../../api/settings-controller/README.md) owns the namespace behind it.
 
 `--public-url` advertises the HTTP(S) root browsers use — the printed and opened startup URL, `DSH_WEB_URL`, and the web-surface orientation. Advertisement grants no trust: the browser-visible authority must also be named with `--trusted-host`. The flag configures no listener, routing, or cookie scope, because the proxy owns the external leg: [Publish the Web UI behind a reverse proxy](../../../docs/user/guide/public-deployments.md) lists what such a deployment must provide.
 
@@ -163,7 +165,8 @@ These limits tell you what to expect in unusual setups — a source checkout, SS
 - **Only the handoff start is observable** — the GUI reports that the browser was asked to open, not that it actually opened; a later browser exit is never reported, and the printed URL is your manual fallback.
 - **SSH sessions keep the URL but skip the browser handoff** — without an advertised root the printed URL names the remote host's loopback endpoint; the SSH client or editor must expose and open the local forwarded address.
 - **`BROWSER` overrides only come from the environment** — a discovered `.env` cannot set `BROWSER`; only an inherited value can choose the executable for the automatic handoff.
-- **The published bind is a persisted posture, not a per-run choice** — no host means every IPv4 interface, and the first start writes `host: 0.0.0.0` into the profile's `cordis.patch.yml`; `host: 127.0.0.1` or `--host 127.0.0.1` is the way back to loopback, and deleting the persisted key re-adopts whatever the release ships.
+- **The published bind is a persisted posture, not a per-run choice** — no host means every IPv4 interface, and the first start writes `host: 0.0.0.0` into the profile's `cordis.patch.yml`; `host: 127.0.0.1`, the General Settings page's Listen address row, or `--host 127.0.0.1` is the way back to loopback, and deleting the persisted key re-adopts whatever the release ships.
+- **A saved listen address applies on the next start** — the settings row writes the profile patch and nothing else, so the running server keeps the address it bound, the printed URL keeps naming it, and no access token is created until the start that binds a non-loopback address.
 
 <a id="dev-note"></a>
 ### Dev Note

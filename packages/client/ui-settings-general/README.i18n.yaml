@@ -3,14 +3,14 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/client/ui-settings-general/README.md
 /:
-  en: b12def981d836df5
-  zh: 9d813c1937f22c61
+  en: 97d99c000cbf812a
+  zh: 63570a59b9609df2
 /deepseek-ai-dsh-client-ui-settings-general:
   en: 1017c980d55e1945
   zh: d3febd2062fce20f
 /deepseek-ai-dsh-client-ui-settings-general/summary:
-  en: cd94b4a8dae32670
-  zh: 333b8603e77f92d7
+  en: 412bfb7f1cb47a19
+  zh: 29747f9cef8816b8
 /deepseek-ai-dsh-client-ui-settings-general/table-of-contents:
   en: 2843d46e95311bce
   zh: ec11bdeb5d3ce818
@@ -18,8 +18,8 @@
   en: 8b75b6fc5a0951e3
   zh: 90c54f660988588b
 /deepseek-ai-dsh-client-ui-settings-general/use-this-package/the-general-section:
-  en: 8b8a7c6287bb303b
-  zh: 19535112531aedd5
+  en: b133c195f26cee8c
+  zh: a1edb4abbff24de4
 /deepseek-ai-dsh-client-ui-settings-general/use-this-package/opening-the-configuration-file:
   en: ca2b4f5ccfbe2705
   zh: bd1dc1d9879d0f0e
@@ -27,8 +27,8 @@
   en: 27f0f6ec55f00228
   zh: 69b47ff1efd81c17
 /deepseek-ai-dsh-client-ui-settings-general/understand-the-implementation:
-  en: 41726bcd4ae37c0a
-  zh: d994b70ca7997da8
+  en: c5229d22d2c99643
+  zh: cf7cdf3d84162e5c
 /deepseek-ai-dsh-client-ui-settings-general/understand-the-implementation/ledger-projections:
   en: 3e3c2c72f87e8b23
   zh: 12b10ba2d37c9077
@@ -42,8 +42,8 @@
   en: 5d722d055516f905
   zh: e7a236f0ff84f7ff
 /deepseek-ai-dsh-client-ui-settings-general/further-exploration:
-  en: 21348b768f60f587
-  zh: 0c3c5b6a682ae267
+  en: 6001a95878fe64fe
+  zh: 1b2ed3594f6dda0e
 /deepseek-ai-dsh-client-ui-settings-general/model-experience:
   en: 3120df665299c634
   zh: 1d9f365d091d0d2a
@@ -51,8 +51,8 @@
   en: ca75c51c89c2c9b0
   zh: de54f3467ef3b9be
 /deepseek-ai-dsh-client-ui-settings-general/known-limitations-and-deferred-work:
-  en: 97dd637a320ac334
-  zh: faa5c512c56a128e
+  en: 60cdac4a7e54f27c
+  zh: 7b4145d225505764
 /deepseek-ai-dsh-client-ui-settings-general/known-limitations-and-deferred-work/dev-note:
   en: e67f633dc6fe7773
   zh: 3bb0c20c93f16f98
