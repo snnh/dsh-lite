@@ -1,5 +1,5 @@
 ---
-description: "长跑的 DeepSeek Harness 宿主启动时采用的常驻集策略，以及各包在策略之外释放内存时共用的收集器入口。"
+description: "长跑的 DeepSeek Harness 宿主启动时采用的常驻集策略，各包在策略之外释放内存时共用的收集器入口，以及缓存用来给自己设定留存上限的缓存预算原语。"
 kind: "package-library"
 ---
 
@@ -61,6 +61,33 @@ maybeGc(true)    // collects now
 
 `maybeGc` 在首次使用时建立**一个进程级**节流窗口，因此调用方无需各自维护间隔记账。需要独立窗口的调用方用 `createCollector` 自建。
 
+### 缓存预算
+
+长跑缓存会声明自己的预算，而不是随观察到的负载一起长大。`createBoundedMap` 最多保留 `maxEntries` 条、`maxBytes` 个估算字节，每次 `set` 之后淘汰最近最少使用的那一条——先结算条数、再结算字节，且绝不淘汰最后一条，因此单条定价超过整个字节预算的值仍会被缓存，而不是把自己反复淘汰掉：
+
+```ts
+import { createBoundedMap, createIdleCache, estimateJsonBytes, readHeapUsedBytes } from '@deepseek-ai/dsh-memory'
+
+interface Projection { readonly id: string; readonly body: string }
+
+const cache = createBoundedMap<string, Projection>({
+  maxEntries: 64,
+  maxBytes: 8 * 1024 * 1024,
+  // The default prices the value alone; this one prices the key with it.
+  estimateBytes: (value, key) => estimateJsonBytes(value) + estimateJsonBytes(key),
+  onEvict: (key, _value, reason) => { process.stderr.write(`${key} left the cache (${reason})\n`) },
+})
+if (readHeapUsedBytes() > 512 * 1024 * 1024) cache.clear()
+
+const idle = createIdleCache<string, Projection>({ idleTtlMs: 30 * 60 * 1000, maxEntries: 64 })
+idle.get('s-1')   // a hit restamps the key's last activity
+idle.stop()       // clears the sweep timer; the entries stay readable
+```
+
+迭代顺序是从旧到新，与 `Map` 的插入顺序一致：遍历 `keys()` 或 `entries()` 的调用方，回收顺序与预算淘汰顺序相同。`onEvict` 报告五种原因之一：`entries` 与 `bytes` 是预算在淘汰，`delete` 与 `clear` 是调用方主动删除，`idle` 是空闲窗口回收了无人触碰的 key。
+
+`estimateJsonBytes` 不做序列化就给值定价：字符串按 UTF-8 字节长度，数字 8 字节，布尔、`null`、`undefined` 各 4 字节，函数、symbol、bigint 各 32 字节，`Uint8Array`/`Buffer` 按 `byteLength`，`Date` 24 字节，数组、`Map`、`Set` 与其它对象按其内容求和。每次调用中，同一个对象标识只计一次：别名或回指在首次访问之后不再计入——这也正是循环引用不会让遍历打转的原因。它是估算而非测量：它给的是留存一个值要花的代价，不做任何序列化，且便宜到可以在每次写入时运行。
+
 ### 调优
 
 | 变量 | 默认值 | 含义 |
@@ -113,4 +140,4 @@ maybeGc(true)    // collects now
 
 ### 测试
 
-`tests/memory.spec.ts` 用假定时器、注入的收集器与时钟驱动策略，因此不会真的执行收集，也不会等待任何挂钟间隔。查找本身既通过 stub 过的 `globalThis.gc` 覆盖，也走它自己的 flag 路径。指标行同样由假定时器驱动，其断言钉住该行的确切形态（含时间戳），而不是钉某个测试无法预测的内存读数。
+`tests/memory.spec.ts` 用假定时器、注入的收集器与时钟驱动策略，因此不会真的执行收集，也不会等待任何挂钟间隔。查找本身既通过 stub 过的 `globalThis.gc` 覆盖，也走它自己的 flag 路径。指标行同样由假定时器驱动，其断言钉住该行的确切形态（含时间戳），而不是钉某个测试无法预测的内存读数。`tests/cache-budget.spec.ts` 钉住估算器对各类值的定价、两个预算及其结算顺序，以及空闲扫描——它用假定时器与注入时钟驱动探测；唯一无法预测的堆读数，它拿实时计数器比对，而不是写死一个数字。

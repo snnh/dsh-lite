@@ -3,8 +3,8 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/util/memory/README.md
 /:
-  en: 375eb6ad921c32a8
-  zh: 57dc9b8aee27a393
+  en: f0028caf2ac05a47
+  zh: dc3592886d0cc130
 /deepseek-ai-dsh-memory:
   en: 68f2ed4cad01d868
   zh: 3ded3b4a3be4cfff
@@ -23,6 +23,9 @@
 /deepseek-ai-dsh-memory/use-this-package/releasing-memory-outside-a-policy:
   en: 1ae2c5473814e41c
   zh: 1a35e74ee4ffed45
+/deepseek-ai-dsh-memory/use-this-package/cache-budgets:
+  en: b991b936d98477dd
+  zh: 1a91ed16e02e5af6
 /deepseek-ai-dsh-memory/use-this-package/tuning:
   en: 37996d5f24e8a35f
   zh: fb88a28377db4816
@@ -48,5 +51,5 @@
   en: b86cacaec452882c
   zh: b009a9fcb0913e5c
 /deepseek-ai-dsh-memory/dev-note/tests:
-  en: ea2c038c08bf958c
-  zh: 9c16c95a499724fc
+  en: b3131ef533394f42
+  zh: 3a58ac5dce7cefc7

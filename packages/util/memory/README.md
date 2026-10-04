@@ -1,5 +1,5 @@
 ---
-description: "The resident-set policy a long-running DeepSeek Harness host boots with, plus the shared collector entry point packages use to release memory outside it."
+description: "The resident-set policy a long-running DeepSeek Harness host boots with, plus the shared collector entry point and the cache budget primitives a cache bounds itself with."
 kind: "package-library"
 ---
 
@@ -61,6 +61,33 @@ maybeGc(true)    // collects now
 
 `maybeGc` builds one process-wide throttle window on first use, so callers do not each carry their own interval bookkeeping. A caller that needs an independent window builds one with `createCollector`.
 
+### Cache budgets
+
+A long-running cache states its budget instead of growing with the workload it observes. `createBoundedMap` retains at most `maxEntries` entries and `maxBytes` priced bytes, dropping the least recently used entry after every `set` — entry count first, bytes second, and never the last entry standing, so one value priced above the whole byte budget is still cached rather than evicting itself:
+
+```ts
+import { createBoundedMap, createIdleCache, estimateJsonBytes, readHeapUsedBytes } from '@deepseek-ai/dsh-memory'
+
+interface Projection { readonly id: string; readonly body: string }
+
+const cache = createBoundedMap<string, Projection>({
+  maxEntries: 64,
+  maxBytes: 8 * 1024 * 1024,
+  // The default prices the value alone; this one prices the key with it.
+  estimateBytes: (value, key) => estimateJsonBytes(value) + estimateJsonBytes(key),
+  onEvict: (key, _value, reason) => { process.stderr.write(`${key} left the cache (${reason})\n`) },
+})
+if (readHeapUsedBytes() > 512 * 1024 * 1024) cache.clear()
+
+const idle = createIdleCache<string, Projection>({ idleTtlMs: 30 * 60 * 1000, maxEntries: 64 })
+idle.get('s-1')   // a hit restamps the key's last activity
+idle.stop()       // clears the sweep timer; the entries stay readable
+```
+
+Iteration is oldest first, matching a `Map`'s insertion order, so a caller that walks `keys()` or `entries()` reclaims in the same order the budgets do. `onEvict` reports one of five reasons: `entries` and `bytes` are the budgets evicting, `delete` and `clear` are the caller asking, and `idle` is the idle window reclaiming an untouched key.
+
+`estimateJsonBytes` prices a value without serializing it: a string by UTF-8 byte length, a number 8 bytes, a boolean, `null`, or `undefined` 4 bytes, a function, symbol, or bigint 32 bytes, a `Uint8Array` or `Buffer` by `byteLength`, a `Date` 24 bytes, and an array, `Map`, `Set`, or object as the sum of its contents. Each object identity is charged once per call, so an alias or a back-reference adds nothing after its first visit — which is also what keeps a cyclic value from spinning the walk. The primitive is an estimate, not a measurement: it prices what a value costs to retain, it serializes nothing, and it is cheap enough to run on every write.
+
 ### Tuning
 
 | Variable | Default | Meaning |
@@ -113,4 +140,4 @@ A runtime that refuses the flag hook yields an inert policy: it logs one line an
 
 ### Tests
 
-`tests/memory.spec.ts` drives the policy with fake timers and an injected collector and clock, so no collection actually runs and no wall-clock interval is waited. The lookup itself is exercised both through a stubbed `globalThis.gc` and through its own flag path. The metric line is driven the same way, and its assertions pin the exact shape of the line — timestamp included — instead of a memory reading that no test can predict.
+`tests/memory.spec.ts` drives the policy with fake timers and an injected collector and clock, so no collection actually runs and no wall-clock interval is waited. The lookup itself is exercised both through a stubbed `globalThis.gc` and through its own flag path. The metric line is driven the same way, and its assertions pin the exact shape of the line — timestamp included — instead of a memory reading that no test can predict. `tests/cache-budget.spec.ts` pins the estimator's per-type prices, the two budgets and the order they settle in, and the idle sweep, which it drives with fake timers and an injected clock; the one value it cannot predict, the heap reading, it compares against the live counter rather than a fixed number.
