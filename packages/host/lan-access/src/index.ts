@@ -3,33 +3,46 @@
  *
  * The harness is most useful from the machine it runs on and from the other
  * machines on the same network — a phone, a tablet, another laptop. This row
- * therefore binds this machine's LAN address by default: every network the
- * machine is attached to *other* than that one keeps its loopback-only posture,
- * container bridges and virtual interfaces included. An operator who wants the
- * old loopback-only posture sets `host: 127.0.0.1`; one who wants every
- * interface sets `host: 0.0.0.0`.
+ * therefore publishes every IPv4 interface this machine holds: the first time
+ * the row runs without a stated host it writes `host: 0.0.0.0` into the
+ * profile's own patch, and that persisted line — not this release's default —
+ * is what every later start binds. Changing the default in a later release
+ * therefore moves nothing for an operator who has already started the harness
+ * once; only an explicit host moves them. An operator who wants the
+ * loopback-only posture sets `host: 127.0.0.1`, and one who wants a single
+ * network sets that network's address.
  *
- * The address it picks is the first interface that carries a network of its
- * own. Docker bridges, veth pairs, hypervisor switches, and tunnels are
- * addresses a phone cannot reach and an operator did not mean, and on a
- * container host they are often reported *before* the physical interface, so
- * they rank last rather than winning by enumeration order. They are ranked,
- * never excluded: a machine whose only address is a VPN interface still binds
- * it.
+ * The hosts this row can be told to bind, in the operator's order of authority:
+ * `--host` from the invocation, then the composed row config (where a
+ * persisted posture lives, since the profile patch outranks every bundle
+ * default), then the shipped posture. With no profile to persist into — an
+ * embedder mounting this row directly — the shipped posture is the narrow one,
+ * `detectLanAddress()`'s answer for a machine that has a LAN and loopback for
+ * one that does not.
  *
- * `detectLanAddress()` answers which address the row binds, and `isLanHost()`
- * answers the question one step before it — whether this machine holds a LAN
- * worth binding at all. The same bridge-and-tunnel distinction decides it: a
- * machine whose every address belongs to a bridge or a tunnel gives a caller
- * something the ranking cannot, namely the difference between "no LAN here"
- * and "the VPN is the only way in".
+ * `detectLanAddress()` picks the address a LAN-preferring fallback binds: the
+ * first interface that carries a network of its own. Docker bridges, veth
+ * pairs, hypervisor switches, and tunnels are addresses a phone cannot reach
+ * and an operator did not mean, and on a container host they are often reported
+ * *before* the physical interface, so they rank last rather than winning by
+ * enumeration order. They are ranked, never excluded: a machine whose only
+ * address is a VPN interface still binds it. `isLanHost()` answers the question
+ * one step before it — whether this machine holds a LAN worth binding at all.
+ *
+ * Every address this row publishes is IPv4: `0.0.0.0` is the IPv4 wildcard and
+ * never an IPv6 listener, and `detectLanAddress()` reads IPv4 addresses only. A
+ * host that wants IPv6 exposure needs a face this row does not provide.
  *
  * A reachable address is reachable by anyone who can route to it, so this row
  * refuses a bind it cannot authenticate: every non-loopback host requires the
  * persistent access token, which is resolved (and created when the harness home
  * has none) before the service is provided. The token is the only thing between
  * the network and remote code execution, so a host that cannot establish one
- * fails the boot instead of listening unauthenticated.
+ * fails the boot instead of listening unauthenticated. A non-loopback bind also
+ * warns once through the startup log — what is bound, what the token is, and
+ * the two ways back to a narrower posture. It is a warning rather than a
+ * prompt: exposure is a posture the operator states, not a question asked at
+ * boot, and nothing here blocks the start.
  *
  * Returning to loopback is one line — `host: 127.0.0.1` in this row — and
  * removing the row entirely also works: the web bundle reads `lanAccess` through
@@ -46,6 +59,7 @@ import { networkInterfaces, type NetworkInterfaceInfo } from 'node:os'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { ACCESS_TOKEN_FILENAME, ensureAccessToken } from '@deepseek-ai/dsh-access-token'
+import { writeProfileRowConfig } from '@deepseek-ai/dsh-config-editor'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 
 /** Stable Cordis plugin name. */
@@ -56,6 +70,22 @@ export const LAN_ACCESS_SERVICE = 'lanAccess'
 
 /** The loopback literal every non-exposed posture binds. */
 export const LOOPBACK_HOST = '127.0.0.1'
+
+/** The IPv4 wildcard: every IPv4 interface this machine holds, and no IPv6 one. */
+export const BIND_ALL_HOST = '0.0.0.0'
+
+/** The shipped patch row identity, used when this activation runs outside a Loader. */
+const SHIPPED_ROW = { id: 'lan-access', name: '@deepseek-ai/dsh-host-lan-access' } as const
+
+/**
+ * The `webStartup` values this row reads. It narrows the web bundle's own
+ * service to the one field a bind decision needs, so this package depends on
+ * the service's shape rather than on the bundle that provides it.
+ */
+interface WebStartupHosts {
+  /** `--host`, absent when the invocation did not name one. */
+  readonly host?: string
+}
 
 /** Hosts that name this machine alone. */
 const LOOPBACK_HOSTS = new Set([LOOPBACK_HOST, 'localhost', '::1', '[::1]'])
@@ -80,17 +110,19 @@ export interface LanAccessValues {
   readonly host: string
 }
 
+/** Row configuration surface; see {@link Config.host} for the posture default. */
 export interface Config {
   /**
-   * Explicit bind host. Omit it to bind this machine's LAN address — the first
-   * interface carrying a network of its own, with bridges and tunnels ranked
-   * last and loopback as the fallback when the machine has none. `127.0.0.1`
-   * restores the loopback-only posture; `0.0.0.0` binds every interface.
+   * Explicit bind host. Omit it to publish every IPv4 interface: the first run
+   * without one persists `0.0.0.0` into the profile patch, so the posture
+   * survives later releases changing their default. `127.0.0.1` restores the
+   * loopback-only posture, and a single network's address publishes that
+   * interface alone.
    */
   host?: string
 }
 
-/** Row configuration; the default binds this machine's LAN address. */
+/** Row configuration; the default publishes every IPv4 interface. */
 export const Config: z<Config> = z.object({
   host: z.string(),
 })
@@ -289,11 +321,88 @@ export function resolveBindHost(configured: string | undefined, detected: string
  * @param config - the resolved row configuration.
  */
 export async function apply(ctx: Context, config?: Config): Promise<void> {
-  const host = resolveBindHost(config?.host, detectLanAddress())
+  const host = await resolveHost(ctx, config)
   if (!isLoopbackHost(host)) {
     // Refuse the exposure when nothing can authenticate it. The connection half
     // exchanges this same token for the browser cookie.
     await ensureAccessToken(dshHomePath(ACCESS_TOKEN_FILENAME))
+    const warning = exposureWarning(host, ctx.get('profileContext')?.patchPath)
+    ctx.logger.warn(warning)
+    // The default web exporter filters warn records, and an exposure warning
+    // that never reaches the terminal is not a warning. Keep the structured
+    // record for logger consumers and put the same line on the console the
+    // operator actually reads.
+    console.warn(warning)
   }
   ctx.provide(LAN_ACCESS_SERVICE, { host })
+}
+
+/**
+ * The patch row this activation persists its posture in.
+ *
+ * The row the Loader is running, not a fixed literal: a profile patch addresses
+ * rows by id and plugin name, and a patch row whose name differs from the
+ * composed row's is skipped, so writing the identity that is actually mounted
+ * keeps one truth even when a composition spells the row differently. An
+ * activation outside a Loader — an embedder, or a test calling `apply` — has no
+ * row and states the shipped identity.
+ *
+ * @param ctx - the activating plugin context.
+ * @returns the row's id and plugin name.
+ */
+function patchRow(ctx: Context): { id: string; name: string } {
+  const options = ctx.fiber.entry?.options
+  return options === undefined ? SHIPPED_ROW : { id: options.id, name: options.name }
+}
+
+/**
+ * The host this row binds, persisting the shipped posture the first time a
+ * profile mounts the row without a stated host.
+ *
+ * The operator's word comes first: `--host` from the invocation, then the
+ * composed row config — which is where a persisted posture lives, since the
+ * profile patch outranks every bundle default — and only then this release's
+ * shipped posture. With no profile to write into, an embedder mounting this row
+ * directly keeps the narrow posture: this machine's LAN address when it has
+ * one, loopback when it does not. With one, the first enable states `0.0.0.0`
+ * in the profile patch so the posture outlives this release's default, and a
+ * later start reads it back as the composed config rather than writing again.
+ *
+ * @param ctx - plugin context; `webStartup` and `profileContext` are read when present.
+ * @param config - the composed row configuration.
+ * @returns the host to bind.
+ */
+async function resolveHost(ctx: Context, config?: Config): Promise<string> {
+  const flagged = (ctx.get('webStartup') as WebStartupHosts | undefined)?.host
+  const stated = flagged !== undefined && flagged.length > 0 ? flagged : config?.host
+  if (stated !== undefined && stated.length > 0) return stated
+  const profile = ctx.get('profileContext')
+  if (profile === undefined) return resolveBindHost(undefined, detectLanAddress())
+  try {
+    await writeProfileRowConfig(profile, { ...patchRow(ctx), config: { host: BIND_ALL_HOST } })
+  } catch (error) {
+    // A profile that cannot be written still states the posture it was
+    // admitted with; the operator sees both the failure and the bind.
+    ctx.logger.warn(`lan-access: could not persist host ${BIND_ALL_HOST} in ${profile.patchPath}: ${String(error)}`)
+  }
+  return BIND_ALL_HOST
+}
+
+/**
+ * The startup warning for a bind anything on the network may reach.
+ *
+ * It states what was bound, what the token is worth, and the two ways back to a
+ * narrower posture — the profile patch to edit and the flag to pass — because
+ * the alternative to a warning is a harness that is exposed and silent about it.
+ *
+ * @param host - the host this row bound.
+ * @param patchPath - the profile patch the posture is persisted in, when there is one.
+ * @returns the warning text.
+ */
+function exposureWarning(host: string, patchPath: string | undefined): string {
+  return `lan-access: bound ${host}, reachable by anything that can route to it. `
+    + `${BIND_ALL_HOST} publishes every IPv4 interface this machine holds, container bridges included, and never an IPv6 one. `
+    + 'The persistent access token is the only authenticator on that surface. '
+    + `For a narrower posture set "host: 127.0.0.1" in ${patchPath ?? 'the profile patch cordis.patch.yml'}, `
+    + 'or one LAN address such as 192.168.1.5 to publish a single network; --host 127.0.0.1 does the same for one run.'
 }

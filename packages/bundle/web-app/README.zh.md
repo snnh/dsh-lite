@@ -61,7 +61,7 @@ dsh --profile web --no-open --port 8080
 <a id="public-deployments"></a>
 ### 监听、信任与公开部署
 
-默认情况下 GUI 绑定本机的局域网地址（由 `lan-access` 行解析：第一个自带网络的接口，容器网桥与隧道排在最后），因此同网络的其它设备可以访问；在该行上设 `host: 127.0.0.1` 可恢复仅 loopback。可重复的 `--trusted-host` 会添加其 Host/Origin 栅栏接受的 authority，因此远端浏览器要么经由剥离前缀的代理访问，要么通过以可信主机名呈现的端口转发客户端访问。
+默认情况下 GUI 发布本机持有的所有 IPv4 接口：随附的 `lan-access` 行解析为 `0.0.0.0`，且 profile 中的首次启动会把该 host 持久化进该 profile 的 `cordis.patch.yml`，因此之后每次启动绑定的都是这行持久化配置，而不是后续版本随附的值。接入的每个网络都能访问它，容器网桥也在其中，且不发布任何 IPv6 接口；在该行上设 `host: 127.0.0.1` 可恢复仅 loopback，写某个网络自己的地址则只发布那一个网络。对单次运行而言 `--host` 高于持久化姿态，`--host 0.0.0.0` 亦然。非回环绑定要求持久访问令牌，并在启动日志中写入一条暴露警告。可重复的 `--trusted-host` 会添加其 Host/Origin 栅栏接受的 authority，因此远端浏览器要么经由剥离前缀的代理访问，要么通过以可信主机名呈现的端口转发客户端访问。
 
 `--public-url` 公告浏览器使用的 HTTP(S) 根——打印与打开的启动 URL、`DSH_WEB_URL` 与 web 表层定位。公告不授予任何信任：浏览器可见的 authority 还必须用 `--trusted-host` 点名。该 flag 不配置监听器、路由或 cookie 作用域，因为外部链路归代理所有：[在反向代理之后发布 Web UI](../../../docs/user/guide/public-deployments.zh.md)列出了这样的部署必须提供什么。
 
@@ -87,7 +87,7 @@ dsh --profile web --no-open --port 8080
 
 ### patch 语义
 
-patch 会替换目标行的整个 `config`，因此每个 Web 行都重述自己拥有的每个键：基础行上的 persona 前缀与后缀模板、`DSH_TOOLS_MODE` PTC mode 开关与 `session-query-sqlite` 值，随后 `insert` 添加 Web 宿主行、传输层与浏览器名录。`webserver` 与 `web-runtime` 行注入 `webStartup` 提供方并直接读取本次调用的取值；`connection` 行则改为读取 web-runtime 行发布的、与绑定相关的 `webRuntime` 值，即该提供方的 authority 加上全接口绑定的 LAN 字面量。base 以进程级挂载的按 agent 工具行在这里被禁用，由 preset 名录接管；每项宿主层与 preset 层归属决策的理由以行内注释写在 patch 里。
+patch 会替换目标行的整个 `config`，因此每个 Web 行都重述自己拥有的每个键：基础行上的 persona 前缀与后缀模板、`DSH_TOOLS_MODE` PTC mode 开关与 `session-query-sqlite` 值，随后 `insert` 添加 Web 宿主行、传输层与浏览器名录。`webserver` 与 `web-runtime` 行注入 `webStartup` 提供方并直接读取本次调用的取值，`lan-access` 行也注入它，以便绑定所声明的 `--host`；`connection` 行则改为读取 web-runtime 行发布的、与绑定相关的 `webRuntime` 值，即该提供方的 authority 加上全接口绑定的 LAN 字面量。base 以进程级挂载的按 agent 工具行在这里被禁用，由 preset 名录接管；每项宿主层与 preset 层归属决策的理由以行内注释写在 patch 里。
 
 ### 公告应用 URL
 
@@ -163,7 +163,7 @@ URL 行与浏览器交接都是就绪信号：监督方一观察到该行就发�
 - **只能观察到交接的启动**——GUI 只报告浏览器被请求打开，而不是它确实打开了；之后的浏览器退出永远不会上报，打印的 URL 是你的手动回退路径。
 - **SSH 会话保留 URL 但跳过浏览器交接**——没有公告根时，打印的 URL 指向远端宿主机 loopback 端点；SSH 客户端或编辑器必须暴露并打开本地转发地址。
 - **`BROWSER` 覆盖只能来自环境**——被发现的 `.env` 不能设置 `BROWSER`；只有继承值能为自动交接选择可执行文件。
-- **CLI 不支持绑定所有网络接口**——出于安全考虑，`--host 0.0.0.0` 会在启动时被拒绝；需要监听全部接口的树请在 `lan-access` 行上设 `host: 0.0.0.0`。
+- **已发布的绑定是持久化姿态，而非单次运行的选择**——不写 host 意味着所有 IPv4 接口，且首次启动会把 `host: 0.0.0.0` 写入 profile 的 `cordis.patch.yml`；`host: 127.0.0.1` 或 `--host 127.0.0.1` 是回到回环的办法，删掉持久化的键则重新采用版本随附的值。
 
 <a id="dev-note"></a>
 ### 开发备注

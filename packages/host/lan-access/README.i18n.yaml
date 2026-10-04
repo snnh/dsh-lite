@@ -3,14 +3,14 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/host/lan-access/README.md
 /:
-  en: bd859bb5b5037b84
-  zh: c023453783696bff
+  en: dca482e73717a69b
+  zh: b990adf42072cbef
 /deepseek-ai-dsh-host-lan-access:
   en: c1f2e255968abe45
   zh: a1341d77bb380bfb
 /deepseek-ai-dsh-host-lan-access/summary:
-  en: de048956d9591add
-  zh: f5e0cb6d5ba4f580
+  en: 669d2ef5f1faf8ac
+  zh: cb95e72b2b605e7c
 /deepseek-ai-dsh-host-lan-access/table-of-contents:
   en: 80b31a934611cb4a
   zh: 3c9647af7a8067c3
@@ -18,32 +18,32 @@
   en: bbff250eba0f1b89
   zh: 0a618f05cc88ee2b
 /deepseek-ai-dsh-host-lan-access/use-this-package/choosing-the-bind-address:
-  en: 3774e7bbb7d0e582
-  zh: 19fab729eba885e7
+  en: c2fe429a9d8bcabb
+  zh: e3511ac36d7369d4
 /deepseek-ai-dsh-host-lan-access/use-this-package/returning-to-loopback:
-  en: cb2118584d697b7f
-  zh: 6b31f686e150025c
+  en: f0cf8a5f9006cc5d
+  zh: 4ac2b8f92ea3171e
 /deepseek-ai-dsh-host-lan-access/understand-the-implementation:
   en: ee4615a04fa6503d
   zh: ee2c5fb2204a43cf
-/deepseek-ai-dsh-host-lan-access/understand-the-implementation/why-the-default-is-the-lan-address:
-  en: c212371ef27af878
-  zh: 75e71d11521a4f28
+/deepseek-ai-dsh-host-lan-access/understand-the-implementation/why-the-default-publishes-every-interface:
+  en: f52d64c7d88b5c7d
+  zh: aae92348a1b02e7d
 /deepseek-ai-dsh-host-lan-access/understand-the-implementation/what-the-refusal-covers:
-  en: 0ae14e83fed47a0f
-  zh: 0ef56a922e3cf88b
+  en: e834af3cb3fa3d65
+  zh: c8d36b21c3042cf8
 /deepseek-ai-dsh-host-lan-access/further-exploration:
-  en: 131de386ec0864b4
-  zh: 0ed2c741cebb73fa
+  en: 7a58169bf44c9e3f
+  zh: ecff4b52ea3c8123
 /deepseek-ai-dsh-host-lan-access/known-limitations-and-deferred-work:
-  en: a73eea13d41ecaee
-  zh: f2addef734abd591
+  en: 8679355e0c48fa92
+  zh: ecc6c2bdcf7564e5
 /deepseek-ai-dsh-host-lan-access/dev-note:
   en: 7410b003a5057dc2
   zh: 1432e59879b44e2d
 /deepseek-ai-dsh-host-lan-access/dev-note/coverage:
-  en: 8425d413e55d16ab
-  zh: b6a7776f9397e7a6
+  en: 44ec42cd19ca3098
+  zh: 30fc8bc410fc8900
 /deepseek-ai-dsh-host-lan-access/dev-note/tests:
-  en: 7d8575fb3d548e16
-  zh: 5f80164f03cf7e17
+  en: 274640c40c9444ea
+  zh: 87df9719e6f5f655

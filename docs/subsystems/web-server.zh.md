@@ -31,8 +31,14 @@ interface WebRoute {
 ```ts type-equiv
 /** Web server listen and response-compression config. */
 interface Config {
-  /** Listen host; the two supported values are loopback and all-interfaces. */
-  host: '127.0.0.1' | '0.0.0.0'
+  /**
+   * Listen host. `127.0.0.1` (the default posture) is loopback only; `0.0.0.0`
+   * is every interface; any other address binds that one local address, which
+   * is how a host exposes itself on a single network without listening on the
+   * others. The server carries no TLS, authentication, or origin policy of its
+   * own, so a reachable bind is the caller's security decision.
+   */
+  host: string
   /** Listen port; zero requests an OS-assigned port. */
   port: number
   /** Response compression for socket-backed HTTP requests. @default 'none' */
@@ -44,7 +50,7 @@ interface Config {
 }
 ```
 
-`host` 只接受 `127.0.0.1`（默认姿态）和 `0.0.0.0`（刻意的网络暴露）。载体本身不拥有 TLS、认证或 Origin 策略，因此绑定到非回环地址会暴露服务器，除非组合层提供这些控制。`compression` 默认为 `none`；随附的 Web 组合选择 gzip level 1 和 1024 字节阈值。随附的 `dsh web` 命令选择 loopback 并拒绝 `--host 0.0.0.0`；其 Connection 插件为每个 Host API route 与 stream 提供 Host/Origin 校验和浏览器会话认证。其他组合自行拥有绑定与路由认证策略。dist 位置是认领席位的前端插件的组装事实。
+`host` 接受任意非空监听地址；随附各行使用 `127.0.0.1`（仅回环）与 `0.0.0.0`（所有 IPv4 接口）。载体本身不拥有 TLS、认证或 Origin 策略，因此绑定到非回环地址会暴露服务器，除非组合层提供这些控制。`compression` 默认为 `none`；随附的 Web 组合选择 gzip level 1 和 1024 字节阈值。随附的 `dsh web` 命令从 `lan-access` 行取得 host——先是 `--host`，然后是组合或持久化的取值——因此除非操作者另行声明，它会发布所有 IPv4 接口；其 Connection 插件为每个 Host API route 与 stream 提供 Host/Origin 校验和浏览器会话认证。其他组合自行拥有绑定与路由认证策略。dist 位置是认领席位的前端插件的组装事实。
 
 ## 服务
 

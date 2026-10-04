@@ -3,17 +3,17 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/upgrade-guide/v0.2.0-rc.2/web-lan-exposure/guide.md
 /:
-  en: bfd3f3d0ce3aee55
-  zh: f41c590318229b8f
-/web-profile-reachable-from-the-local-network-by-default:
-  en: 94cba4aff6f8704e
-  zh: 15da47234a4fbebb
-/web-profile-reachable-from-the-local-network-by-default/change:
-  en: 1c3a7ee2da5aed30
-  zh: b93279b65d8a8a2e
-/web-profile-reachable-from-the-local-network-by-default/migration:
-  en: db71ff39f25f3555
-  zh: 95ae4128645f084a
-/web-profile-reachable-from-the-local-network-by-default/migration/security-boundary:
-  en: ec6f43c452b7ad0e
-  zh: 326e28b0dccc527d
+  en: a9bce43fb73e0029
+  zh: 7c702a98fb06fdbd
+/web-profile-publishes-every-ipv4-interface-by-default:
+  en: 6508b97edad35610
+  zh: 0b8996eed67677dd
+/web-profile-publishes-every-ipv4-interface-by-default/change:
+  en: 49c746b1c1130665
+  zh: 9e10965a25f18b3c
+/web-profile-publishes-every-ipv4-interface-by-default/migration:
+  en: 08e34e8e231763ac
+  zh: d51f6f579ea2863f
+/web-profile-publishes-every-ipv4-interface-by-default/migration/security-boundary:
+  en: 3aae7d6ff7edec0a
+  zh: a0d617483f27bd41

@@ -375,13 +375,17 @@ describe.skipIf(!existsSync(dshBin))('dsh BUILT bin (node lib/bin.js, no tsx)', 
       expect(web.stdout).toContain('--public-url <url>')
       expect(web.stdout).not.toContain('dsh web: http://')
 
-      const wildcardHost = await runBuiltBin(['web', '--host', '0.0.0.0'], {
+      // `--host 0.0.0.0` is no longer refused: the flag reaches the lan-access
+      // row, which persists that posture and binds every IPv4 interface. The
+      // invocation still exits before any row activates, on the port guard.
+      const wildcardHost = await runBuiltBin(['web', '--host', '0.0.0.0', '--port', 'abc'], {
         DSH_HOME: home,
         DSH_TELEMETRY_DISABLED: '1',
       })
       expect(wildcardHost.code).toBe(1)
       expect(wildcardHost.stdout).toBe('')
-      expect(wildcardHost.stderr).toContain('--host 0.0.0.0 is intentionally not supported yet for safety: it would expose remote code execution to the network; use 127.0.0.1 instead')
+      expect(wildcardHost.stderr).toContain('--port must be a number')
+      expect(wildcardHost.stderr).not.toContain('0.0.0.0 is intentionally not supported')
       expect(wildcardHost.stderr).not.toContain('dsh web: http://')
 
       const headlessHelp = await runBuiltBin(['headless', '--help'], {

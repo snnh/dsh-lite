@@ -257,7 +257,7 @@ export interface SettingsControllerInternals {
 ## `@deepseek-ai/dsh-api-terminal-controller`
 
 - `inject`: `subprocess` · `sandboxPolicy` · `typert`
-- `source`: [`packages/api/terminal-controller/src/index.ts:26`](../packages/api/terminal-controller/src/index.ts)
+- `source`: [`packages/api/terminal-controller/src/index.ts:27`](../packages/api/terminal-controller/src/index.ts)
 
 ```ts config-catalog
 /** Deployment limits and an optional shell profile. */
@@ -283,6 +283,14 @@ export interface Config {
   readonly scrollback: number
   /** Maximum queued UTF-8 frame bytes per output follower before disconnection. */
   readonly maxBufferedBytes: number
+  /**
+   * Host-wide ceiling in bytes on the screen and follower-queue buffers every
+   * Session's terminals may reserve together; `0` disables the ceiling. A
+   * request that would cross it is refused with `terminal/capacity-reached`,
+   * and no running terminal or attached follower is reclaimed to make room.
+   * @default 268435456
+   */
+  readonly maxTotalBufferedBytes?: number
   /** Maximum UTF-8 bytes in one input request. */
   readonly maxInputBytes: number
   /** Provider process-termination grace period in milliseconds. */
@@ -437,7 +445,7 @@ export type Config = LocalConfig
 ## `@deepseek-ai/dsh-client-connection`
 
 - `inject`: `credentials`
-- `source`: [`packages/client/connection/src/index.ts:92`](../packages/client/connection/src/index.ts)
+- `source`: [`packages/client/connection/src/index.ts:94`](../packages/client/connection/src/index.ts)
 
 ```ts config-catalog
 /** Browser authentication, request limits, and connection recovery configuration. */
@@ -1251,7 +1259,7 @@ export interface Config {
 
 ## `@deepseek-ai/dsh-fs-local`
 
-- `source`: [`packages/fs/fs-local/src/index.ts:45`](../packages/fs/fs-local/src/index.ts)
+- `source`: [`packages/fs/fs-local/src/index.ts:44`](../packages/fs/fs-local/src/index.ts)
 
 ```ts config-catalog
 /** Configuration for the local filesystem backend. */
@@ -1330,12 +1338,12 @@ export interface Config {
 
 ## `@deepseek-ai/dsh-hmr`
 
-- `refs`: `ChokidarOptions` (`chokidar`)
+- `refs`: [`WatchOptions`](../packages/util/fs-watcher/src/index.ts)
 - `source`: [`packages/boot/hmr/src/index.ts:53`](../packages/boot/hmr/src/index.ts)
 
 ```ts config-catalog
 /** Module roots and watcher timing, with Chokidar deployment options. */
-export interface HmrConfig extends ChokidarOptions {
+export interface HmrConfig extends WatchOptions {
   /** Directory resolved against the owning context's base URL. */
   base?: string
   /** Module watch roots; an empty list leaves only explicit configuration watches. */
@@ -1448,6 +1456,28 @@ export interface Config {
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-host-frontend-static -->
 
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-host-lan-access -->
+<a id="deepseek-aidsh-host-lan-access"></a>
+
+## `@deepseek-ai/dsh-host-lan-access`
+
+- `source`: [`packages/host/lan-access/src/index.ts:114`](../packages/host/lan-access/src/index.ts)
+
+```ts config-catalog
+/** Row configuration surface; see {@link Config.host} for the posture default. */
+export interface Config {
+  /**
+   * Explicit bind host. Omit it to publish every IPv4 interface: the first run
+   * without one persists `0.0.0.0` into the profile patch, so the posture
+   * survives later releases changing their default. `127.0.0.1` restores the
+   * loopback-only posture, and a single network's address publishes that
+   * interface alone.
+   */
+  host?: string
+}
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-host-lan-access -->
+
 <!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-host-open-in-app -->
 <a id="deepseek-aidsh-host-open-in-app"></a>
 
@@ -1527,8 +1557,14 @@ export interface Config {
 ```ts config-catalog
 /** Web server listen and response-compression config. */
 export interface Config {
-  /** Listen host; the two supported values are loopback and all-interfaces. */
-  host: '127.0.0.1' | '0.0.0.0'
+  /**
+   * Listen host. `127.0.0.1` (the default posture) is loopback only; `0.0.0.0`
+   * is every interface; any other address binds that one local address, which
+   * is how a host exposes itself on a single network without listening on the
+   * others. The server carries no TLS, authentication, or origin policy of its
+   * own, so a reachable bind is the caller's security decision.
+   */
+  host: string
   /** Listen port; zero requests an OS-assigned port. */
   port: number
   /** Response compression for socket-backed HTTP requests. @default 'none' */
@@ -2638,7 +2674,7 @@ export type JsonlCompression = 'zstd' | 'none'
 ## `@deepseek-ai/dsh-session-projection-cache`
 
 - `inject`: `storageDomain` · `sessionProjections` · `sessions`
-- `source`: [`packages/session/session-projection-cache/src/index.ts:75`](../packages/session/session-projection-cache/src/index.ts)
+- `source`: [`packages/session/session-projection-cache/src/index.ts:119`](../packages/session/session-projection-cache/src/index.ts)
 
 ```ts config-catalog
 /**
@@ -2646,13 +2682,27 @@ export type JsonlCompression = 'zstd' | 'none'
  * universally correct value, so the composition states them explicitly
  * (cordis.yml); the three mandatory write points (session creation,
  * `turn/end`, and session disposal) are policy, not tunables, and always
- * fire.
+ * fire. The two resident bounds are the opposite kind of setting: they have
+ * conservative defaults a composition may tighten or lift, because a cache
+ * that grows with the session directory is what the bound exists to prevent.
  */
 export interface Config {
   /** Committed events per session that force a durable checkpoint write between mandatory points. */
   writeEveryEvents: number
   /** Longest time (milliseconds) a dirty checkpoint may stay unwritten between mandatory points. */
   writeIntervalMs: number
+  /**
+   * Session records the resident copy retains before it drops the least
+   * recently served ones; `0` leaves the entry count unbounded.
+   * @default 5000
+   */
+  residentMaxEntries?: number
+  /**
+   * Estimated bytes the resident copy retains before it drops the least
+   * recently served records; `0` leaves the byte account unbounded.
+   * @default 67108864
+   */
+  residentMaxBytes?: number
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-session-projection-cache -->
@@ -4479,6 +4529,7 @@ Imported as libraries by other packages; a `cordis.yml` cannot load them.
 <!-- BEGIN GENERATED config-catalog:library -->
 | `package` | `inject` | `source` |
 | --- | --- | --- |
+| `@deepseek-ai/dsh-access-token` | — | [`packages/util/access-token/src/index.ts`](../packages/util/access-token/src/index.ts) |
 | `@deepseek-ai/dsh-agent-loop-testkit` | — | [`packages/test-support/agent-loop-testkit/src/index.ts`](../packages/test-support/agent-loop-testkit/src/index.ts) |
 | `@deepseek-ai/dsh-anonymous-user-id` | — | [`packages/identity/anonymous-user-id/src/index.ts`](../packages/identity/anonymous-user-id/src/index.ts) |
 | `@deepseek-ai/dsh-app-boot` | — | [`packages/boot/app-boot/src/index.ts`](../packages/boot/app-boot/src/index.ts) |
@@ -4500,6 +4551,7 @@ Imported as libraries by other packages; a `cordis.yml` cannot load them.
 | `@deepseek-ai/dsh-experimental-voice-input-bundle` | — | [`packages/experimental/voice-input-bundle/src/index.ts`](../packages/experimental/voice-input-bundle/src/index.ts) |
 | `@deepseek-ai/dsh-experimental-webworker-packer` | — | [`packages/experimental/webworker-packer/src/index.ts`](../packages/experimental/webworker-packer/src/index.ts) |
 | `@deepseek-ai/dsh-experimental-webworker-runtime` | — | [`packages/experimental/webworker-runtime/src/index.ts`](../packages/experimental/webworker-runtime/src/index.ts) |
+| `@deepseek-ai/dsh-fs-watcher` | — | [`packages/util/fs-watcher/src/index.ts`](../packages/util/fs-watcher/src/index.ts) |
 | `@deepseek-ai/dsh-home-paths` | — | [`packages/util/home-paths/src/index.ts`](../packages/util/home-paths/src/index.ts) |
 | `@deepseek-ai/dsh-hook-protocol` | — | [`packages/hooks/hook-protocol/src/index.ts`](../packages/hooks/hook-protocol/src/index.ts) |
 | `@deepseek-ai/dsh-http-proxy` | — | [`packages/util/http-proxy/src/index.ts`](../packages/util/http-proxy/src/index.ts) |
@@ -4508,6 +4560,7 @@ Imported as libraries by other packages; a `cordis.yml` cannot load them.
 | `@deepseek-ai/dsh-llm-deepseek` | — | [`packages/llm/llm-deepseek/src/index.ts`](../packages/llm/llm-deepseek/src/index.ts) |
 | `@deepseek-ai/dsh-llm-mock-server` | — | [`packages/test-support/llm-mock-server/src/index.ts`](../packages/test-support/llm-mock-server/src/index.ts) |
 | `@deepseek-ai/dsh-loader-smoke` | — | [`packages/test-support/loader-smoke/src/index.ts`](../packages/test-support/loader-smoke/src/index.ts) |
+| `@deepseek-ai/dsh-memory` | — | [`packages/util/memory/src/index.ts`](../packages/util/memory/src/index.ts) |
 | `@deepseek-ai/dsh-native-command` | — | [`packages/util/native-command/src/index.ts`](../packages/util/native-command/src/index.ts) |
 | `@deepseek-ai/dsh-output-retention` | — | [`packages/util/output-retention/src/index.ts`](../packages/util/output-retention/src/index.ts) |
 | `@deepseek-ai/dsh-package-manifest` | — | [`packages/util/package-manifest/src/index.ts`](../packages/util/package-manifest/src/index.ts) |

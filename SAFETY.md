@@ -18,6 +18,7 @@ Do not rely on DeepSeek Harness as the sole security control for untrusted workl
 
 - Run the project with the least privileges and access required.
 - Prefer a disposable virtual machine, container, or dedicated environment.
+- Treat the Web UI's network posture as part of that exposure: `dsh web` publishes every IPv4 interface by default and its printed access token is the only authenticator on that surface, so keep the server on loopback unless every network it answers on is trusted.
 - Keep backups of files that the project can access.
 - Do not expose sensitive credentials or data unless you accept the risk.
 - Review plugins, configuration, and proposed commands before allowing them to run.

@@ -61,7 +61,7 @@ The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-a
 <a id="public-deployments"></a>
 ### Listening, trust, and public deployments
 
-By default the GUI binds this machine's LAN address (resolved by the `lan-access` row: the first interface carrying a network of its own, with container bridges and tunnels ranked last), so it is reachable from other devices on the same network; `host: 127.0.0.1` on that row restores loopback-only. Repeatable `--trusted-host` adds the authorities its Host/Origin fence accepts, so a remote browser reaches it behind a prefix-stripping proxy or through a port-forwarding client that presents a trusted hostname.
+By default the GUI publishes every IPv4 interface this machine holds: the shipped `lan-access` row resolves to `0.0.0.0`, and the first start in a profile persists that host into the profile's `cordis.patch.yml`, so every later start binds the persisted value rather than whatever a later release ships. Every attached network reaches it, container bridges included, and no IPv6 interface is published; `host: 127.0.0.1` on that row restores loopback-only, and one network's own address publishes just that network. `--host` outranks the persisted posture for a single run, `--host 0.0.0.0` included. A non-loopback bind requires the persistent access token and writes one exposure warning into the startup log. Repeatable `--trusted-host` adds the authorities its Host/Origin fence accepts, so a remote browser reaches it behind a prefix-stripping proxy or through a port-forwarding client that presents a trusted hostname.
 
 `--public-url` advertises the HTTP(S) root browsers use — the printed and opened startup URL, `DSH_WEB_URL`, and the web-surface orientation. Advertisement grants no trust: the browser-visible authority must also be named with `--trusted-host`. The flag configures no listener, routing, or cookie scope, because the proxy owns the external leg: [Publish the Web UI behind a reverse proxy](../../../docs/user/guide/public-deployments.md) lists what such a deployment must provide.
 
@@ -87,7 +87,7 @@ The bundle is one patch layer of five files plus one runtime glue plugin: `cordi
 
 ### Patch semantics
 
-A patch replaces the targeted row's whole `config`, so each web row restates every key it owns: the persona prefix and suffix templates, the `DSH_TOOLS_MODE` PTC mode opt-in, and the `session-query-sqlite` values on the base rows, then `insert` adds the web host rows, transport, and browser roster. The `webserver` and `web-runtime` rows inject the `webStartup` provider and read their invocation values directly; the `connection` row instead reads the bind-dependent `webRuntime` values the web-runtime row publishes, which are that provider's authorities plus the LAN literals of an all-interfaces bind. The per-agent tool rows the base mounts process-wide are disabled here and the preset roster takes over; the reasoning for each host-plane versus preset-plane decision is inline in the patch.
+A patch replaces the targeted row's whole `config`, so each web row restates every key it owns: the persona prefix and suffix templates, the `DSH_TOOLS_MODE` PTC mode opt-in, and the `session-query-sqlite` values on the base rows, then `insert` adds the web host rows, transport, and browser roster. The `webserver` and `web-runtime` rows inject the `webStartup` provider and read their invocation values directly, and the `lan-access` row injects it to bind the `--host` it names; the `connection` row instead reads the bind-dependent `webRuntime` values the web-runtime row publishes, which are that provider's authorities plus the LAN literals of an all-interfaces bind. The per-agent tool rows the base mounts process-wide are disabled here and the preset roster takes over; the reasoning for each host-plane versus preset-plane decision is inline in the patch.
 
 ### Advertised application URL
 
@@ -163,7 +163,7 @@ These limits tell you what to expect in unusual setups — a source checkout, SS
 - **Only the handoff start is observable** — the GUI reports that the browser was asked to open, not that it actually opened; a later browser exit is never reported, and the printed URL is your manual fallback.
 - **SSH sessions keep the URL but skip the browser handoff** — without an advertised root the printed URL names the remote host's loopback endpoint; the SSH client or editor must expose and open the local forwarded address.
 - **`BROWSER` overrides only come from the environment** — a discovered `.env` cannot set `BROWSER`; only an inherited value can choose the executable for the automatic handoff.
-- **Binding all network interfaces is not supported from the CLI** — `--host 0.0.0.0` is rejected at startup for safety; a tree that needs every interface sets `host: 0.0.0.0` on the `lan-access` row instead.
+- **The published bind is a persisted posture, not a per-run choice** — no host means every IPv4 interface, and the first start writes `host: 0.0.0.0` into the profile's `cordis.patch.yml`; `host: 127.0.0.1` or `--host 127.0.0.1` is the way back to loopback, and deleting the persisted key re-adopts whatever the release ships.
 
 <a id="dev-note"></a>
 ### Dev Note

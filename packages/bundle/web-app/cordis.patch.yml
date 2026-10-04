@@ -171,16 +171,21 @@
     # ── layer 2: transport/service ──────────────────────────────────────────────
 
     # Network exposure, on by default. This row decides the address the web
-    # server binds: with no `host` it takes this machine's LAN address, so the
-    # harness is reachable from the local network while container bridges and
-    # other interfaces stay loopback-only. A network-reachable bind requires the
-    # persistent access token, so the row resolves (and creates) it before
-    # providing `lanAccess`, and refuses the bind when it cannot. Set
-    # `host: 127.0.0.1` for the loopback-only posture, or `host: 0.0.0.0` for
-    # every interface. See that package's README for the TLS and
-    # peer-allow-list boundaries this does not provide.
+    # server binds: with no `host` it publishes every IPv4 interface and
+    # persists `0.0.0.0` into this profile's patch the first time it runs, so
+    # later releases changing their default move nothing for an operator who has
+    # already started once. An explicit `--host` (read through the web-startup
+    # provider above) wins over the persisted posture, then the row's own
+    # config. A network-reachable bind requires the persistent access token, so
+    # the row resolves (and creates) it before providing `lanAccess`, warns once
+    # in the startup log about what it exposed and how to narrow it, and refuses
+    # the bind when it cannot authenticate. Set `host: 127.0.0.1` for the
+    # loopback-only posture, or this machine's LAN address for one network. See
+    # that package's README for the TLS and peer-allow-list boundaries this does
+    # not provide.
     - id: lan-access
       name: '@deepseek-ai/dsh-host-lan-access'
+      inject: [webStartup]
 
     # Plain route-registration carrier; host and port come from the app's
     # webStartup provider, with these deployment fallbacks. The dist is served
