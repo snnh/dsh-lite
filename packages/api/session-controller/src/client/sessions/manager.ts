@@ -72,12 +72,13 @@ interface ProjectionInflight {
 
 /**
  * Default bound on retained list-entry identities
- * ({@link SessionManagerOptions.entryCacheMaxEntries}). Comfortably above any
- * catalog a sidebar lists at once, so ordinary sessions never lose entry
- * identity, while a pathological catalog cannot pin one entry object per
- * session for the lifetime of the Client.
+ * ({@link SessionManagerOptions.entryCacheMaxEntries}). A safety valve far
+ * above any catalog a sidebar lists at once — including the 1,000-row catalogs
+ * the reference-stability contract is specified against — so ordinary sessions
+ * never lose entry identity, while a pathological catalog cannot pin one entry
+ * object per session for the lifetime of the Client.
  */
-const DEFAULT_ENTRY_CACHE_MAX_ENTRIES = 500
+const DEFAULT_ENTRY_CACHE_MAX_ENTRIES = 5000
 
 /** Construction options for {@link SessionManager}. */
 export interface SessionManagerOptions {
@@ -88,7 +89,7 @@ export interface SessionManagerOptions {
    * user actually looks at keep their entry objects. Values are floored and
    * raised to 1 — a cache that retains nothing would defeat the very
    * reference-stability contract it exists for.
-   * @default 500
+   * @default 5000
    */
   entryCacheMaxEntries?: number
 }
