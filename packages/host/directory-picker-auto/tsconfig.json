@@ -18,6 +18,9 @@
       "path": "../../../vendor/loader"
     },
     {
+      "path": "../lan-access"
+    },
+    {
       "path": "../webserver"
     },
     {

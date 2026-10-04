@@ -47,6 +47,7 @@
     "@deepseek-ai/dsh-host-webserver": "workspace:*"
   },
   "dependencies": {
+    "@deepseek-ai/dsh-host-lan-access": "workspace:*",
     "@deepseek-ai/dsh-launch-environment": "workspace:*"
   }
 }

@@ -9308,6 +9308,9 @@ importers:
 
   packages/host/directory-picker-auto:
     dependencies:
+      '@deepseek-ai/dsh-host-lan-access':
+        specifier: workspace:*
+        version: link:../lan-access
       '@deepseek-ai/dsh-launch-environment':
         specifier: workspace:*
         version: link:../../util/launch-environment
