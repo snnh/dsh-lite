@@ -20,7 +20,7 @@ A plugin that keeps a `SessionReference` past the threshold without observing th
 1. **Keep the default.** The threshold is the Client Session Controller's own option, `sessionIdleTtlMs` (`SessionManagerOptions.sessionIdleTtlMs` and `ClientSessionsOptions.sessionIdleTtlMs`), defaulting to `3600000` (60 minutes).
 2. **To give up the memory trade**, set it to `0`, which restores always-resident instances:
 
-   ```ts
+   ```ts ignore-check
    new ClientSessions(ctx, remotes, { sessionIdleTtlMs: 0 })
    ```
 

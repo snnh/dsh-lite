@@ -45,7 +45,14 @@ export class TerminalBudget {
   /** @param maxBytes - bytes every screen and follower queue may reserve together. */
   constructor(private readonly maxBytes: number) {}
 
-  /** Worst-case bytes one retained screen reserves at the widest permitted geometry. */
+  /**
+   * Worst-case bytes one retained screen reserves at the widest permitted geometry:
+   * the charge is taken once, before the screen can grow, so a terminal can never
+   * admit a screen the budget would have refused at its full size.
+   * @param scrollback - retained scrollback rows the screen's buffer may hold.
+   * @param maxCols - widest column count the deployment lets a screen reach.
+   * @returns worst-case bytes to reserve for that screen, released when it is disposed.
+   */
   static screen(scrollback: number, maxCols: number): number { return scrollback * maxCols * SCREEN_BYTES_PER_CELL }
 
   /** Bytes reserved right now; diagnostics only. */

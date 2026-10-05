@@ -20,7 +20,7 @@ description: "客户端现在会在 60 分钟空闲后释放无人观察、也�
 1. **保留默认值。** 该阈值是 Client Session Controller 自己的选项 `sessionIdleTtlMs`（`SessionManagerOptions.sessionIdleTtlMs` 与 `ClientSessionsOptions.sessionIdleTtlMs`），默认 `3600000`（60 分钟）。
 2. **若不想用内存换这一行为**，把它设为 `0`，即可恢复实例常驻：
 
-   ```ts
+   ```ts ignore-check
    new ClientSessions(ctx, remotes, { sessionIdleTtlMs: 0 })
    ```
 

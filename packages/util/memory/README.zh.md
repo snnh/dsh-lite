@@ -7,7 +7,7 @@ kind: "package-library"
 
 [English](README.md) | 中文
 
-## 摘要
+## 概述
 
 `@deepseek-ai/dsh-memory` 只负责长跑宿主需要的三件事：触达运行时垃圾收集器的查找、它外面的节流窗口，以及常驻集看门狗——后者在启动后收集一次，其后仅在超过阈值时再收集，并按自己的间隔输出内存指标行。**查找本身才是杠杆**：没有 `--expose-gc` 启动的构建根本没有收集器，所以查找会设置该 flag 并在新 context 里读出 `gc`，而创建这个 context 同时把空闲页归还给操作系统。每个旋钮都有环境变量覆盖，`DSH_GC=0` 关闭整个策略；它是直接的库依赖，而不是 `cordis.yml` 里的一行。
 
@@ -16,8 +16,9 @@ kind: "package-library"
 - [使用本包](#use-this-package)
 - [理解实现](#understand-the-implementation)
 - [延伸阅读](#further-exploration)
+- [模型体验](#model-experience)
 - [已知限制与后续工作](#known-limitations-and-deferred-work)
-- [开发说明](#dev-note)
+- [开发备注](#dev-note)
 
 -----
 
@@ -128,6 +129,15 @@ idle.stop()       // clears the sweep timer; the entries stay readable
 - 仓库根目录的 `docs/` 描述了本包不得破坏的 Harness 契约。
 - 常驻集工作的测量设施与其启动宿主放在一起；本包刻意不自带基准。
 
+<a id="model-experience"></a>
+## 模型体验
+
+无，因为收集器查找、节流窗口与缓存预算只塑造宿主的常驻集行为；没有任何旋钮或读数进入模型请求。
+
+#### KV Cache 影响
+
+无；一次收集或一次淘汰都不会改写请求中的任何内容，因此原本可复用的提供方前缀依旧可复用。
+
 <a id="known-limitations-and-deferred-work"></a>
 ## 已知限制与后续工作
 
@@ -136,12 +146,12 @@ idle.stop()       // clears the sweep timer; the entries stay readable
 - **本包不设置 `--max-semi-space-size`、GC 节流参数或 `MALLOC_ARENA_MAX`。** 节流常量需要一次真实会话负载下的测量，才能成为默认值。
 
 <a id="dev-note"></a>
-## 开发说明
+### 开发备注
 
-### 覆盖率
+#### 覆盖率
 
 `packages/*/*/src` 带有逐文件 100% 的语句、分支与函数门禁。查找的失败路径——flag 钩子抛错的运行时，以及新 context 里看不到 `gc` 的情况——由 mock `node:v8` 与 `node:vm` 的测试覆盖。测试进程无法触达的那一条分支（没有收集器的运行时返回的惰性策略）带有内联原因的 `v8 ignore` 注释。
 
-### 测试
+#### 测试
 
 `tests/memory.spec.ts` 用假定时器、注入的收集器与时钟驱动策略，因此不会真的执行收集，也不会等待任何挂钟间隔。查找本身既通过 stub 过的 `globalThis.gc` 覆盖，也走它自己的 flag 路径。指标行同样由假定时器驱动，其断言钉住该行的确切形态（含时间戳），而不是钉某个测试无法预测的内存读数。`tests/cache-budget.spec.ts` 钉住估算器对各类值的定价、两个预算及其结算顺序，以及空闲扫描——它用假定时器与注入时钟驱动探测；唯一无法预测的堆读数，它拿实时计数器比对，而不是写死一个数字。

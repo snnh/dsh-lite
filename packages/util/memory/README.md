@@ -16,6 +16,7 @@ English | [中文](README.zh.md)
 - [Use this package](#use-this-package)
 - [Understand the implementation](#understand-the-implementation)
 - [Further Exploration](#further-exploration)
+- [Model Experience](#model-experience)
 - [Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
 - [Dev Note](#dev-note)
 
@@ -126,18 +127,27 @@ A runtime that refuses the flag hook yields an inert policy: it logs one line an
 - `docs/` in the repository root describes the harness contracts this package must not break.
 - The measurement harness for resident-set work lives beside the host that boots it; this package deliberately ships no benchmark of its own.
 
+<a id="model-experience"></a>
+## Model Experience
+
+None, as the collector lookup, the throttle window, and the cache budgets only shape host resident-set behavior; no knob or reading enters a model request.
+
+#### KV Cache effect
+
+None; a collection or an eviction rewrites nothing in a request, so a prefix that was already reusable stays reusable.
+
 ## Known Limitations and Deferred Work
 
 - **Generation sizes are startup-only.** Setting `--max-semi-space-size` after the heap exists changes nothing: the same value passed to `node` measured 164.5 MB where the runtime setter measured 256.3 MB. `dsh` publishes an `env node` entry point that cannot carry node arguments, so an operator who wants that ~90 MB sets `NODE_OPTIONS=--max-semi-space-size=2`. Stacked with this policy it measured 152 MB against 153 MB, which is why the CLI does not try to own it.
 - **The threshold cannot see per-session growth.** A host whose resident set stays under the threshold never collects, even while its heap grows slowly. Caches that churn are expected to call `maybeGc` from their own eviction paths.
 - **`--max-semi-space-size`, GC pacing, and `MALLOC_ARENA_MAX` are not set by this package.** Pacing constants need a measurement pass on a real session load before they become defaults.
 
-## Dev Note
+### Dev Note
 
-### Coverage
+#### Coverage
 
 `packages/*/*/src` carries a per-file 100% statement, branch, and function gate. The lookup's refusal paths — a runtime whose flag hook throws, and a fresh context that exposes no `gc` — are covered by tests that mock `node:v8` and `node:vm`. The branch a test process cannot reach, the inert policy a runtime with no collector returns, carries a `v8 ignore` comment with the reason inline.
 
-### Tests
+#### Tests
 
 `tests/memory.spec.ts` drives the policy with fake timers and an injected collector and clock, so no collection actually runs and no wall-clock interval is waited. The lookup itself is exercised both through a stubbed `globalThis.gc` and through its own flag path. The metric line is driven the same way, and its assertions pin the exact shape of the line — timestamp included — instead of a memory reading that no test can predict. `tests/cache-budget.spec.ts` pins the estimator's per-type prices, the two budgets and the order they settle in, and the idle sweep, which it drives with fake timers and an injected clock; the one value it cannot predict, the heap reading, it compares against the live counter rather than a fixed number.

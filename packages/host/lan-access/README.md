@@ -1,6 +1,6 @@
 ---
 description: "Network exposure for the DeepSeek Harness web server: the row publishes every IPv4 interface by default, persists that posture in the profile, and refuses any reachable bind it cannot authenticate."
-kind: "bundle-row"
+kind: "package-reference"
 ---
 
 # @deepseek-ai/dsh-host-lan-access
@@ -16,6 +16,7 @@ English | [中文](README.zh.md)
 - [Use this package](#use-this-package)
 - [Understand the implementation](#understand-the-implementation)
 - [Further Exploration](#further-exploration)
+- [Model Experience](#model-experience)
 - [Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
 - [Dev Note](#dev-note)
 
@@ -93,6 +94,17 @@ A loopback bind needs nothing beyond the process-local authentication the connec
 - `@deepseek-ai/dsh-client-connection` exchanges the token for the signed browser cookie and owns the Host/Origin fence.
 - `@deepseek-ai/dsh-web-app` reads `ctx.lanAccess.host` for the bind, samples the reachable addresses into the trust fence, prints them, and uses the loopback URL as the application URL.
 
+-----
+
+<a id="model-experience"></a>
+## Model Experience
+
+None, as this row only decides the address the web server binds and refuses a reachable bind it cannot authenticate; it registers no prompt, tool schema, or session event.
+
+#### KV Cache effect
+
+None; the bind posture never enters a model request, so a reusable provider prefix is left untouched.
+
 ## Known Limitations and Deferred Work
 
 - **No TLS, no `Secure` cookie, no HSTS.** The token travels once in the printed URL, then becomes an `HttpOnly` cookie over plain HTTP. Anyone who can observe the network path can read it; a reverse proxy or a virtual network is the answer for anything beyond trusted networks.
@@ -102,12 +114,12 @@ A loopback bind needs nothing beyond the process-local authentication the connec
 - **The interface name is the only signal.** There is no platform I/O behind this table — no route lookup, no sysfs or WMI reading of the interface type — so a name the table does not carry is treated as a LAN interface: a bridge an operator renamed, a virtualization product with its own grammar (Parallels `enp*`/`vnic*`, say), or a platform whose switch names are not `virbr*`/`vmnet*`/`vEthernet*` ranks with the physical interfaces and may win the bind, bounded by the fact that a demoted address is still bound when nothing else exists, and by `host` stating the choice outright.
 - **The trust fence is not an authentication layer.** It refuses cross-site and DNS-rebinding requests; the token is the authentication.
 
-## Dev Note
+### Dev Note
 
-### Coverage
+#### Coverage
 
 `packages/*/*/src` carries a per-file 100% statement, branch, and function gate. `resolveBindHost` takes the detected address as an argument so every branch — configured, detected, and neither — is pinned without depending on the machine the tests run on, and the persistence path runs against a real temporary profile rather than a stub.
 
-### Tests
+#### Tests
 
 `tests/lan-access.spec.ts` stubs `DSH_HOME` per case and observes token creation, reuse, and refusal on the filesystem. `tests/lan-access-posture.spec.ts` drives the persisted posture over a real profile patch: what a first enable writes, that the row the Loader runs is the row addressed, what a stated host leaves alone, which source outranks which, and what the startup warning says. The default-host case asserts against the machine's own detection result rather than a fixed address, so it holds on a CI container with only loopback as well as on a workstation.

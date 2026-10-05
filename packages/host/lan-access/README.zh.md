@@ -1,13 +1,13 @@
 ---
 description: "DeepSeek Harness Web 服务器的网络暴露：本行默认发布所有 IPv4 接口，把该姿态持久化进 profile，并拒绝任何它无法认证的可达绑定。"
-kind: "bundle-row"
+kind: "package-reference"
 ---
 
 # @deepseek-ai/dsh-host-lan-access
 
 [English](README.md) | 中文
 
-## 摘要
+## 概述
 
 `@deepseek-ai/dsh-host-lan-access` 决定 Web 服务器绑定的地址。只要没有东西声明 host，它就发布本机持有的所有 IPv4 接口：首次启动会把 `host: 0.0.0.0` 写入该 profile 自己的 patch，因此之后每次启动绑定的都是这行持久化配置，而不是发行版的默认值。可达地址对任何能路由到它的人都是可达的，因此本行会拒绝它无法认证的绑定：每个非回环 host 都要求持久访问令牌，且本行会在启动日志中警告一次。把 `host` 设为 `127.0.0.1` 即让整棵树回到仅回环。
 
@@ -16,8 +16,9 @@ kind: "bundle-row"
 - [使用本包](#use-this-package)
 - [理解实现](#understand-the-implementation)
 - [延伸阅读](#further-exploration)
+- [模型体验](#model-experience)
 - [已知限制与后续工作](#known-limitations-and-deferred-work)
-- [开发说明](#dev-note)
+- [开发备注](#dev-note)
 
 -----
 
@@ -95,6 +96,17 @@ dsh web: http://127.0.0.1:3080/?token=… (LAN: http://192.168.1.5:3080/?token=�
 - `@deepseek-ai/dsh-client-connection` 用该令牌换取签名的浏览器 cookie，并拥有 Host/Origin 围栏。
 - `@deepseek-ai/dsh-web-app` 读取 `ctx.lanAccess.host` 作为绑定，把可达地址采样进信任面、打印它们，并把它用作应用 URL 的 loopback 地址。
 
+-----
+
+<a id="model-experience"></a>
+## 模型体验
+
+无，因为本行只决定 Web 服务器绑定的地址，并拒绝它无法认证的可达绑定；它不注册任何提示词、工具 schema 或会话事件。
+
+#### KV Cache 影响
+
+无；绑定姿态从不进入模型请求，可复用的提供方前缀因此不受影响。
+
 <a id="known-limitations-and-deferred-work"></a>
 ## 已知限制与后续工作
 
@@ -106,12 +118,12 @@ dsh web: http://127.0.0.1:3080/?token=… (LAN: http://192.168.1.5:3080/?token=�
 - **信任围栏不是认证层。** 它拒绝跨站与 DNS rebinding 请求；认证由令牌承担。
 
 <a id="dev-note"></a>
-## 开发说明
+### 开发备注
 
-### 覆盖率
+#### 覆盖率
 
 `packages/*/*/src` 带有逐文件 100% 的语句、分支与函数门禁。`resolveBindHost` 把探测到的地址作为参数接收，因此"配置值、探测值、两者皆无"三条分支都被钉住，而不依赖测试运行所在的机器；持久化路径则跑在真实的临时 profile 上，而不是桩件上。
 
-### 测试
+#### 测试
 
 `tests/lan-access.spec.ts` 按用例 stub `DSH_HOME`，在文件系统上观察令牌的创建、复用与拒绝。`tests/lan-access-posture.spec.ts` 在真实的 profile patch 上驱动持久化姿态：首次启用写入什么、写入的是 Loader 实际运行的那一行、已声明 host 时不会改动什么、哪种来源优先，以及启动警告说了什么。默认 host 的用例对照机器自身的探测结果断言，而非固定地址，因此它既适用于只有回环的 CI 容器，也适用于工作站。

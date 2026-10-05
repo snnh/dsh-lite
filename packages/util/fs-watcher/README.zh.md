@@ -36,6 +36,8 @@ kind: "package-library"
 ```ts
 import { createWatcher, waitForReady } from '@deepseek-ai/dsh-fs-watcher'
 
+declare const root: string
+
 const watcher = createWatcher(root, {
   ignoreInitial: true,
   depth: 0,
