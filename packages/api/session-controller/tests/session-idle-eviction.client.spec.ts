@@ -91,7 +91,7 @@ describe('SessionManager idle eviction', () => {
     onTestFinished(() => { vi.useRealTimers() })
     const m = manager()
     const session = m.get(ID)
-    const echo = session.beginSubmission({ text: 'queued locally', attachments: [] })
+    const echo = session.beginSubmission({ mode: 'queue', text: 'queued locally', attachments: [] })
 
     await vi.advanceTimersByTimeAsync(4 * TTL_MS)
     expect(m.get(ID)).toBe(session)
