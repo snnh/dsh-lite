@@ -8,7 +8,7 @@
  * the failure this suite exists to make impossible.
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
@@ -186,15 +186,12 @@ describe('resolveHost, through apply', () => {
     }
   })
 
-  it('still treats an empty stated host as unstated, persisting the shipped posture', async () => {
+  it('still treats an empty stated host as unstated, binding the shipped posture', async () => {
     const ctx = contextOf()
-    const profile = unwrittenProfile()
-    ctx.provide('profileContext', profile)
     ctx.provide('webStartup', { host: '' })
     await apply(ctx, { host: '' })
     // The contrast that keeps the refusal from swallowing the "name nothing"
     // case: an empty value is not a bad host, it is no host.
     expect(provided(ctx)?.host).toBe('0.0.0.0')
-    expect(readFileSync(profile.patchPath, 'utf8')).toContain('host: 0.0.0.0')
   })
 })

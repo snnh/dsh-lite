@@ -293,7 +293,7 @@ const SERVICE_ROLES: ServiceRole[] = [
     title: 'Host bind-host Remote controller',
     mode: 'core',
     consumers: ['client-ui-settings-general'],
-    note: 'Reports the bound, persisted, pinned, and detected addresses separately and validates the one an operator saves with the lan-access row\'s own bind grammar — a loopback spelling, an IPv4 literal, or the `0.0.0.0` wildcard — before writing it as that row\'s `config.host`; nothing rebinds, reconciles, or resolves a token here.',
+    note: 'Reports the address this process bound, the one the profile states, the one the invocation pinned, and the one this machine detects separately, and validates the one an operator saves with the lan-access row\'s own bind grammar — a loopback spelling, an IPv4 literal, or the `0.0.0.0` wildcard — before writing it as that row\'s `config.host`; nothing rebinds, reconciles, or resolves a token here.',
   },
   {
     key: 'workspaceFiles',
@@ -813,7 +813,7 @@ const SERVICE_ROLES: ServiceRole[] = [
     title: 'Web bind-address posture',
     mode: 'core',
     consumers: ['web-app'],
-    note: 'Resolves the host the web server binds — `--host`, then the composed or persisted value, then the detected LAN address, then loopback — and persists a first-run `0.0.0.0` into the profile patch; every non-loopback bind needs the persistent access token first, and a saved address takes effect on the next start.',
+    note: 'Resolves the host the web server binds — `--host`, then the composed row config, and otherwise this release\'s built-in `0.0.0.0` — and writes no file: a first-run patch line would make the Loader reconcile a changed entry, and the web server that reads this host would re-bind on a new port while the URL this start already printed goes stale. Every non-loopback bind needs the persistent access token first, and a saved address takes effect on the next start.',
   },
   {
     key: 'clientModules',

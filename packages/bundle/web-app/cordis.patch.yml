@@ -171,16 +171,19 @@
     # ── layer 2: transport/service ──────────────────────────────────────────────
 
     # Network exposure, on by default. This row decides the address the web
-    # server binds: with no `host` it publishes every IPv4 interface and
-    # persists `0.0.0.0` into this profile's patch the first time it runs, so
-    # later releases changing their default move nothing for an operator who has
-    # already started once. An explicit `--host` (read through the web-startup
-    # provider above) wins over the persisted posture, then the row's own
-    # config. A network-reachable bind requires the persistent access token, so
-    # the row resolves (and creates) it before providing `lanAccess`, warns once
-    # in the startup log about what it exposed and how to narrow it, and refuses
-    # the bind when it cannot authenticate. Set `host: 127.0.0.1` for the
-    # loopback-only posture, or this machine's LAN address for one network. See
+    # server binds: with no `host` it publishes every IPv4 interface, straight
+    # from its own schema default, and writes no file at all — a patch line
+    # written here is a changed config entry the Loader would reconcile, and the
+    # web server that reads `ctx.lanAccess.host` would re-bind on a new port
+    # while the URL this start already printed goes stale. An explicit `--host`
+    # (read through the web-startup provider above) wins over the composed row
+    # config, which wins over that default. A network-reachable bind requires the
+    # persistent access token, so the row resolves (and creates) it before
+    # providing `lanAccess`, warns once in the startup log about what it exposed
+    # and how to narrow it, and refuses the bind when it cannot authenticate. Set
+    # `host: 127.0.0.1` for the loopback-only posture, or this machine's LAN
+    # address for one network; a line saved from the settings page or edited by
+    # hand is the only record of that posture. See
     # that package's README for the TLS and peer-allow-list boundaries this does
     # not provide. The row validates the host it is handed, through one grammar
     # authority (`classifyBindHost`): a loopback spelling (`127.0.0.1`,

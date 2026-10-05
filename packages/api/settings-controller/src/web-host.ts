@@ -4,14 +4,14 @@
  * start's address into the profile.
  *
  * The scope is startup configuration alone. A save lands through the same
- * `writeProfileRowConfig()` the lan-access row persists its first-run posture
+ * `writeProfileRowConfig()` the lan-access row receives a stored posture through
  * with — one storage, one truth — and touches nothing else: not the running
  * bind, not the access token, not the advertised URL, not the Loader. The
  * operator restarts, and the next start reads the line back through the row's
  * ordinary resolution order (`--host`, then the composed config the profile
  * patch feeds, then this machine's detected address, then loopback).
  *
- * The persisted line is what makes this page worth having: the profile patch
+ * The stored line is what makes this page worth having: the profile patch
  * outranks every bundle default, so a host stated here survives later releases
  * changing theirs, and `127.0.0.1` is how an operator returns to loopback.
  *
@@ -41,7 +41,7 @@ const LAN_ACCESS_ROW_NAME = '@deepseek-ai/dsh-host-lan-access'
 /**
  * The row identity a write states when the active profile composes no
  * lan-access row: the shipped identity, which is the one the row's own
- * first-run persist states. A profile that mounts the row later picks the line
+ * a stored bind host. A profile that mounts the row later picks the line
  * up; one that never does skips it with the patch lane's own warning rather
  * than failing the boot.
  */

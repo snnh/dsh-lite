@@ -9408,9 +9408,6 @@ importers:
       '@deepseek-ai/dsh-access-token':
         specifier: workspace:*
         version: link:../../util/access-token
-      '@deepseek-ai/dsh-config-editor':
-        specifier: workspace:*
-        version: link:../../boot/config-editor
       '@deepseek-ai/dsh-home-paths':
         specifier: workspace:*
         version: link:../../util/home-paths

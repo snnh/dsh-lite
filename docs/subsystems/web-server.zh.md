@@ -55,7 +55,7 @@ interface Config {
 }
 ```
 
-`host` 接受任意非空监听地址；随附各行使用 `127.0.0.1`（仅回环）与 `0.0.0.0`（所有 IPv4 接口）。载体本身不拥有 TLS、认证或 Origin 策略，因此绑定到非回环地址会暴露服务器，除非组合层提供这些控制。`compression` 默认为 `none`；随附的 Web 组合选择 gzip level 1 和 1024 字节阈值。随附的 `dsh web` 命令从 `lan-access` 行取得 host——先是 `--host`，然后是组合或持久化的取值——因此除非操作者另行声明，它会发布所有 IPv4 接口；其 Connection 插件为每个 Host API route 与 stream 提供 Host/Origin 校验和浏览器会话认证。「通用」设置页的监听地址行是操作者声明地址的另一种方式：它通过 `ctx.remote.webHost` 把同一行写入 profile patch，并在下次启动生效，在此期间旁边显示的是本进程已绑定的地址。其他组合自行拥有绑定与路由认证策略。dist 位置是认领席位的前端插件的组装事实。
+`host` 接受任意非空监听地址；随附各行使用 `127.0.0.1`（仅回环）与 `0.0.0.0`（所有 IPv4 接口）。载体本身不拥有 TLS、认证或 Origin 策略，因此绑定到非回环地址会暴露服务器，除非组合层提供这些控制。`compression` 默认为 `none`；随附的 Web 组合选择 gzip level 1 和 1024 字节阈值。随附的 `dsh web` 命令从 `lan-access` 行取得 host——先是 `--host`，然后是组合后的行配置，最后是该行自己那个不写往任何地方的 `0.0.0.0` 默认值——因此除非操作者另行声明，它会发布所有 IPv4 接口；其 Connection 插件为每个 Host API route 与 stream 提供 Host/Origin 校验和浏览器会话认证。「通用」设置页的监听地址行是操作者声明地址的另一种方式：它通过 `ctx.remote.webHost` 把同一行写入 profile patch，并在下次启动生效，在此期间旁边显示的是本进程已绑定的地址。其他组合自行拥有绑定与路由认证策略。dist 位置是认领席位的前端插件的组装事实。
 
 ## 服务
 

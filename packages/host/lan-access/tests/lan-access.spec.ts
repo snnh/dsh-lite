@@ -82,18 +82,13 @@ describe('resolveBindHost', () => {
 })
 
 describe('lan-access', () => {
-  it('binds the detected addresses by default and authenticates them', async () => {
+  it('binds every IPv4 interface by default and authenticates it', async () => {
     const ctx = newContext()
     await apply(ctx)
-    const expected = detectLanAddress() ?? LOOPBACK_HOST
-    expect(provided(ctx)?.host).toBe(expected)
-    if (isLoopbackHost(expected)) {
-      // A machine with only loopback needs no token, exactly like an explicit
-      // loopback configuration.
-      await expect(stat(tokenPath)).rejects.toMatchObject({ code: 'ENOENT' })
-    } else {
-      expect((await readFile(tokenPath, 'utf8')).trim()).toMatch(/^[0-9a-f]{64}$/u)
-    }
+    // The shipped posture is the wildcard, and a reachable bind always carries
+    // the persistent token.
+    expect(provided(ctx)?.host).toBe('0.0.0.0')
+    expect((await readFile(tokenPath, 'utf8')).trim()).toMatch(/^[0-9a-f]{64}$/u)
   })
 
   it('asks nothing of an explicit loopback bind', async () => {

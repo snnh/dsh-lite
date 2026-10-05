@@ -129,34 +129,39 @@ async function bootWith(profile: ProfileContext, args: readonly string[]): Promi
 }
 
 describe('web composition over the lan-access row', () => {
-  it('persists the shipped posture on the first enable and binds it', async () => {
-    const { profile, lanRow } = profileFixture()
+  it('composes the shipped posture on the first enable and writes nothing', async () => {
+    const { profile } = profileFixture()
+    const before = readFileSync(profile.patchPath, 'utf8')
     await bootWith(profile, [])
     expect(observed.lanAccessHost).toBe('0.0.0.0')
     expect(observed.readerConfig).toEqual({ host: '0.0.0.0' })
-    // The row the Loader ran, addressed by its own id and module specifier, so
-    // the patch this writes is the one the next composition merges.
-    expect(readFileSync(profile.patchPath, 'utf8')).toContain([
-      '- id: lan-access',
-      `  name: ${lanRow}`,
-      '  config:',
-      '    host: 0.0.0.0',
-    ].join('\n'))
+    // The default comes from the schema, not from an edit: a row that wrote
+    // here would make the Loader reconcile a changed entry, and the web server
+    // reading this host would rebind on a new port after the start printed its
+    // URL.
+    expect(readFileSync(profile.patchPath, 'utf8')).toBe(before)
     expect(observed.warnings.join('\n')).toContain('bound 0.0.0.0')
     expect(observed.warnings.join('\n')).toContain(profile.patchPath)
   })
 
-  it('reads the persisted posture back on the next boot instead of writing again', async () => {
-    const { profile } = profileFixture()
+  it('obeys a posture the operator states in the profile patch', async () => {
+    const { profile, lanRow } = profileFixture()
     await bootWith(profile, [])
-    // The operator edits the persisted posture; a later start must obey the
-    // patch rather than this release's default, and must not write over it.
-    writeFileSync(profile.patchPath, readFileSync(profile.patchPath, 'utf8').replace('host: 0.0.0.0', 'host: 10.1.2.3'))
+    // The operator states a posture; a later start must obey the patch rather
+    // than this release's default, and must not rewrite the line.
+    writeFileSync(profile.patchPath, [
+      `- id: lan-access`,
+      `  name: ${lanRow}`,
+      '  config:',
+      '    host: 10.1.2.3',
+      '',
+    ].join('\n'))
     observed.warnings = []
+    const stated = readFileSync(profile.patchPath, 'utf8')
     await bootWith(profile, [])
     expect(observed.lanAccessHost).toBe('10.1.2.3')
     expect(observed.readerConfig).toEqual({ host: '10.1.2.3' })
-    expect(readFileSync(profile.patchPath, 'utf8')).toContain('host: 10.1.2.3')
+    expect(readFileSync(profile.patchPath, 'utf8')).toBe(stated)
     expect(observed.warnings.join('\n')).toContain('bound 10.1.2.3')
   })
 

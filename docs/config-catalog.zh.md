@@ -1463,16 +1463,15 @@ export interface Config {
 
 ## `@deepseek-ai/dsh-host-lan-access`
 
-- `source`: [`packages/host/lan-access/src/index.ts:148`](../packages/host/lan-access/src/index.ts)
+- `source`: [`packages/host/lan-access/src/index.ts:155`](../packages/host/lan-access/src/index.ts)
 
 ```ts config-catalog
 /** Row configuration surface; see {@link Config.host} for the posture default. */
 export interface Config {
   /**
-   * Explicit bind host. Omit it to publish every IPv4 interface: the first run
-   * without one persists `0.0.0.0` into the profile patch, so the posture
-   * survives later releases changing their default. `127.0.0.1` restores the
-   * loopback-only posture, and a single network's address publishes that
+   * Explicit bind host. Omit it to publish every IPv4 interface; that wildcard
+   * is this row's default, not a value written anywhere. `127.0.0.1` restores
+   * the loopback-only posture, and a single network's address publishes that
    * interface alone.
    */
   host?: string
