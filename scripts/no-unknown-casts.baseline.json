@@ -192,6 +192,12 @@
   "packages/api/gateway/tests/journal-stream.client.spec.ts": {
     "fc16f363fc891dac66e0be8c042da4b1d3f45c35af2d31a03f2214a6c3698379": 1
   },
+  "packages/api/gateway/tests/stream-resync.host.spec.ts": {
+    "dd244515f22ccbc14e5872126c3fc405ed6a63bb0390940976e234e3c06fcc2b": 1
+  },
+  "packages/api/gateway/tests/stream-server-limits.host.spec.ts": {
+    "dd244515f22ccbc14e5872126c3fc405ed6a63bb0390940976e234e3c06fcc2b": 1
+  },
   "packages/api/gateway/tests/stream-server.host.spec.ts": {
     "c7136804a6f7b829f525135643cb93cc8b3176b1d0036b2ebde5d7b668411658": 1,
     "dd244515f22ccbc14e5872126c3fc405ed6a63bb0390940976e234e3c06fcc2b": 1
@@ -249,6 +255,9 @@
     "40725eab4d86929b16d87c88d5cf83168035def78b4d901613dd0369876f0731": 4,
     "6667f55d27d315e8906a2ffdd1b7ab83c3785036fce5575f865b1dab9f3710b3": 2
   },
+  "packages/api/session-controller/tests/entry-cache-lru.client.spec.ts": {
+    "4777453719b1a12ac03d7405a7cc1662ac1873b8eb0016a08ccd11f27076e803": 1
+  },
   "packages/api/session-controller/tests/event-script.client.ts": {
     "1a300ac31a51719910b1f4d8943ca15754e8eda958089110c7b9b5dbf8ce8e1f": 1,
     "971ec45a1146ab52f2fb13f75b782d5d35c0fb2ddba1fb9ccab14cc54f7291d5": 1
@@ -280,6 +289,9 @@
   "packages/api/session-controller/tests/session-history-journal.host.spec.ts": {
     "4e6289bbcd36e12927fd2ac87dc09b4de8ac884f2a0041af58383a0144b8b9b1": 1
   },
+  "packages/api/session-controller/tests/session-idle-eviction.client.spec.ts": {
+    "4777453719b1a12ac03d7405a7cc1662ac1873b8eb0016a08ccd11f27076e803": 1
+  },
   "packages/api/session-controller/tests/session-models.host.spec.ts": {
     "7f2d35b6be247c2410599d4b91260905bc2ada88f62507af622fe067a9295f5b": 1
   },
@@ -305,8 +317,19 @@
     "ac0a86d16dd1fa30322d4ca2becc1864f716b08efd5826d74b271f07d0f3d605": 1,
     "dc2f3b946d1994a23ad82426c87326a6c50a477719f9ae1b4687087522d9571b": 1
   },
+  "packages/api/settings-controller/tests/web-host.host.spec.ts": {
+    "7fe58280287ff63d40e979e72329f975e11015a95e9a8eec207a5a78748d3c89": 1
+  },
   "packages/api/terminal-controller/src/index.ts": {
     "04bc8a44533574365dfedf563e2356458bcf95f990a00906938c977c1d683356": 2
+  },
+  "packages/api/terminal-controller/tests/capacity.client.spec.ts": {
+    "297f02af62e22b46b454c4dac5641b1b6d237e917e77391afc26af6ddebc7ef2": 1
+  },
+  "packages/api/terminal-controller/tests/capacity.spec.ts": {
+    "40725eab4d86929b16d87c88d5cf83168035def78b4d901613dd0369876f0731": 1,
+    "90930a120a74bbeca411408cc77c8a36df7b429350d4c2cf54b119342e618c77": 1,
+    "d013f494ce855cf163055ea9163fda1c946518480ac6fb1cb2c79e26f0584c4a": 2
   },
   "packages/api/terminal-controller/tests/controller.spec.ts": {
     "8bea8de026f8d9b845b1790bec688b20525edc3e8f8fa37d1f05f96bbbbafa6d": 1,
@@ -389,6 +412,12 @@
   },
   "packages/bundle/web-app/tests/document-preview.spec.ts": {
     "154da39139a0074bad3d13a624e5fa62d1f7ce19dc8b9c28a73af3263cd7f10e": 1
+  },
+  "packages/bundle/web-app/tests/lan-access-composition.spec.ts": {
+    "2e78263d16d54ccfd8d322bcdf1bf738bd8134e15c24063ece9a1d1b52f4ebd9": 2
+  },
+  "packages/bundle/web-app/tests/lan-url-print.spec.ts": {
+    "7a1331f607587e04fae4112efe956111743c2e38e327275c7def4d39d93dbb2a": 1
   },
   "packages/bundle/web-app/tests/startup.spec.ts": {
     "2e78263d16d54ccfd8d322bcdf1bf738bd8134e15c24063ece9a1d1b52f4ebd9": 1
@@ -634,6 +663,11 @@
     "04984a2ce1486250236e638e0197da0a1a840855ed3975c59130a85358c7e5fe": 1,
     "146a1291e7964e9eafad9a4f742f16e195a171ebebdcd79df404b353580255f4": 1,
     "2e78263d16d54ccfd8d322bcdf1bf738bd8134e15c24063ece9a1d1b52f4ebd9": 1
+  },
+  "packages/client/ui-settings-general/tests/network-row.client.spec.tsx": {
+    "10d2b30647beae2b7e0c881ad79967f2bad4aa66e1bc74f952c5c28f43dac8f1": 1,
+    "2e78263d16d54ccfd8d322bcdf1bf738bd8134e15c24063ece9a1d1b52f4ebd9": 1,
+    "36cbc05dc3acda1d8eab2b65dc453a04af477974933fe7580ac472d300151dfc": 1
   },
   "packages/client/ui-settings-models/tests/apply.client.spec.ts": {
     "0464c472dfc74994388bf63a6b3c110df506ce44fe47a5040e93c67a5eb3b4ae": 1,
@@ -2130,6 +2164,9 @@
   },
   "packages/util/deque/tests/deque.spec.ts": {
     "77a439bbf36ca838c15f459e6dc344ee43d2b999b487bfda6b7e1f1c7c20e4e3": 1
+  },
+  "packages/util/fs-watcher/tests/fs-watcher.spec.ts": {
+    "6dfe702b6cb8848eeb1d56c5af6ff723d84841aaa1d96790295db4ed70616c65": 2
   },
   "packages/web/tool-web/tests/spill.spec.ts": {
     "ecf3420d023d28e1cbc687d438bb66ee49d55a4ae4cb0828dd0f59b926363903": 1

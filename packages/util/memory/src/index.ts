@@ -82,7 +82,7 @@ export const DEFAULT_METRICS_INTERVAL_MS = 5 * 60 * 1000
  * @returns the collector, or undefined when this runtime exposes none.
  */
 export function resolveCollectGarbage(): CollectGarbage | undefined {
-  const exposed = Reflect.get(globalThis, 'gc') as unknown
+  const exposed: unknown = Reflect.get(globalThis, 'gc')
   if (typeof exposed === 'function') return exposed as CollectGarbage
   try {
     // Node exposes `gc` only to a context created after the flag is set, so a
@@ -92,7 +92,7 @@ export function resolveCollectGarbage(): CollectGarbage | undefined {
     // replace it with a cheaper flag read — a runtime that refuses the hook
     // keeps the higher resident set (see the module comment for the A/B).
     setFlagsFromString('--expose-gc')
-    const hooked = runInNewContext('gc') as unknown
+    const hooked: unknown = runInNewContext('gc')
     return typeof hooked === 'function' ? (hooked as CollectGarbage) : undefined
   } catch {
     // A runtime that refuses the flag hook simply has no collector.
