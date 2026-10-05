@@ -253,6 +253,9 @@
       inject: [webRuntime]
       config:
         # LAN literals derived from the active bind plus --trusted-host extras.
+        # The derived half is one startup sample, and a container published with
+        # `-p` exposes only its own interfaces, so the host-reachable authority a
+        # browser types must be declared here or with --trusted-host.
         # A deployment adding authorities keeps this expression and concatenates
         # its literals, for example: ['app.internal', ...ctx.webRuntime.trustedHosts].
         trustedHosts: !!js ctx.webRuntime.trustedHosts

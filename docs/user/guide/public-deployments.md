@@ -47,6 +47,18 @@ The fence accepts loopback plus every authority `--trusted-host` names. A browse
 
 Neither the advertised URL nor the fence protects the listening port itself, so restrict the port to the trusted proxy or network.
 
+## Containers and addresses that move
+
+A container publishes a mapped port (`docker run -p 3080:3080 ...`), so the process sees only the container's own interfaces — usually a `172.x` literal — while the host and every phone on the network reach it under the host's own address. That authority is in no derived entry, so the server is healthy, the static page loads, and then every `/api` request answers 403: the client reports that it cannot connect rather than showing a rejection. Name the authority browsers use at startup:
+
+```sh
+dsh web --host 0.0.0.0 --trusted-host 192.168.1.20:3080
+```
+
+A reverse proxy's public host name and an internal DNS name need the same declaration, and a port-less entry covers any port. Declaring an authority widens only the Host check: the session cookie stays bound to the normalized `host:port` it was issued for, and the access token is unchanged.
+
+The derived entries are one sample taken at startup and never re-derived, so a new DHCP lease, a VPN that changes the route in, or a new bridge changes the literal browsers type while the fence keeps the old one. When that literal changes, restart the server and declare the new authority; the fence notices nothing on its own.
+
 ## What stays the deployment's job
 
 - **TLS termination.** The listener serves plain HTTP and terminates no TLS.
