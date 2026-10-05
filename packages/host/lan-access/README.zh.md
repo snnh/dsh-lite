@@ -76,6 +76,7 @@ dsh web: http://127.0.0.1:3080/?token=… (LAN: http://192.168.1.5:3080/?token=�
 
 把 `host` 设为 `127.0.0.1`——写在 profile 的 `cordis.patch.yml` 里、「通用」设置页的监听地址行里，或用 `--host 127.0.0.1` 只对单次运行生效。此前启动持久化的键就是同一个键，因此编辑或删除它就是全部迁移工作；没有别处记录该姿态。删掉本行并不是回到回环的办法，因为随附的 `webserver` 行读取 `ctx.lanAccess.host`，而没有本行时 bundle 默认值会发布所有接口。
 
+<a id="understand-the-implementation"></a>
 ## 理解实现
 
 ### 为什么默认发布所有接口
@@ -88,11 +89,13 @@ dsh web: http://127.0.0.1:3080/?token=… (LAN: http://192.168.1.5:3080/?token=�
 
 回环绑定只需要连接半区已经施加的进程内认证。其它所有绑定——无论操作者声明还是随附姿态——都先要求持久令牌：Harness home 不可写、或配置值低于长度下限，都会让本行拒绝激活，于是不会有 Web 服务器绑定一个它无法认证的网络地址。可达绑定随后通过 `ctx.logger.warn` 与 `console.warn` 写入它的启动警告；console 那一份是必需的，因为默认 Web exporter 会过滤 `warn` 记录，而操作者可见的警告必须抵达终端。警告会点名所绑定的地址、作为唯一认证者的令牌、要编辑的 patch 文件，以及能收窄单次运行的 flag——绝不包含令牌本身；它是警告而非询问：暴露是操作者声明的姿态，这里不会阻塞启动。
 
+<a id="further-exploration"></a>
 ## 延伸阅读
 
 - `@deepseek-ai/dsh-client-connection` 用该令牌换取签名的浏览器 cookie，并拥有 Host/Origin 围栏。
 - `@deepseek-ai/dsh-web-app` 读取 `ctx.lanAccess.host` 作为绑定，把可达地址采样进信任面、打印它们，并把它用作应用 URL 的 loopback 地址。
 
+<a id="known-limitations-and-deferred-work"></a>
 ## 已知限制与后续工作
 
 - **没有 TLS、没有 `Secure` cookie、没有 HSTS。** 令牌随打印 URL 出现一次，随后在明文 HTTP 上变为 `HttpOnly` cookie。任何能看到网络路径的人都能读到它；超出可信网络的范围应使用反向代理或虚拟组网。
@@ -102,6 +105,7 @@ dsh web: http://127.0.0.1:3080/?token=… (LAN: http://192.168.1.5:3080/?token=�
 - **接口名是唯一的信号。** 这张表背后没有任何平台 I/O——不查路由，也不读 sysfs 或 WMI 的接口类型——因此表里没有的名字一律按真实接口处理：被操作者改过名的网桥、自带命名语法的虚拟化产品（比如 Parallels 的 `enp*`/`vnic*`），或交换机不叫 `virbr*`/`vmnet*`/`vEthernet*` 的平台，都会和物理接口同级排序，甚至赢得绑定；其边界在于：被降权的地址在别无选择时依然会被绑定，而 `host` 可以把这个选择直接说清楚。
 - **信任围栏不是认证层。** 它拒绝跨站与 DNS rebinding 请求；认证由令牌承担。
 
+<a id="dev-note"></a>
 ## 开发说明
 
 ### 覆盖率

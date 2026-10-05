@@ -101,6 +101,7 @@ idle.stop()       // clears the sweep timer; the entries stay readable
 
 格式非法的值会保留默认值，而不是让启动失败。
 
+<a id="understand-the-implementation"></a>
 ## 理解实现
 
 ### 收集器查找就是杠杆
@@ -121,17 +122,20 @@ idle.stop()       // clears the sweep timer; the entries stay readable
 
 拒绝该 flag 钩子的运行时会得到一个惰性策略：它只打印一行，不做任何采样。本包其余部分照常工作——`maybeGc` 返回 `false`，`createCollector().collect()` 永不执行收集。
 
+<a id="further-exploration"></a>
 ## 延伸阅读
 
 - 仓库根目录的 `docs/` 描述了本包不得破坏的 Harness 契约。
 - 常驻集工作的测量设施与其启动宿主放在一起；本包刻意不自带基准。
 
+<a id="known-limitations-and-deferred-work"></a>
 ## 已知限制与后续工作
 
 - **分代大小只能在启动时设置。** 堆已存在后再设置 `--max-semi-space-size` 毫无效果：同一个值传给 `node` 时实测 164.5 MB，而运行时设置器实测 256.3 MB。`dsh` 发布的是 `env node` 入口，无法携带 node 参数，所以想要那约 90 MB 的用户需自行设置 `NODE_OPTIONS=--max-semi-space-size=2`。与本策略叠加时实测 152 MB 对 153 MB——这正是 CLI 不去接管它的原因。
 - **阈值看不到按会话的增长。** 常驻集始终低于阈值的宿主永不收集，即使它的堆在缓慢增长。会反复更替的缓存应当在自己的淘汰路径上调用 `maybeGc`。
 - **本包不设置 `--max-semi-space-size`、GC 节流参数或 `MALLOC_ARENA_MAX`。** 节流常量需要一次真实会话负载下的测量，才能成为默认值。
 
+<a id="dev-note"></a>
 ## 开发说明
 
 ### 覆盖率

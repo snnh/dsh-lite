@@ -50,6 +50,7 @@ const stored = await readPersistedAccessToken(path) // undefined when absent or 
 | `ACCESS_TOKEN_FILENAME` | `access-token` | Harness home 下的文件名 |
 | `MIN_ACCESS_TOKEN_LENGTH` | 32 | 配置值的长度下限 |
 
+<a id="understand-the-implementation"></a>
 ## 理解实现
 
 ### 优先级与轮换
@@ -60,16 +61,19 @@ const stored = await readPersistedAccessToken(path) // undefined when absent or 
 
 写入时使用 `mode: 0o600`，随后再对路径做一次 chmod，因为 `writeFile` 只在该调用创建文件时应用 mode——否则一个更早、更宽松的文件会保留自己的权限。没有 POSIX 权限位的文件系统按尽力而为处理。
 
+<a id="further-exploration"></a>
 ## 延伸阅读
 
 - `@deepseek-ai/dsh-client-connection` 用该令牌换取签名的浏览器 cookie；令牌本身除了那个会话之外不授予任何东西。
 - 仓库根目录的 `docs/` 描述了本包不得破坏的 Harness 契约。
 
+<a id="known-limitations-and-deferred-work"></a>
 ## 已知限制与后续工作
 
 - **没有 TLS，也没有 `Secure` 属性。** 令牌会随打印 URL 的查询串出现一次，随后变为 `HttpOnly` cookie。把宿主暴露到可信网络之外，预期经由反向代理或虚拟组网。
 - **令牌是唯一的认证输入。** 没有第二因素、没有按用户身份、也没有吊销列表；轮换令牌即吊销。
 
+<a id="dev-note"></a>
 ## 开发说明
 
 ### 覆盖率
