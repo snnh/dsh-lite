@@ -29,14 +29,10 @@ const contexts: Context[] = []
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), 'dsh-lan-posture-'))
   vi.stubEnv('DSH_HOME', home)
-  // The posture warning must reach the console even when the logger exporter
-  // filters warn records; keep it off the test output while asserting it.
-  vi.spyOn(console, 'warn').mockImplementation(() => {})
 })
 
 afterEach(async () => {
   vi.unstubAllEnvs()
-  vi.restoreAllMocks()
   for (const ctx of contexts.splice(0)) await ctx.fiber.dispose()
   rmSync(home, { recursive: true, force: true })
 })
@@ -179,10 +175,6 @@ describe('lan-access persisted posture', () => {
     ]) expect(warn).toHaveBeenCalledWith(expect.stringContaining(fragment))
     // The token itself never reaches the log.
     expect(warn).not.toHaveBeenCalledWith(expect.stringContaining(readFileSync(tokenPath(), 'utf8').trim()))
-    // The same warning reaches the console the default web exporter would
-    // otherwise filter away.
-    expect(console.warn).toHaveBeenCalledTimes(1)
-    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining(`bound ${BIND_ALL_HOST}`))
   })
 
   it('stays silent on a loopback bind, creating no token and writing no posture', async () => {

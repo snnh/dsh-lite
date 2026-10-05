@@ -385,13 +385,7 @@ export async function apply(ctx: Context, config?: Config): Promise<void> {
     // Refuse the exposure when nothing can authenticate it. The connection half
     // exchanges this same token for the browser cookie.
     await ensureAccessToken(dshHomePath(ACCESS_TOKEN_FILENAME))
-    const warning = exposureWarning(host, ctx.get('profileContext')?.patchPath)
-    ctx.logger.warn(warning)
-    // The default web exporter filters warn records, and an exposure warning
-    // that never reaches the terminal is not a warning. Keep the structured
-    // record for logger consumers and put the same line on the console the
-    // operator actually reads.
-    console.warn(warning)
+    ctx.logger.warn(exposureWarning(host, ctx.get('profileContext')?.patchPath))
   }
   ctx.provide(LAN_ACCESS_SERVICE, { host })
 }
