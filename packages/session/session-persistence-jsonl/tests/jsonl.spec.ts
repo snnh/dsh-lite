@@ -1099,6 +1099,38 @@ describe('JsonlSessionPersistence: immutable format generations', () => {
     }
   })
 
+  it('pins no parsed history on a current-generation open and releases the prepared view on close', async () => {
+    type HandleState = { state: { primed?: Record<string, unknown> | undefined } }
+    const current = meta('current-no-primed', '/work')
+    const created = await ctx.sessionPersistence.create(current)
+    await created.flush()
+    await created.close()
+    const currentReader = await ctx.sessionPersistence.open(current.id, 'read')
+    try {
+      expect((currentReader as unknown as HandleState).state.primed).toBeUndefined()
+    } finally {
+      await currentReader.close()
+    }
+
+    const header = meta('released-v0-primed-shape', '/work')
+    const sourcePath = historicalLogPath(root, header.cwd, header.id)
+    await mkdir(dirname(sourcePath), { recursive: true })
+    await writeFile(
+      sourcePath,
+      `${JSON.stringify(releasedV0Header(header))}\n${migrationOneTurnLog().map(event => JSON.stringify(event)).join('\n')}\n`,
+    )
+    const reader = await ctx.sessionPersistence.open(header.id, 'read')
+    const state = (reader as unknown as HandleState).state
+    try {
+      // Only the read result is retained — never the prepared log's
+      // publication closures.
+      expect(Object.keys(state.primed ?? {}).sort()).toEqual(['eventState', 'events'])
+    } finally {
+      await reader.close()
+    }
+    expect(state.primed).toBeUndefined()
+  })
+
   it('fails a stale prepared publication once and re-prepares on the next write open', async () => {
     const header = meta('released-v0-write-source-drift', '/work')
     const sourcePath = historicalLogPath(root, header.cwd, header.id)

@@ -74,8 +74,9 @@ export interface StorageHandleState {
   inheritedEventCount: SessionLogOffset
   /**
    * The migrated view of a historical generation that has no current-
-   * generation artifact on disk yet. A read open retains it so reads keep
-   * serving the prepared log; it is dropped as soon as a current generation
+   * generation artifact on disk yet. A read open retains only the read
+   * result (`eventState` + `events`), never the prepared log's publication
+   * closures; it is dropped on close and as soon as a current generation
    * appears. A current-generation open never sets it, so the handle pins no
    * parsed history of its own.
    */
@@ -141,8 +142,11 @@ export class JsonlSessionHandle implements SessionHandle {
       if (primedPath === undefined) {
         return this.readPrimed(primed, offset, length)
       }
+      // Drop the retained view only after the current artifact read
+      // succeeded: a failed read keeps the prepared fallback retrievable.
+      const result = await this.readCurrent(primedPath, offset, length, options?.signal)
       this.state.primed = undefined
-      return await this.readCurrent(primedPath, offset, length, options?.signal)
+      return result
     }
     if (this.access === 'write' && !this.state.materialized) {
       return { eventState: 'detached', events: [] }
@@ -224,6 +228,10 @@ export class JsonlSessionHandle implements SessionHandle {
    */
   close(): Promise<void> {
     return this.closing ??= (async () => {
+      // Reads on a closed handle refuse, so the retained historical view is
+      // dead weight from here on; release it even if a caller keeps the
+      // closed handle around.
+      this.state.primed = undefined
       let drainFailure: unknown
       // Producers on other fibers may still publish while close waits for
       // in-flight mutations (root disposal is concurrent), so drain again
