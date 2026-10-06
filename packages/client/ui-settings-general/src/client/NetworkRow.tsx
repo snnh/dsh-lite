@@ -113,9 +113,11 @@ export function NetworkRow({ onHost, controller, useHost, t }: NetworkRowProps):
   if (!view.writable) {
     return <ReadOnlyRow title={t('network.title')} note={t('network.readOnly.noProfile')} />
   }
-  // The stated address is what the next start resolves: the profile's line when
-  // it has one, the running bind otherwise. The warning belongs to the address
-  // an operator has committed to, not to whatever is being typed.
+  // The stated address is the profile's line when it has one, and the running
+  // bind otherwise — the same default that bind came from. A `--host` pin is not
+  // folded in here: the warning below owns it, because the flag outranks the
+  // line and only the operator can retire the flag. The warning belongs to the
+  // address an operator has committed to, not to whatever is being typed.
   const stated = view.persisted ?? view.bound
   // Loopback, the wildcard, and this machine's detected address: the three
   // worth one click, anything else typed.

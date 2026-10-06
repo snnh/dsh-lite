@@ -11,8 +11,6 @@ import {
   detectLanAddress,
   isLoopbackHost,
   LAN_ACCESS_SERVICE,
-  LOOPBACK_HOST,
-  resolveBindHost,
   type LanAccessValues,
 } from '../src/index.ts'
 
@@ -60,24 +58,6 @@ describe('isLoopbackHost', () => {
     for (const host of ['0.0.0.0', '192.168.1.5', '10.0.0.1']) {
       expect(isLoopbackHost(host)).toBe(false)
     }
-  })
-})
-
-describe('resolveBindHost', () => {
-  it('prefers the configured host over the detected one', () => {
-    expect(resolveBindHost('10.0.0.9', '192.168.1.5')).toBe('10.0.0.9')
-  })
-
-  it('binds the detected LAN address when the row names none', () => {
-    expect(resolveBindHost(undefined, '192.168.1.5')).toBe('192.168.1.5')
-  })
-
-  it('falls back to loopback when the machine has no LAN address', () => {
-    expect(resolveBindHost(undefined, undefined)).toBe(LOOPBACK_HOST)
-  })
-
-  it('treats an empty configured value as unset', () => {
-    expect(resolveBindHost('', '192.168.1.5')).toBe('192.168.1.5')
   })
 })
 

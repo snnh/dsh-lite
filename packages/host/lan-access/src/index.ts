@@ -20,8 +20,11 @@
  * an operator's own choice lives, since the profile patch outranks every bundle
  * default — then the shipped default.
  *
- * `detectLanAddress()` picks the address a LAN-preferring fallback binds: the
- * first interface that carries a network of its own. Docker bridges, veth
+ * `detectLanAddress()` answers which single address on this machine peers can
+ * reach — the first interface that carries a network of its own — so the
+ * settings page can offer it as one click beside loopback and the wildcard. It
+ * is an offer, not a fallback: a row that states no host publishes every IPv4
+ * interface. Docker bridges, veth
  * pairs, hypervisor switches, tunnels, and the wireless shims each platform
  * adds on top (macOS `awdl*`/`llw*`, a `bridge*` VM bridge, a Windows
  * `vEthernet`) are addresses a phone cannot reach and an operator did not mean,
@@ -311,8 +314,11 @@ export function rankLanCandidates(candidates: readonly LanCandidate[]): readonly
 }
 
 /**
- * The address this row binds when it names none: the best-ranked candidate,
- * which is the first non-virtual interface's address when there is one.
+ * The single address on this machine peers are most likely able to reach: the
+ * best-ranked candidate, which is the first non-virtual interface's address
+ * when there is one. Best-effort and display-only — it decides no bind, and a
+ * caller that offers it must still accept whatever the row's own grammar can
+ * classify, since an operator may decline the offer and state another.
  * @returns the address, or undefined on a machine with only loopback (an
  *   isolated container, for example).
  */
@@ -367,19 +373,6 @@ export function classifyBindHost(host: string): BindHostKind | undefined {
  */
 export function isLoopbackHost(host: string): boolean {
   return classifyBindHost(host) === 'loopback'
-}
-
-/**
- * Resolve the host this row binds. The detected address is a parameter rather
- * than a default so a caller — and a test — can state "this machine has none"
- * distinctly from "do not look".
- * @param configured - the row's explicit host, when it named one.
- * @param detected - this machine's LAN address, from {@link detectLanAddress}.
- * @returns the configured host, else the detected address, else loopback.
- */
-export function resolveBindHost(configured: string | undefined, detected: string | undefined): string {
-  if (configured !== undefined && configured.length > 0) return configured
-  return detected ?? LOOPBACK_HOST
 }
 
 /**

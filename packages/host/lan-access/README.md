@@ -118,7 +118,7 @@ None; the bind posture never enters a model request, so a reusable provider pref
 
 #### Coverage
 
-`packages/*/*/src` carries a per-file 100% statement, branch, and function gate. `resolveBindHost` takes the detected address as an argument so every branch — configured, detected, and neither — is pinned without depending on the machine the tests run on, and the posture cases assert that a start creating a token writes nothing else under the harness home.
+`packages/*/*/src` carries a per-file 100% statement, branch, and function gate. Every host the row resolves without reading this machine — the flag, the composed config, and the shipped default — is pinned through the explicit resolution inputs, so the cases do not depend on the machine the tests run on, and the posture cases assert that a start creating a token writes nothing else under the harness home.
 
 #### Tests
 

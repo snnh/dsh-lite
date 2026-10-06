@@ -41,7 +41,7 @@ export interface WebHostStatus {
   readonly persisted?: string
   /** The host `--host` pinned for this invocation, which outranks the patch. */
   readonly pinned?: string
-  /** This machine's detected LAN address, the fallback when no host is stated. */
+  /** This machine's detected LAN address, offered as a one-click candidate; it decides no bind. */
   readonly detected?: string
   /** A profile patch exists to persist into; the write itself may still be refused. */
   readonly writable: boolean

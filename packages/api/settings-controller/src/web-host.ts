@@ -9,7 +9,9 @@
  * bind, not the access token, not the advertised URL, not the Loader. The
  * operator restarts, and the next start reads the line back through the row's
  * ordinary resolution order (`--host`, then the composed config the profile
- * patch feeds, then this machine's detected address, then loopback).
+ * patch feeds, then the row's own shipped default: the IPv4 wildcard). The
+ * detected address is reported for the page to offer as one click; it decides
+ * no bind, so a save is the only way this page changes what starts.
  *
  * The stored line is what makes this page worth having: the profile patch
  * outranks every bundle default, so a host stated here survives later releases
