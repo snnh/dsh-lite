@@ -375,9 +375,10 @@ describe.skipIf(!existsSync(dshBin))('dsh BUILT bin (node lib/bin.js, no tsx)', 
       expect(web.stdout).toContain('--public-url <url>')
       expect(web.stdout).not.toContain('dsh web: http://')
 
-      // `--host 0.0.0.0` is no longer refused: the flag reaches the lan-access
-      // row, which persists that posture and binds every IPv4 interface. The
-      // invocation still exits before any row activates, on the port guard.
+      // `--host 0.0.0.0` is no longer refused: the flag is data, and the
+      // consumer that decides what may be bound resolves it (for the shipped
+      // rows, `lan-access`). The invocation still exits before any row
+      // activates, on the port guard.
       const wildcardHost = await runBuiltBin(['web', '--host', '0.0.0.0', '--port', 'abc'], {
         DSH_HOME: home,
         DSH_TELEMETRY_DISABLED: '1',
@@ -789,7 +790,13 @@ describe.skipIf(!existsSync(dshBin))('dsh BUILT bin (node lib/bin.js, no tsx)', 
         NODE_OPTIONS: `--import=${webReadyExitHook}`,
       })
       expect(result.code, result.stderr).toBe(0)
-      expect(result.stdout).toMatch(/^dsh web: http:\/\/127\.0\.0\.1:\d+\/\?token=[A-Za-z0-9_-]+$/u)
+      // The advertised line carries the loopback URL first, then an optional
+      // ` (LAN: <url>)` suffix when a second address is reachable. Pin both:
+      // an anchored loopback-only pattern silently rots the day the suffix
+      // appears, and anything else after the token means the line changed.
+      expect(result.stdout).toMatch(
+        /^dsh web: http:\/\/127\.0\.0\.1:\d+\/\?token=[A-Za-z0-9_-]+(?: \(LAN: http:\/\/[^\s)]+\))?$/u,
+      )
       expect(result.stderr).toContain('llm-pi-ai')
     } finally {
       rmSync(home, { recursive: true, force: true })

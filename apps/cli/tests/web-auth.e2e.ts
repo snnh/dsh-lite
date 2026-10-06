@@ -193,11 +193,16 @@ describe('dsh web authentication through the real CLI', () => {
       first = undefined
       second = await startWeb(root, dshHome, port)
       const secondUrl = new URL(second.launchUrl)
-      expect(secondUrl.searchParams.get('token')).not.toBe(firstUrl.searchParams.get('token'))
+      // The access token survives a restart by design — a printed LAN URL keeps
+      // working until the token is rotated by deleting `$DSH_HOME/access-token`
+      // or changing `DSH_ACCESS_TOKEN`. Rotation, not restart, is the boundary.
+      expect(secondUrl.searchParams.get('token')).toBe(firstUrl.searchParams.get('token'))
       expect((await describeSettings(port, secondUrl.host, cookie)).status).toBe(200)
 
       const credentialMode = (await stat(join(dshHome, '.credentials.yaml'))).mode & 0o777
       expect(credentialMode).toBe(0o600)
+      const tokenMode = (await stat(join(dshHome, 'access-token'))).mode & 0o777
+      expect(tokenMode).toBe(0o600)
     } catch (error) {
       const evidence = [first?.output(), second?.output()].filter(value => value !== undefined).join('\n')
       throw new Error(`${error instanceof Error ? error.message : String(error)}\n${redact(evidence)}`, { cause: error })
