@@ -124,7 +124,7 @@ The `seed` and `apply` signatures are unchanged. The client routes by `kind`: a 
 
 **An index of each session's cut maintained by persistence or session-query.** A new durable index with its own consistency maintenance, serving one display read. Rejected.
 
-**Restore a bounded body probe.** The `probeSmallCold` idea #3400 removed, or a client-side asynchronous `refreshProjections` for visible seeded sessions. It breaks the list's zero-I/O principle, and the historical 1KB threshold shows it never covered an ordinary fork. Rejected.
+**Restore a bounded body probe.** The `probeSmallCold` idea #3400 removed, or a client-side asynchronous `refreshProjections` for visible seeded sessions. It breaks the list's principle of reading no Session log, and the historical 1KB threshold shows it never covered an ordinary fork. Rejected.
 
 **Only the `asOfSeq: -1` sentinel, without store tiers.** One server-side change makes hints always lose under the seq rule. It rests on a convention: when a hint's seq equals or exceeds the baseline cut (crash-repair truncation), `apply` keeps the old row and the wrong value survives until the next frame. The user requires connected data to replace hints unconditionally, so the rule belongs in the store rather than in a seq convention.
 

@@ -202,7 +202,11 @@ export class SessionReferenceResolver extends TypertRemoteService {
     const records = (await settleWithCancellation(this.ctx.sessionQuery.listSessions(signal), signal))
       .filter(record => record.header.id !== agent.id)
       .map((record, index) => ({ record, index }))
-    const labelled = records.map(({ record, index }) => ({ record, index, ...this.projectedLabels(record) }))
+    const labelled = await Promise.all(records.map(async ({ record, index }) => ({
+      record,
+      index,
+      ...await this.projectedLabels(record),
+    })))
     return labelled.filter(({ record, label, displayTitle }) => {
       if (needle === '') return true
       return record.header.id.toLocaleLowerCase().includes(needle)
@@ -243,12 +247,14 @@ export class SessionReferenceResolver extends TypertRemoteService {
    * @param record - the listed session, live or cold.
    * @returns the title-backed mention label and the subagent-label-first display title.
    */
-  private projectedLabels(record: SessionRecord): { label: string; displayTitle: string } {
+  private async projectedLabels(
+    record: SessionRecord,
+  ): Promise<{ label: string; displayTitle: string }> {
     const attached = this.ctx.get('sessions')?.get(record.header.id)
     const projections = this.ctx.get('sessionProjections')
     const snapshot = attached !== undefined && projections !== undefined
       ? projections.snapshot(attached, ['title', 'subagent'])
-      : this.ctx.get('sessionProjectionCache')?.cachedSnapshot(record.header, ['title', 'subagent'])
+      : await this.ctx.get('sessionProjectionCache')?.cachedSnapshot(record.header, ['title', 'subagent'])
     const label = titleOf(snapshot) ?? record.header.id
     const subagent = snapshot?.values.subagent
     return {

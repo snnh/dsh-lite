@@ -2,12 +2,13 @@
  * SessionProjectionCache behavior: mandatory-point writes (turn/end, detach),
  * count/interval throttling between them, fail-soft durability (a failed
  * write logs and stays stale, never throws into the event path), and the
- * synchronous cached listing read. The durable medium is the
- * `session_projcache` storage domain in per-record layout: one
- * version-stamped document per session under the json backend root at
- * `<root>/session_projcache/sessions/<id>.json`. Reads never touch the
- * medium — they come from the domain's in-memory tables, which writes mutate
- * only after durability.
+ * asynchronous cached listing read. The durable medium is the
+ * `session_projcache` storage domain in per-record layout with lazy
+ * residency: one version-stamped document per session under the json backend
+ * root at `<root>/session_projcache/sessions/<id>.json`, and nothing resident
+ * in the domain. A read serves the service's own budgeted copy when the
+ * session is hot and otherwise pays one point read of that session's
+ * document, which admits the record it fetched to the copy.
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -368,11 +369,11 @@ describe('SessionProjectionCache listing read', () => {
   it('rejects a nonzero inherited cut for an unseeded header on the fold face', async () => {
     const { cache } = await harness()
 
-    expect(() => cache.coldSnapshot(
+    await expect(cache.coldSnapshot(
       headerOf(SessionId('invalid-unseeded-cut')),
       SessionLogOffset(1),
       [],
-    )).toThrow('unseeded projection-cache identity inherited event count must be 0')
+    )).rejects.toThrow('unseeded projection-cache identity inherited event count must be 0')
   })
 
   it('serves rows with differing watermarks as one block at the lowest served watermark', async () => {
@@ -392,7 +393,7 @@ describe('SessionProjectionCache listing read', () => {
     // The block carries one watermark: the seq every served value has folded
     // through at least, so the lower of the two rows names the block.
     for (const [id, asOfSeq] of [['watermark-lower', 2], ['watermark-higher', 4]] as const) {
-      expect(cache.cachedSnapshot(headerOf(SessionId(id)))).toEqual({
+      expect(await cache.cachedSnapshot(headerOf(SessionId(id)))).toEqual({
         asOfSeq,
         values: {
           'cache-test/marks': { marks: ['primary'] },
@@ -426,15 +427,15 @@ describe('SessionProjectionCache listing read', () => {
 
     // The listing knows only the header: the record's lifecycle matches, so
     // its rows are viewed without any cut.
-    expect(cache.cachedSnapshot(seededHeader))
+    expect(await cache.cachedSnapshot(seededHeader))
       .toEqual({ asOfSeq: 1, values: { 'cache-test/marks': { marks: ['seed'] } } })
     // An unseeded header names another lifecycle even though the id matches.
-    expect(cache.cachedSnapshot(headerOf(id))).toBeUndefined()
+    expect(await cache.cachedSnapshot(headerOf(id))).toBeUndefined()
     // The fold face holds the exact cut: the matching cut seeds from the row,
     // another cut refolds the whole log instead of continuing a foreign state.
-    expect(cache.coldSnapshot(seededHeader, SessionLogOffset(2), log).values['cache-test/marks'])
+    expect((await cache.coldSnapshot(seededHeader, SessionLogOffset(2), log)).values['cache-test/marks'])
       .toEqual({ marks: ['seed'] })
-    expect(cache.coldSnapshot(seededHeader, SessionLogOffset(1), log).values['cache-test/marks'])
+    expect((await cache.coldSnapshot(seededHeader, SessionLogOffset(1), log)).values['cache-test/marks'])
       .toEqual({ marks: ['logged'] })
   })
 
@@ -462,11 +463,11 @@ describe('SessionProjectionCache listing read', () => {
 
     // An older format generation never serves the full block, but its title
     // survives the format edge, for a seeded lifecycle as for an unseeded one.
-    expect(cache.cachedSnapshot(seededHeader)).toBeUndefined()
-    expect(cache.cachedPredecessorTitle(seededHeader))
+    expect(await cache.cachedSnapshot(seededHeader)).toBeUndefined()
+    expect(await cache.cachedPredecessorTitle(seededHeader))
       .toEqual({ asOfSeq: 3, values: { title: 'forked title' } })
     // An unseeded header names another lifecycle: no title either.
-    expect(cache.cachedPredecessorTitle(headerOf(id))).toBeUndefined()
+    expect(await cache.cachedPredecessorTitle(headerOf(id))).toBeUndefined()
   })
 
   it('serves a creation-time checkpoint at the before-first-event cursor', async () => {
@@ -477,7 +478,7 @@ describe('SessionProjectionCache listing read', () => {
     })
     const { cache } = await harness({ root })
 
-    expect(cache.cachedSnapshot(headerOf(SessionId('before-first-event'))))
+    expect(await cache.cachedSnapshot(headerOf(SessionId('before-first-event'))))
       .toEqual({ asOfSeq: -1, values: { 'cache-test/marks': { marks: [] } } })
   })
 
@@ -498,7 +499,7 @@ describe('SessionProjectionCache listing read', () => {
     )
     const { cache } = await harness({ root })
 
-    expect(cache.cachedSnapshot(headerOf(id))).toBeUndefined()
+    expect(await cache.cachedSnapshot(headerOf(id))).toBeUndefined()
   })
 
   it('keeps host-only checkpoint state out of cached wire snapshots', async () => {
@@ -512,11 +513,11 @@ describe('SessionProjectionCache listing read', () => {
     ctx.sessionProjections.register(secretUnit)
     const header = headerOf(SessionId('host-state'))
 
-    expect(cache.cachedSnapshot(header)).toEqual({
+    expect(await cache.cachedSnapshot(header)).toEqual({
       asOfSeq: 4,
       values: { 'cache-test/marks': { marks: ['wire'] } },
     })
-    expect(JSON.stringify(cache.cachedSnapshot(header)))
+    expect(JSON.stringify(await cache.cachedSnapshot(header)))
       .not.toContain('private prompt text')
   })
 
@@ -529,12 +530,12 @@ describe('SessionProjectionCache listing read', () => {
     const { cache } = await harness({ root })
     const id = SessionId('listed')
     // Matching header: the values at the stored row's own watermark.
-    expect(cache.cachedSnapshot(headerOf(id)))
+    expect(await cache.cachedSnapshot(headerOf(id)))
       .toEqual({ asOfSeq: 4, values: { 'cache-test/marks': { marks: ['t'] } } })
     // A recreated id (different createdAt): the record is unrelated — no block.
-    expect(cache.cachedSnapshot(headerOf(id, 777))).toBeUndefined()
+    expect(await cache.cachedSnapshot(headerOf(id, 777))).toBeUndefined()
     // Unknown id: no block.
-    expect(cache.cachedSnapshot(headerOf(SessionId('never-cached'))))
+    expect(await cache.cachedSnapshot(headerOf(SessionId('never-cached'))))
       .toBeUndefined()
   })
 
@@ -547,7 +548,7 @@ describe('SessionProjectionCache listing read', () => {
     })
     const { ctx, cache } = await harness({ root })
     ctx.sessionProjections.register(marks3Unit)
-    const block = cache.cachedSnapshot(headerOf(SessionId('multi-row')))
+    const block = await cache.cachedSnapshot(headerOf(SessionId('multi-row')))
     expect(block?.values).toEqual({
       'cache-test/marks': { marks: ['a'] },
       'cache-test/marks3': { marks: ['b'] },
@@ -575,7 +576,7 @@ describe('SessionProjectionCache listing read', () => {
       },
     }))
     const { cache } = await harness({ root })
-    expect(cache.cachedSnapshot(headerOf(SessionId('all-stale'))))
+    expect(await cache.cachedSnapshot(headerOf(SessionId('all-stale'))))
       .toBeUndefined()
   })
 
@@ -596,19 +597,19 @@ describe('SessionProjectionCache listing read', () => {
     const { cache } = await harness({ root })
     const id = SessionId('pre-lineage')
     // Unseeded caller: the absent lineage is exactly its identity — served.
-    expect(cache.cachedSnapshot(headerOf(id)))
+    expect(await cache.cachedSnapshot(headerOf(id)))
       .toEqual({ asOfSeq: 4, values: { 'cache-test/marks': { marks: ['kept'] } } })
     // Seeded caller: the lineage-less record cannot vouch for a seeded lifecycle — refused.
-    expect(cache.cachedSnapshot({ ...headerOf(id), isSeeded: true }))
+    expect(await cache.cachedSnapshot({ ...headerOf(id), isSeeded: true }))
       .toBeUndefined()
     // The fold face reads the absent lineage as the unseeded cut 0: the
     // unseeded caller continues from the row, the seeded caller refolds.
     const log: SessionEvent[] = [0, 1, 2, 3, 4].map(seq => ({
       type: 'cache-test/mark', seq: SessionSeq(seq), time: seq, data: { marks: [`m${seq}`] },
     }))
-    expect(cache.coldSnapshot(headerOf(id), SessionLogOffset(0), log).values['cache-test/marks'])
+    expect((await cache.coldSnapshot(headerOf(id), SessionLogOffset(0), log)).values['cache-test/marks'])
       .toEqual({ marks: ['kept'] })
-    expect(cache.coldSnapshot({ ...headerOf(id), isSeeded: true }, SessionLogOffset(1), log).values['cache-test/marks'])
+    expect((await cache.coldSnapshot({ ...headerOf(id), isSeeded: true }, SessionLogOffset(1), log)).values['cache-test/marks'])
       .toEqual({ marks: ['m4'] })
   })
 
@@ -627,7 +628,7 @@ describe('SessionProjectionCache listing read', () => {
     }))
     const { cache } = await harness({ root })
 
-    expect(cache.cachedSnapshot(headerOf(id))).toBeUndefined()
+    expect(await cache.cachedSnapshot(headerOf(id))).toBeUndefined()
   })
 
   it('returns undefined when every stored row is version-mismatched', async () => {
@@ -639,7 +640,7 @@ describe('SessionProjectionCache listing read', () => {
       'cache-test/marks': { ver: 99, seq: SessionSeq(4), val: { marks: ['old'] } },
     })
     const { cache } = await harness({ root })
-    expect(cache.cachedSnapshot(headerOf(SessionId('row-stale'))))
+    expect(await cache.cachedSnapshot(headerOf(SessionId('row-stale'))))
       .toBeUndefined()
   })
 
@@ -657,10 +658,10 @@ describe('SessionProjectionCache listing read', () => {
     })
     const { cache } = await harness({ root })
     const id = SessionId('homed')
-    expect(cache.cachedSnapshot(headerOf(id, 0, '/work'))?.values['cache-test/marks'])
+    expect((await cache.cachedSnapshot(headerOf(id, 0, '/work')))?.values['cache-test/marks'])
       .toEqual({ marks: ['w'] })
-    expect(cache.cachedSnapshot(headerOf(id, 0, '/elsewhere'))).toBeUndefined()
-    expect(cache.cachedSnapshot(headerOf(id, 0))).toBeUndefined()
+    expect(await cache.cachedSnapshot(headerOf(id, 0, '/elsewhere'))).toBeUndefined()
+    expect(await cache.cachedSnapshot(headerOf(id, 0))).toBeUndefined()
   })
 
   it('returns undefined for a malformed record document (refold from the log on the caller side)', async () => {
@@ -670,7 +671,7 @@ describe('SessionProjectionCache listing read', () => {
     await mkdir(dirname(path), { recursive: true })
     await writeFile(path, 'not json at all')
     const { cache } = await harness({ root })
-    expect(cache.cachedSnapshot(headerOf(SessionId('malformed'))))
+    expect(await cache.cachedSnapshot(headerOf(SessionId('malformed'))))
       .toBeUndefined()
   })
 })
@@ -701,8 +702,8 @@ describe('SessionProjectionCache cold-read seeding', () => {
   it('hydratePrepared seeds from a matching row and retries from the exact log on a malformed one', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-projcache-'))
     roots.push(root)
-    // Records land on disk before the domain opens, so the in-memory table
-    // picks them up at init.
+    // Records land on disk before the cache opens, so the first read meets
+    // them on the medium (lazy residency keeps nothing at open).
     await seedRecord(root, 'prepared-seeded', {
       'cache-test/marks': { ver: 1, seq: SessionSeq(1), val: { marks: ['cached'] } },
     })
@@ -715,7 +716,7 @@ describe('SessionProjectionCache cold-read seeding', () => {
     // A matching row hydrates the prepared Session without a persistence read.
     const seeded = headerOf(SessionId('prepared-seeded'))
     const seededSession = Session.create(seeded.id, events, seeded)
-    expect(cache.hydratePrepared(seededSession, events)).toEqual({
+    expect(await cache.hydratePrepared(seededSession, events)).toEqual({
       asOfSeq: 2,
       values: { 'cache-test/marks': { marks: ['cached'] } },
     })
@@ -724,7 +725,7 @@ describe('SessionProjectionCache cold-read seeding', () => {
     // exact log so a valid Session stays readable.
     const fallback = headerOf(SessionId('prepared-fallback'))
     const fallbackSession = Session.create(fallback.id, events, fallback)
-    expect(cache.hydratePrepared(fallbackSession, events)).toEqual({
+    expect(await cache.hydratePrepared(fallbackSession, events)).toEqual({
       asOfSeq: 2,
       values: { 'cache-test/marks': { marks: ['fresh'] } },
     })
@@ -732,7 +733,7 @@ describe('SessionProjectionCache cold-read seeding', () => {
     // No row at all: hydrate from init over the exact log.
     const bare = headerOf(SessionId('prepared-bare'))
     const bareSession = Session.create(bare.id, events, bare)
-    expect(cache.hydratePrepared(bareSession, events)).toEqual({
+    expect(await cache.hydratePrepared(bareSession, events)).toEqual({
       asOfSeq: 2,
       values: { 'cache-test/marks': { marks: ['fresh'] } },
     })
@@ -764,7 +765,7 @@ describe('SessionProjectionCache cold-read seeding', () => {
       type: 'cache-test/mark', seq: SessionSeq(seq), time: seq, data: { marks: [`m${seq}`] },
     })) as SessionEvent[]
     const refreshed = whenWritten(ctx, meta.id)
-    const snapshot = cache.coldSnapshot(meta, SessionLogOffset(0), events)
+    const snapshot = await cache.coldSnapshot(meta, SessionLogOffset(0), events)
     // The full log was traversed, but the fold applied only seqs 3 and 4.
     expect(apply).toHaveBeenCalledTimes(2)
     expect(apply.mock.calls.map(call => call[1].seq)).toEqual([3, 4])
@@ -778,7 +779,7 @@ describe('SessionProjectionCache cold-read seeding', () => {
     // log and creates the cache row (the `?? {}` seed path).
     const fresh = headerOf(SessionId('cold-fresh'), 10)
     const created = whenWritten(ctx, fresh.id)
-    cache.coldSnapshot(fresh, SessionLogOffset(0), events)
+    await cache.coldSnapshot(fresh, SessionLogOffset(0), events)
     expect(apply).toHaveBeenCalledTimes(7) // 2 tail + 5 full
     await created
     expect((await storedRows(root, fresh.id))?.['cache-test/count']?.seq).toBe(4)
@@ -801,7 +802,7 @@ describe('SessionProjectionCache cold-read seeding', () => {
     // fail; the cold read itself still succeeds and never throws.
     const meta = headerOf(SessionId('cold-fail'))
     await mkdir(recordPath(root, meta.id), { recursive: true })
-    expect(ctx.sessionProjectionCache.coldSnapshot(meta, SessionLogOffset(0), [])).toBeDefined()
+    expect(await ctx.sessionProjectionCache.coldSnapshot(meta, SessionLogOffset(0), [])).toBeDefined()
     // The failed write-back is fire-and-forget: poll for the warn instead of
     // assuming a fixed settle window (slow runners exceed it).
     await vi.waitFor(() => {

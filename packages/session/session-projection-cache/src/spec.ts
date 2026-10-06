@@ -7,6 +7,13 @@
  * backend stores the domain `per-record`: one document per session under
  * `<root>/session_projcache/sessions/`, so a checkpoint write rewrites one
  * session's document instead of the whole unit).
+ *
+ * The domain is `residency: 'lazy'`: the table keeps one row per checkpointed
+ * Session forever, so materializing it at open would pin the whole checkpoint
+ * tree for the process lifetime. An open therefore touches no record, and
+ * every read is one durable point read of the session's own document — which
+ * is exactly the access shape of this table, since no cache path iterates or
+ * scans it (the service's own bounded copy is the only resident state).
  * @module @deepseek-ai/dsh-session-projection-cache/src/spec
  */
 
@@ -76,31 +83,42 @@ export type CheckpointRecord = z.infer<typeof checkpointRecord>
 
 /**
  * The session-projcache domain spec. The `per-record` layout scopes version
- * bumps per session: after a bump, a stale session document is discarded on
- * open (cache semantics — a stale or unreadable cache costs a longer tail
- * replay, never a wrong value) while the rest of the domain stays usable,
- * instead of rejecting the whole medium. The `compatibleVersions` entries
- * keep structurally valid predecessor records available for a later current
- * checkpoint rewrite. Records without `formatVersion` remain unusable as fold
- * shortcuts because they cannot prove which Session event semantics produced
- * their rows; the per-record version map and disposition live in this package's README.
- * The per-row `ver` guard and the identity match still discard anything the
- * current fold semantics cannot vouch for.
+ * bumps per session: after a bump, a stale session document is discarded when
+ * a read meets it (cache semantics — a stale or unreadable cache costs a
+ * longer tail replay, never a wrong value) while the rest of the domain stays
+ * usable, instead of rejecting the whole medium. The lazy `residency` moves
+ * that per-record work to the read that meets the record: `open` materializes
+ * nothing, so a bootstrap that trips over one record cannot fail at boot, and
+ * the `compatibleVersions` and `invalidRecords` declarations below keep
+ * exactly the meaning they have on the read path. The `compatibleVersions`
+ * entries keep structurally valid predecessor records available for a later
+ * current checkpoint rewrite (the per-record unit reads a document stamped
+ * with a listed version instead of reporting it absent). Records without
+ * `formatVersion` remain unusable as fold shortcuts because they cannot prove
+ * which Session event semantics produced their rows; the per-record version
+ * map and disposition live in this package's README. The per-row `ver` guard
+ * and the identity match still discard anything the current fold semantics
+ * cannot vouch for. The legacy whole-unit bootstrap keeps its one-time
+ * behaviour: it runs when, and only when, an enumeration of the new layout
+ * finds nothing and the legacy unit's version is accepted.
  *
  * A lifecycle-matching predecessor may still expose its version-compatible
  * title through the cache service's listing-only hint; this never relaxes the
  * format requirement for hydration or another fold shortcut.
  *
  * `invalidRecords: 'backup-and-skip'`: a stored record that fails the schema
- * anyway is disposable derived data, so it must never cost the boot — the
- * domain layer moves the document aside as `<key>.json.bak.<stamp>`, logs
- * the concrete validation failure, and serves the session as uncached (a
- * cold read rebuilds and rewrites it).
+ * is disposable derived data, so it must never cost the boot — under lazy
+ * residency there is no boot-time read to fail at all; the read that meets
+ * the record moves the document aside as `<key>.json.bak.<stamp>`, logs the
+ * concrete validation failure, and answers as if the record were absent (a
+ * cold read rebuilds and rewrites it). The policy needs a per-record document
+ * to move, which the `per-record` layout provides.
  */
 export const projectionCacheDomainSpec = defineDomain({
   name: 'session_projcache',
   version: 7,
   compatibleVersions: [3, 4, 5, 6],
+  residency: 'lazy',
   invalidRecords: 'backup-and-skip',
   layout: 'per-record',
   tables: { sessions: domainTable<SessionId, CheckpointRecord>(checkpointRecord) },

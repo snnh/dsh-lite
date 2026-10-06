@@ -762,7 +762,7 @@ describe('SessionObservationReader cold projections', () => {
     const store = new Map([[meta.id, { header: meta, events: [messageEvent(0, 'cached')], revision: 'r1' }]])
     ctx.provide('sessionPersistence', stubPersistence(store, { stat: 0, open: 0, read: 0 }))
     const snapshot = { asOfSeq: 0, values: {} }
-    const hydratePrepared = vi.fn().mockReturnValue(snapshot)
+    const hydratePrepared = vi.fn().mockResolvedValue(snapshot)
     ctx.provide('sessionProjectionCache', { hydratePrepared } as never)
 
     using observed = await new SessionObservationReader(ctx).read(meta.id)

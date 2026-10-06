@@ -230,7 +230,7 @@ export class SessionObservationReader {
 
       let projections: ProjectionSnapshot | undefined
       try {
-        projections = projectionMode === 'none' ? undefined : this.preparedProjections(entry)
+        projections = projectionMode === 'none' ? undefined : await this.preparedProjections(entry)
       } catch (error: unknown) {
         throw new SessionQueryError(
           `failed to project session "${sessionId}": ${errorMessage(error)}`,
@@ -424,13 +424,13 @@ export class SessionObservationReader {
     return lease()
   }
 
-  private preparedProjections(entry: PreparedEntry): ProjectionSnapshot | undefined {
+  private async preparedProjections(entry: PreparedEntry): Promise<ProjectionSnapshot | undefined> {
     const registry = this.ctx.get('sessionProjections')
     if (registry === undefined) return undefined
     const cache = this.ctx.get('sessionProjectionCache')
     return cache === undefined
       ? registry.hydrate(entry.session, {}, entry.events, SessionLogOffset(0))
-      : cache.hydratePrepared(entry.session, entry.events)
+      : await cache.hydratePrepared(entry.session, entry.events)
   }
 }
 

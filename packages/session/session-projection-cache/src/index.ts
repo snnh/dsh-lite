@@ -1,20 +1,21 @@
 /**
  * Persisted projection cache (`ctx.sessionProjectionCache`): durable
  * checkpoints of every projection unit's state, one record per session on
- * the `session_projcache` domain (`per-record` layout — the shipped json
- * backend stores one document per session under its root). Reads and writes
- * share ONE coherent state: the domain's in-memory tables serve every read
- * synchronously, and each write lands on the domain's write chain (durability
- * first, then memory), so a read can never observe a disk write the memory
- * has not applied, or a memory value the disk does not hold. The cache is a
- * fold shortcut, never an authority: a row
- * is possibly stale (its `seq` says how stale) but never wrong, so every
- * write path is fail-soft (a lost write costs a longer tail replay on the
- * next cold read) and a `ver` mismatch discards the row instead of migrating
- * it. Reads are served from this service's own budgeted copy of the domain's
+ * the `session_projcache` domain (`per-record` layout, `residency: 'lazy'`
+ * — the shipped json backend stores one document per session under its root
+ * and an open reads none of them). Reads and writes share ONE coherent state:
+ * each write lands on the domain's write chain (durability first, then the
+ * medium), and each read is one durable point read of one session's document.
+ * The cache is a fold shortcut, never an authority: a row is possibly stale
+ * (its `seq` says how stale) but never wrong, so every write path is
+ * fail-soft (a lost write costs a longer tail replay on the next cold read)
+ * and a `ver` mismatch discards the row instead of migrating it. Reads are
+ * served from this service's own budgeted copy of the domain's
  * records (`residentMaxEntries`/`residentMaxBytes`); dropping a record from
  * that copy is a memory-only decision that never touches the durable one, and
- * the domain's table remains the source a dropped record is refilled from.
+ * the domain's table remains the source a dropped record is refilled from,
+ * through one point read that admits what it fetched back into the copy. That
+ * copy is the only resident state this package holds; the domain holds none.
  * Archiving a session is the one durable statement that its record is no
  * longer worth keeping, so it deletes the record — resident and durable —
  * while disposing a session only checkpoints it. Design authority: the
@@ -39,7 +40,7 @@ import type {
   ProjectionSnapshot,
   SessionProjectionMap,
 } from '@deepseek-ai/dsh-session-projection'
-import type { DomainChanged, KvTable } from '@deepseek-ai/dsh-storage-domain'
+import type { DomainChanged, LazyKvTable } from '@deepseek-ai/dsh-storage-domain'
 import { projectionCacheDomainSpec } from './spec.ts'
 import type { CheckpointIdentity, CheckpointRecord } from './spec.ts'
 
@@ -158,17 +159,18 @@ interface DirtyState {
  * moment) — and serves the
  * cached rows for a session header. Every durable write is fail-soft:
  * failures log a warning and the cache self-heals on the next write. Reads are
- * served from a budgeted resident copy of the domain's records; the domain
- * table is the authority that copy is refilled from, and archiving a session
- * (observed through the Workspace registry's commits) deletes its record from
- * both.
+ * served from a budgeted resident copy of the domain's records — the only
+ * resident state this service holds — and a record that copy has dropped is
+ * refilled by one durable point read of the domain table (which admits it back
+ * into the copy). Archiving a session (observed through the Workspace
+ * registry's commits) deletes its record from both.
  */
 export class SessionProjectionCache extends Service {
   static inject = ['storageDomain', 'sessionProjections', 'sessions']
 
   static Config: z<Config> = Config
 
-  private table?: KvTable<SessionId, CheckpointRecord>
+  private table?: LazyKvTable<SessionId, CheckpointRecord>
   private readonly dirty = new Map<Session, DirtyState>()
   /**
    * Resident copy of the records the read faces serve: the sessions a host
@@ -179,9 +181,21 @@ export class SessionProjectionCache extends Service {
    * every read relies on is that this copy never holds a record older than the
    * table's: a write invalidates its entry before the table can change and
    * re-admits it once the write landed, and a deletion invalidates it before
-   * the record leaves the table.
+   * the record leaves the table. A read is the one path that refills the copy
+   * from the medium, so it captures {@link writeSerial} before its point read
+   * and admits what it fetched only when no write has invalidated the copy in
+   * the meantime — otherwise a read that started before a write landed would
+   * put the record that write replaced back into the copy.
    */
   private readonly resident: BoundedMap<SessionId, CheckpointRecord>
+  /**
+   * Counter of the writes that invalidated a resident entry (every `put` and
+   * `purgeArchived`). A cold read snapshots it before its point read and
+   * admits only when it is unchanged: any write that landed while the read was
+   * in flight already published the newer record (or removed it), and the
+   * record the medium served that read is older than the table's.
+   */
+  private writeSerial = 0
   /** Effective entry bound of {@link resident}; `0` leaves the count unbounded. */
   private readonly residentMaxEntries: number
   /** Effective byte bound of {@link resident}; `0` leaves the byte account unbounded. */
@@ -235,16 +249,22 @@ export class SessionProjectionCache extends Service {
   /**
    * The record the domain holds for one session, admitted to the resident copy
    * on the way out. A copy hit is served directly (and re-stamped as the most
-   * recently used entry); a miss the domain table can answer refills the copy,
-   * and a miss in both is a session this cache holds no record for.
+   * recently used entry) with no I/O at all; a miss costs one durable point
+   * read of that session's document through the lazy table, which is what
+   * refills the copy, and a miss in both is a session this cache holds no
+   * record for. The point read is admitted only while no write has invalidated
+   * the copy since it started (see {@link writeSerial}), so a read that raced
+   * a checkpoint (or an archive purge) can never publish the record that write
+   * already replaced.
    * @param id - the session whose record is read.
    * @returns the stored record, or `undefined` when neither copy holds one.
    */
-  private storedRecord(id: SessionId): CheckpointRecord | undefined {
+  private async storedRecord(id: SessionId): Promise<CheckpointRecord | undefined> {
     const resident = this.resident.get(id)
     if (resident !== undefined) return resident
-    const stored = this.requireTable().get(id)
-    if (stored !== undefined) this.resident.set(id, stored)
+    const serial = this.writeSerial
+    const stored = await this.requireTable().read(id)
+    if (stored !== undefined && this.writeSerial === serial) this.resident.set(id, stored)
     return stored
   }
 
@@ -253,20 +273,21 @@ export class SessionProjectionCache extends Service {
    * identity matches `expected`. A session id names a slot, not a lifecycle:
    * a recreated id or a persistence store swapped under a surviving cache
    * must not let an old record seed state folded from an unrelated log.
-   * Synchronous from the resident copy, which the domain's in-memory state
-   * refills — never from the medium.
+   * Asynchronous because the record may live only on the medium: a hot record
+   * comes from the resident copy, a cold one costs one point read of that
+   * session's document (which admits it to the copy). Never a log read.
    * @param id - the session whose record is read.
    * @param expected - the log identity the caller holds (live or stored header).
    * @returns the identity-matching record, or `undefined` (absent or unrelated).
    */
-  private recordFor(id: SessionId, expected: CurrentCheckpointIdentity): CheckpointRecord | undefined {
-    const record = this.storedRecord(id)
+  private async recordFor(id: SessionId, expected: CurrentCheckpointIdentity): Promise<CheckpointRecord | undefined> {
+    const record = await this.storedRecord(id)
     if (record === undefined) return undefined
     return identityMatches(record.identity, expected) ? record : undefined
   }
 
   /**
-   * The zero-I/O listing read: whole values viewed straight from the stored
+   * The listing read: whole values viewed straight from the stored
    * rows (version-matching keys only) of the record bound to the caller's
    * lifecycle. The header is the only identity witness a listing holds, so
    * this face matches the lifecycle identity (`formatVersion`, `createdAt`,
@@ -279,23 +300,28 @@ export class SessionProjectionCache extends Service {
    * cannot relate to the log the caller later opens. The Session list
    * therefore labels the block as cached, and the client lets every value the
    * connected Session produces supersede it whatever this number says.
+   *
+   * Not zero-I/O any more, and never a log read: a hot session is answered
+   * from the resident copy in the same tick, and a cold one pays one durable
+   * point read of that session's document, which admits the record it fetched
+   * back into the copy so the next listing read is hot again.
    * @param meta - the listed session's header (identity witness; no log read).
    * @param keys - optional projection keys required by the caller's audience.
    * @returns the viewed block, or `undefined` when no usable row exists for
    *   this lifecycle at the current Session format.
    */
-  cachedSnapshot(
+  async cachedSnapshot(
     meta: SessionHeader,
     keys?: readonly Extract<keyof SessionProjectionMap, string>[],
-  ): ProjectionSnapshot | undefined {
+  ): Promise<ProjectionSnapshot | undefined> {
     const expected = lifecycleIdentityOf(meta)
-    const record = this.storedRecord(meta.id)
+    const record = await this.storedRecord(meta.id)
     if (record === undefined || !currentLifecycleMatches(record.identity, expected)) return undefined
     return this.viewRecord(record, keys)
   }
 
   /**
-   * Read only a predecessor checkpoint's title as a zero-I/O listing hint.
+   * Read only a predecessor checkpoint's title as a listing hint.
    *
    * The authoritative Session header supplies the lifecycle identity. A cache
    * checkpoint can lag that log but cannot lead it because writes flush the
@@ -303,15 +329,17 @@ export class SessionProjectionCache extends Service {
    * fact from this Session. The registry still requires the current title
    * projection's row version and schema. No other predecessor projection is
    * exposed: format normalization can change their current meaning, and the
-   * {@link cachedSnapshot} / hydration paths continue to reject them.
+   * {@link cachedSnapshot} / hydration paths continue to reject them. Its
+   * cost is {@link cachedSnapshot}'s: the resident copy when this session is
+   * hot, one point read (and an admission) when it is cold, never a log read.
    * @param meta - authoritative listed Session header.
    * @returns a title-only block at the stored title row's watermark, or
    *   `undefined` when the record is current, newer, unrelated, missing, or
    *   incompatible with the title unit.
    */
-  cachedPredecessorTitle(meta: SessionHeader): ProjectionSnapshot | undefined {
+  async cachedPredecessorTitle(meta: SessionHeader): Promise<ProjectionSnapshot | undefined> {
     const expected = lifecycleIdentityOf(meta)
-    const record = this.storedRecord(meta.id)
+    const record = await this.storedRecord(meta.id)
     if (record === undefined || !predecessorIdentityMatches(record.identity, expected)) return undefined
     return this.viewRecord(record, [PREDECESSOR_TITLE_KEY])
   }
@@ -341,15 +369,18 @@ export class SessionProjectionCache extends Service {
    * persistence read. The cache seeds matching rows; the supplied exact log
    * advances every unit to the observation cut. No checkpoint is written
    * because the logical observation may contain recovery events not yet durable.
+   * The seed is the resident copy when this session is hot and one point read
+   * of its cache document when it is cold; the log the caller already holds
+   * stays the only log read on this path.
    * @param session - exact unpublished Session retained by persistence.
    * @param events - exact logical event prefix represented by the observation.
    * @returns all projection values at the event cut.
    */
-  hydratePrepared(
+  async hydratePrepared(
     session: Session,
     events: readonly SessionEvent[],
-  ): ProjectionSnapshot {
-    const record = this.recordFor(
+  ): Promise<ProjectionSnapshot> {
+    const record = await this.recordFor(
       session.id,
       identityOf(session.header, session.inheritedEventCount),
     )
@@ -410,14 +441,14 @@ export class SessionProjectionCache extends Service {
    * @param events - the session's complete log, in seq order.
    * @returns the projection cut at the log end.
    */
-  coldSnapshot(
+  async coldSnapshot(
     meta: SessionHeader,
     inheritedEventCount: SessionLogOffset,
     events: readonly SessionEvent[],
-  ): ProjectionSnapshot {
+  ): Promise<ProjectionSnapshot> {
     const identity = identityOf(meta, inheritedEventCount)
     const restored = this.ctx.sessionProjections.restore(
-      this.recordFor(meta.id, identity)?.rows ?? {},
+      (await this.recordFor(meta.id, identity))?.rows ?? {},
       events,
       SessionLogOffset(0),
       meta,
@@ -524,10 +555,13 @@ export class SessionProjectionCache extends Service {
     const record: CheckpointRecord = { identity, rows: detached as CheckpointRecord['rows'] }
     // The copy must never serve a record the table has already replaced, so it
     // is invalidated before the table can change and re-admitted once the write
-    // landed (durability first, then memory — a rejected write leaves the copy
-    // empty for this id, and the next read refills it from the unchanged
-    // table).
+    // landed (durability first, then the copy — a rejected write leaves the
+    // copy empty for this id, and the next read refills it from the unchanged
+    // table). Bumping the serial is what suppresses a read that was already in
+    // flight when this write started: it may hold the record this write
+    // replaces, so its point read must not be admitted.
     this.resident.delete(id)
+    this.writeSerial += 1
     await this.requireTable().put(id, record)
     this.resident.set(id, record)
   }
@@ -576,8 +610,12 @@ export class SessionProjectionCache extends Service {
   private async purgeArchived(id: SessionId): Promise<void> {
     // One workspace commit carries the whole archive set, most of which this
     // cache never held: an absent record must not spend a write-chain slot.
-    if (!this.resident.has(id) && this.requireTable().get(id) === undefined) return
+    // The copy is asked first because it answers with no I/O; a miss costs one
+    // point read, which is what tells an already-purged id from a record only
+    // the medium holds.
+    if (!this.resident.has(id) && await this.requireTable().read(id) === undefined) return
     this.resident.delete(id)
+    this.writeSerial += 1
     await this.requireTable().delete(id)
     // A checkpoint that completed while this deletion sat on the write chain
     // may have re-admitted its record: the archive state, not that write,
@@ -585,7 +623,7 @@ export class SessionProjectionCache extends Service {
     this.resident.delete(id)
   }
 
-  private requireTable(): KvTable<SessionId, CheckpointRecord> {
+  private requireTable(): LazyKvTable<SessionId, CheckpointRecord> {
     /* v8 ignore next -- Service.init assigns the table before the service becomes injectable */
     if (this.table === undefined) throw new Error('session projection cache is not initialized')
     return this.table

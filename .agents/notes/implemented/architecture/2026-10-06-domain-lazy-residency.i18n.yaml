@@ -1,0 +1,37 @@
+# Bilingual-pair consistency record for 2026-10-06-domain-lazy-residency.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-10-06-domain-lazy-residency.md
+/agent-note-opt-in-lazy-domain-residency-and-the-point-read-seam-it-needs:
+  en: 99edfd75a0c502cb
+  zh: 9f58a7071dd603ad
+/agent-note-opt-in-lazy-domain-residency-and-the-point-read-seam-it-needs/problem:
+  en: 49fc26c999363f8b
+  zh: e377b94c07d5d4c8
+/agent-note-opt-in-lazy-domain-residency-and-the-point-read-seam-it-needs/decision:
+  en: a15c7c13f167e5ac
+  zh: 63bcc2ef60c2f344
+/agent-note-opt-in-lazy-domain-residency-and-the-point-read-seam-it-needs/decision/residency-is-a-spec-field-whose-default-is-unchanged:
+  en: 75d5ae080d265dc2
+  zh: 06c6f89fb726ad94
+/agent-note-opt-in-lazy-domain-residency-and-the-point-read-seam-it-needs/decision/the-seam-gained-point-reads-not-a-cache:
+  en: 1b82e8969e5248a1
+  zh: e6190404f1cce7ea
+/agent-note-opt-in-lazy-domain-residency-and-the-point-read-seam-it-needs/decision/a-lazy-table-has-no-synchronous-read-on-purpose:
+  en: 02f9e6112ba9983b
+  zh: 480734f22e05c106
+/agent-note-opt-in-lazy-domain-residency-and-the-point-read-seam-it-needs/decision/the-projection-cache-s-read-faces-follow-its-table:
+  en: 4420336ec936cb07
+  zh: a47b6f48383319ef
+/agent-note-opt-in-lazy-domain-residency-and-the-point-read-seam-it-needs/decision/the-listing-pays-what-the-open-no-longer-does:
+  en: 71ade651f0d67918
+  zh: b0ee631aee423084
+/agent-note-opt-in-lazy-domain-residency-and-the-point-read-seam-it-needs/alternatives-considered:
+  en: 8090401c7d65c9f4
+  zh: 775ef07b15666d21
+/agent-note-opt-in-lazy-domain-residency-and-the-point-read-seam-it-needs/consequences:
+  en: 2a7c0c603f39dd08
+  zh: 9c8087312289a1bd
+/agent-note-opt-in-lazy-domain-residency-and-the-point-read-seam-it-needs/testing:
+  en: c1dac67f19dbbb6c
+  zh: d26443a37d9b3125

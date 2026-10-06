@@ -5,20 +5,23 @@
  * Workspace registry's archive commits — observed as `domain/changed` on the
  * `workspace` global — delete a session's record resident and durable.
  * Disposal is the control case: the live-to-cold moment checkpoints and must
- * never delete.
+ * never delete. The domain itself keeps nothing resident, so a read of a
+ * dropped record is one point read of that session's document.
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
+import { MemoryMediaPool, MemoryStorageBackend } from '../../../storage/storage-domain/tests/helpers/memory-backend.ts'
 import { z } from 'zod'
-import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
+import SessionStore, { SESSION_FORMAT_VERSION, SessionId } from '@deepseek-ai/dsh-session'
 import type { Session } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
-import Storage from '@deepseek-ai/dsh-storage'
+import Storage, { storageBackendServiceKey } from '@deepseek-ai/dsh-storage'
+import type { KvUnit, KvUnitDescriptor, StorageBackend } from '@deepseek-ai/dsh-storage'
 import {
   apply as storageJsonApply, Config as storageJsonConfig, inject as storageJsonInject, name as storageJsonName,
 } from '@deepseek-ai/dsh-storage-json'
@@ -162,6 +165,67 @@ async function markedSession(
 /** The marked wire block every cache read of a {@link markedSession} serves. */
 const markedValues = { 'resident-test/marks': { marks: ['a'] } }
 
+/**
+ * Memory backend whose record reads are held open: a read fetches the
+ * medium's value immediately, then waits for the test's gate before handing
+ * it back. That is the shape of a cold read racing a write — the value it
+ * carries is the one the write is about to replace.
+ * @param pool - Media the backend serves.
+ * @returns the backend, the promise resolving at its first record read, and the gate setter.
+ */
+function gatedReadBackend(pool: MemoryMediaPool) {
+  const memory = new MemoryStorageBackend(pool)
+  let gate: Promise<void> = Promise.resolve()
+  let reached: () => void = () => {}
+  const reading = new Promise<void>((resolve) => { reached = resolve })
+  const backend: StorageBackend = {
+    close: () => memory.close(),
+    kv: {
+      open: async (descriptor: KvUnitDescriptor): Promise<KvUnit> => {
+        const unit = await memory.kv.open(descriptor)
+        const backup = unit.backupRecord?.bind(unit)
+        return {
+          loadAll: () => unit.loadAll(),
+          readRecord: async (table, key) => {
+            const stored = await unit.readRecord(table, key)
+            reached()
+            await gate
+            return stored
+          },
+          readGlobal: () => unit.readGlobal(),
+          putRecord: (table, key, value) => unit.putRecord(table, key, value),
+          deleteRecord: (table, key) => unit.deleteRecord(table, key),
+          setGlobal: value => unit.setGlobal(value),
+          close: () => unit.close(),
+          ...(backup === undefined ? {} : { backupRecord: backup }),
+        }
+      },
+    },
+  }
+  return { backend, reading, hold: (until: Promise<void>) => { gate = until } }
+}
+
+/** Mount the storage stack over `backend` and return the context plus the cache. */
+async function backendHarness(backend: StorageBackend) {
+  const ctx = new Context()
+  contexts.push(ctx)
+  await ctx.plugin(Storage)
+  // The domain layer resolves a backend by its registered *service*, so the
+  // fixture backend is registered and provided under its own name.
+  ctx.effect(() => ctx.storage.backend.register('fixture', backend))
+  ctx.effect(() => async () => { await backend.close() })
+  ctx.provide(storageBackendServiceKey('fixture'), backend)
+  await ctx.plugin(SessionStore)
+  await ctx.plugin(SessionProjectionRegistry)
+  ctx.sessionProjections.register(marksUnit)
+  await ctx.plugin(
+    { name: storageDomainName, inject: storageDomainInject, apply: storageDomainApply, Config: storageDomainConfig },
+    { backend: 'fixture' },
+  )
+  await ctx.plugin(SessionProjectionCache, { writeEveryEvents: 100, writeIntervalMs: 60_000 })
+  return { ctx, cache: ctx.sessionProjectionCache }
+}
+
 afterEach(async () => {
   await Promise.all(contexts.splice(0).map(ctx => ctx.fiber.dispose()))
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })))
@@ -210,15 +274,15 @@ describe('SessionProjectionCache resident budget', () => {
       expect((await storedRows(root, first.id))?.['resident-test/marks']?.val).toEqual({ marks: ['a'] })
       expect((await storedRows(root, second.id))?.['resident-test/marks']?.val).toEqual({ marks: ['a'] })
 
-      // A read of the dropped record refills the copy from the domain table and
-      // serves the same block a hit would have served.
-      expect(cache.cachedSnapshot(first.header)).toEqual({ asOfSeq: markSeq, values: markedValues })
-      expect(cache.cachedSnapshot(first.header)?.values).toEqual(markedValues)
+      // A read of the dropped record refills the copy by one point read of the
+      // session's document and serves the same block a hit would have served.
+      expect(await cache.cachedSnapshot(first.header)).toEqual({ asOfSeq: markSeq, values: markedValues })
+      expect((await cache.cachedSnapshot(first.header))?.values).toEqual(markedValues)
       expect(cache.residentUsage.entries).toBe(1)
 
       // A later write for the evicted session re-admits it and still serves.
       await cache.write(first)
-      expect(cache.cachedSnapshot(first.header)?.values).toEqual(markedValues)
+      expect((await cache.cachedSnapshot(first.header))?.values).toEqual(markedValues)
     })
   }
 
@@ -226,7 +290,7 @@ describe('SessionProjectionCache resident budget', () => {
     const { ctx, root, cache } = await harness()
     const { session } = await markedSession(cache, ctx, SessionId('archived'))
     // Served from the resident copy before the archive.
-    expect(cache.cachedSnapshot(session.header)?.values).toEqual(markedValues)
+    expect((await cache.cachedSnapshot(session.header))?.values).toEqual(markedValues)
 
     const purged = whenDeleted(ctx, session.id)
     archiveCommit(ctx, [session.id])
@@ -235,7 +299,7 @@ describe('SessionProjectionCache resident budget', () => {
     // removes a record — so a listing read now misses and the consumer refolds.
     expect(cache.residentUsage.entries).toBe(0)
     expect(await storedRows(root, session.id)).toBeUndefined()
-    expect(cache.cachedSnapshot(session.header)).toBeUndefined()
+    expect(await cache.cachedSnapshot(session.header)).toBeUndefined()
     // The archived session itself is untouched: archival is not a lifecycle end.
     expect(ctx.sessions.get(session.id)).toBe(session)
 
@@ -243,7 +307,7 @@ describe('SessionProjectionCache resident budget', () => {
     // recreates the record from scratch.
     await cache.write(session)
     expect((await storedRows(root, session.id))?.['resident-test/marks']?.val).toEqual({ marks: ['a'] })
-    expect(cache.cachedSnapshot(session.header)?.values).toEqual(markedValues)
+    expect((await cache.cachedSnapshot(session.header))?.values).toEqual(markedValues)
   })
 
   it('keeps a detached session record: disposal is a checkpoint, never a deletion', async () => {
@@ -296,28 +360,120 @@ describe('SessionProjectionCache resident budget', () => {
     expect(deleted).not.toHaveBeenCalled()
     expect(cache.residentUsage.entries).toBe(1)
     expect((await storedRows(root, session.id))?.['resident-test/marks']?.val).toEqual({ marks: ['a'] })
-    expect(cache.cachedSnapshot(session.header)?.values).toEqual(markedValues)
+    expect((await cache.cachedSnapshot(session.header))?.values).toEqual(markedValues)
   })
 
-  it('keeps the record and warns when the durable deletion fails', async () => {
+  it('treats an archived record the medium cannot hand over as already gone', async () => {
     const { ctx, root, cache } = await harness()
-    const { session } = await markedSession(cache, ctx, SessionId('purge-fails'))
+    const { session } = await markedSession(cache, ctx, SessionId('purge-unreadable'))
     const warn = vi.spyOn(ctx.logger, 'warn').mockImplementation(() => {})
-    // A directory where the document must be removed makes the durable deletion
-    // fail; the in-memory record the domain still holds stays authoritative.
+    const deleted = vi.fn()
+    ctx.on('domain/changed', (change) => {
+      if (change.domain === projectionCacheDomainSpec.name && change.operation === 'deleted') deleted()
+    })
+    // A directory where the document must be: the point read the lazy table's
+    // delete performs finds nothing, so it reports the record absent and never
+    // issues the durable removal at all.
     const path = recordPath(root, session.id)
     await rm(path, { force: true })
     await mkdir(path, { recursive: true })
 
     archiveCommit(ctx, [session.id])
+    // The archive commit invalidates the copy synchronously, so the record is
+    // unreachable from both sides from here on.
+    expect(cache.residentUsage.entries).toBe(0)
+    expect(await cache.cachedSnapshot(session.header)).toBeUndefined()
+    // Our own write queues behind the purge on the same chain, which is the
+    // barrier that makes the two negative facts below deterministic; it fails
+    // because a directory still sits where the document must land.
+    await expect(cache.write(session)).rejects.toThrow()
+    expect(warn).not.toHaveBeenCalled()
+    expect(deleted).not.toHaveBeenCalled()
+    expect((await stat(path)).isDirectory()).toBe(true)
+    expect(cache.residentUsage.entries).toBe(0)
+  })
+
+  it('keeps the record and warns when the durable deletion is rejected', async () => {
+    // A memory medium is the one shape a removal failure can have that leaves
+    // the record readable: the json medium fails a removal only by making the
+    // document unreadable too (the case above).
+    const pool = new MemoryMediaPool()
+    const { ctx, cache } = await backendHarness(new MemoryStorageBackend(pool))
+    const { session } = await markedSession(cache, ctx, SessionId('purge-fails'))
+    const warn = vi.spyOn(ctx.logger, 'warn').mockImplementation(() => {})
+    const medium = pool.media.get(projectionCacheDomainSpec.name)!.tables.get('sessions')!
+    expect(medium.has(session.id)).toBe(true)
+
+    // The next write primitive the domain issues is the purge's durable
+    // removal, and it rejects without touching the medium.
+    pool.failNextWrites = 1
+    archiveCommit(ctx, [session.id])
     await vi.waitFor(() => {
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('dropping archived session "purge-fails" failed'))
     }, { timeout: 5_000 })
-    // Fail-soft: the failed deletion left the domain's record in place, so the
-    // copy (invalidated before the attempt) simply refills from it and serves
-    // exactly what it served before.
+    // Fail-soft: the copy was invalidated before the attempt and the durable
+    // record is untouched, so the next read refills the copy from the medium
+    // and serves exactly what it served before.
     expect(cache.residentUsage.entries).toBe(0)
-    expect(cache.cachedSnapshot(session.header)?.values).toEqual(markedValues)
+    expect(medium.has(session.id)).toBe(true)
+    expect((await cache.cachedSnapshot(session.header))?.values).toEqual(markedValues)
     expect(cache.residentUsage.entries).toBe(1)
+  })
+
+  it('serves a copy hit without touching the medium at all', async () => {
+    const pool = new MemoryMediaPool()
+    const { backend, hold } = gatedReadBackend(pool)
+    const { ctx, cache } = await backendHarness(backend)
+    const { session } = await markedSession(cache, ctx, SessionId('hot-copy'))
+    // The write admitted the record, so the copy answers alone: any point read
+    // of the medium from here on fails, and a hit that reached it would reject.
+    expect(cache.residentUsage.entries).toBe(1)
+    const blocked = Promise.reject(new Error('a copy hit must not read the medium'))
+    // Observed here so the runner does not read the standing rejection as an
+    // unhandled one; a point read that awaits the gate still rejects.
+    blocked.catch(() => {})
+    hold(blocked)
+
+    expect((await cache.cachedSnapshot(session.header))?.values).toEqual(markedValues)
+    expect(cache.residentUsage.entries).toBe(1)
+  })
+
+  it('refuses to admit a point read that raced a write, so the copy keeps the newer record', async () => {
+    const id = SessionId('raced-read')
+    const createdAt = 41
+    const pool = new MemoryMediaPool()
+    // The medium already holds an older checkpoint for this session, under the
+    // exact lifecycle identity the listing header witnesses.
+    pool.media.set(projectionCacheDomainSpec.name, {
+      tables: new Map([['sessions', new Map([[id, {
+        identity: {
+          formatVersion: SESSION_FORMAT_VERSION, createdAt, isSeeded: false, inheritedEventCount: 0,
+        },
+        rows: { 'resident-test/marks': { ver: 1, seq: 3, val: { marks: ['old'] } } },
+      }]])]]),
+      global: null,
+    })
+    pool.versions.set(projectionCacheDomainSpec.name, projectionCacheDomainSpec.version)
+    const { backend, reading, hold } = gatedReadBackend(pool)
+    const { ctx, cache } = await backendHarness(backend)
+    const session = ctx.sessions.prepare(id, { meta: { createdAt } })
+
+    let release: () => void = () => {}
+    hold(new Promise<void>((resolve) => { release = resolve }))
+    const pending = cache.cachedSnapshot(session.header)
+    await reading
+    // The write lands while that read is still in flight: it replaces the
+    // record on the medium and admits the new one to the copy.
+    session.append('resident-test/mark', { marks: ['a'] })
+    await cache.write(session)
+    expect(cache.residentUsage.entries).toBe(1)
+    release()
+
+    // The read answers with the record it fetched before the write landed …
+    expect(await pending).toEqual({ asOfSeq: 3, values: { 'resident-test/marks': { marks: ['old'] } } })
+    // … and that record is refused as an admission, so the copy still holds the
+    // newer one and the next read is a hit on it.
+    expect(cache.residentUsage.entries).toBe(1)
+    expect((await cache.cachedSnapshot(session.header))?.values).toEqual({ 'resident-test/marks': { marks: ['a'] } })
   })
 })

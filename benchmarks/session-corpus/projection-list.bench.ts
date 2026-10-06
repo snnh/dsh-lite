@@ -11,9 +11,47 @@ import type { ProjectionListReport } from './projection-list.worker.ts'
 const WORKER = join(import.meta.dirname, '..', '.dsh-build', 'session-corpus', 'projection-list.worker.js')
 const ATTEMPTS = 3
 const WORKER_TIMEOUT_MS = 120_000
-/** Coarse reference-machine throughput allowances, before CI scaling and variance headroom. */
-const LIST_REFERENCE_MS = { modest: 50, tail: 500, cheap: 150 } as const
-/** Queue-delay reference allowance above the measured 16 ms work slices and one-row overshoot. */
+/**
+ * Coarse reference-machine throughput allowances, before CI scaling and
+ * variance headroom.
+ *
+ * The `modest` and `cheap` allowances predate the projection cache's lazy
+ * storage domain. The `tail` allowance prices it: `session_projcache` no longer
+ * materializes its table at open, so the read and validation of every stored
+ * record — which that domain used to pay while the host booted, outside this
+ * file — is now paid by the listing that meets those records, one durable point
+ * read per listed row the cache's bounded resident copy does not hold. That is
+ * the intended trade: a listing reads only the rows it touches instead of every
+ * record on the medium at boot, and a deployment whose copy covers its working
+ * set pays the read once per Session rather than once per process.
+ *
+ * Measured on the x64 CI-class runner this lane's scale was calibrated against
+ * (Node v24.18.0, 16 vCPU), median of three fresh children, on the asserted
+ * list + JSON figure:
+ *
+ * | Workload | First list | Repeat list |
+ * |---|---:|---:|
+ * | modest | 100 ms | 23 ms |
+ * | tail | 3,211 ms | 3,109 ms |
+ * | cheap | 83 ms | 75 ms |
+ *
+ * Arithmetic for the one allowance that changed: `tail` first list 3,211 ms and
+ * repeat 3,109 ms with the listing's two-row read window (3,262 ms / 3,183 ms
+ * with the reads strictly one at a time). 3,211 ms ÷ the shared scale 2 =
+ * 1,606 → 1,600 reference, so the budget is ceil(1,600 × 2 × 1.25) = 4,000 ms —
+ * 1.25× the measured first list and 1.29× the measured repeat, the same
+ * headroom the `modest` allowance carries (100 ms measured against its 125 ms
+ * bound). The same derivation reproduces the unchanged allowances: 100 ms ÷ 2 =
+ * 50 for `modest`, and `cheap` keeps its looser 150 ms ceiling.
+ */
+const LIST_REFERENCE_MS = { modest: 50, tail: 1_600, cheap: 150 } as const
+/**
+ * Queue-delay reference allowance above the measured 16 ms work slices and the
+ * overshoot of one row — one cold read window for the persisted workloads.
+ * Measured worst queue delay per workload: 7.2 ms (modest), 4.8 ms (tail, whose
+ * rows block for the parse and validation of one stored record), and 16.0 ms
+ * (cheap, which only has live rows).
+ */
 const CALLBACK_REFERENCE_MS = 30
 /** Reference retained-heap allowance; memory receives variance headroom but no CPU scaling. */
 const RETAINED_HEAP_REFERENCE_BYTES = 240 * 1024 * 1024

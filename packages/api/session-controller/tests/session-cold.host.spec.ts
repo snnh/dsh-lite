@@ -95,8 +95,8 @@ describe('sessions.list cold merge', () => {
       inspect,
     })
     ctx.provide('sessionProjectionCache', {
-      cachedSnapshot: () => undefined,
-      cachedPredecessorTitle: (meta: SessionHeader) => meta.id === sid('legacy-title')
+      cachedSnapshot: async () => undefined,
+      cachedPredecessorTitle: async (meta: SessionHeader) => meta.id === sid('legacy-title')
         ? { asOfSeq: 2, values: { title: 'Cached predecessor title' } }
         : undefined,
     } as never)
@@ -144,7 +144,7 @@ describe('sessions.list cold merge', () => {
     })
     const cacheCalls: string[] = []
     ctx.provide('sessionProjectionCache', {
-      cachedSnapshot: (meta: SessionHeader) => {
+      cachedSnapshot: async (meta: SessionHeader) => {
         cacheCalls.push(String(meta.id))
         if (meta.id === sid('cached-blank')) {
           return { asOfSeq: 0, values: { sessionListMetadata: { blank: true, lastPromptAt: null } } }
@@ -160,7 +160,7 @@ describe('sessions.list cold merge', () => {
         }
         return undefined
       },
-      cachedPredecessorTitle: () => undefined,
+      cachedPredecessorTitle: async () => undefined,
     } as never)
     const remote = createSessionTestRemote(ctx, { defaultModelSelection: () => ({ provider: 'p', model: 'm' }), cwd: '/tmp' })
 
@@ -191,6 +191,31 @@ describe('sessions.list cold merge', () => {
     })
     expect(cacheCalls).toContain('seeded-cold')
     expect(inspect).not.toHaveBeenCalled()
+  })
+
+  it('serves a cold row without its projection column when the cache read fails', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SessionStore)
+    const metas = [header('cache-failure', 300)]
+    providePersistence(ctx, { list: () => Promise.resolve(metas) })
+    const warn = vi.spyOn(ctx.logger, 'warn').mockImplementation(() => {})
+    // The read faces of the cache service are asynchronous and do I/O, so a
+    // cold listing must contain a rejected read the way it contains any other
+    // projection failure: the row stays, its column does not.
+    ctx.provide('sessionProjectionCache', {
+      cachedSnapshot: async () => { throw new Error('cache read failed') },
+      cachedPredecessorTitle: async () => undefined,
+    } as never)
+    const remote = createSessionTestRemote(ctx, { defaultModelSelection: () => ({ provider: 'p', model: 'm' }), cwd: '/tmp' })
+
+    const response = await remote.list(request({}))
+    if (!response.ok) throw new Error('list failed')
+    const row = response.value.items.find(item => item.sessionId === 'cache-failure')
+    expect(row).toMatchObject({ sessionId: 'cache-failure', updatedAt: 300, blank: false })
+    expect(row?.projections).toBeUndefined()
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('api-session.list: projection column for \"cache-failure\" failed'),
+    )
   })
 
 })

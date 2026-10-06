@@ -21,7 +21,7 @@ import SessionTitleService from '@deepseek-ai/dsh-session-title'
 import * as SessionTurnOutlinePlugin from '@deepseek-ai/dsh-session-turn-outline'
 import Storage from '@deepseek-ai/dsh-storage'
 import * as StorageDomain from '@deepseek-ai/dsh-storage-domain'
-import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
+import type { LazyKvTable } from '@deepseek-ai/dsh-storage-domain'
 import * as StorageJson from '@deepseek-ai/dsh-storage-json'
 import TokenMeter from '@deepseek-ai/dsh-token-meter'
 import { assertBuiltBenchmarkRuntime } from '../support/built-worker.ts'
@@ -149,7 +149,7 @@ async function mountHost(root: string): Promise<{ readonly ctx: Context; readonl
 /** Run one operation against the projection-cache table stored under `root`. */
 async function withCacheTable<Value>(
   root: string,
-  operation: (table: KvTable<SessionId, CheckpointRecord>) => Promise<Value>,
+  operation: (table: LazyKvTable<SessionId, CheckpointRecord>) => Promise<Value>,
 ): Promise<Value> {
   const ctx = new Context()
   try {
@@ -199,7 +199,7 @@ async function prepareAnchors(root: string, anchors: readonly number[]): Promise
   }
   await withCacheTable(foldRoot, async (table) => {
     for (const anchor of anchors) {
-      const record = table.get(anchorHeader(anchor).id)
+      const record = await table.read(anchorHeader(anchor).id)
       await writeFile(anchorFactsPath(root, anchor), JSON.stringify({ ...facts.get(anchor), record }))
     }
   })

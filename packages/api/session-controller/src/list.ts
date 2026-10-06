@@ -24,6 +24,50 @@ const SEARCH_PROVIDER_CALL_LIMIT = 100
 const SESSION_SEARCH_QUERY_MAX_CHARS = 500
 const MESSAGE_TYPES = new Set(['user/message', 'assistant/message'])
 
+/**
+ * Cold rows whose projection-cache reads may be in flight at once.
+ *
+ * Each cold row costs one durable point read of its own cache document, and
+ * those reads are independent of each other, so a strictly one-at-a-time pass
+ * leaves the medium idle for the whole of every read. The window stays small
+ * because only the first part of a read happens off this thread: the file read
+ * overlaps, while the decode, the JSON parse, and the record validation run
+ * here as each read resolves. A wider window therefore queues more of that
+ * work in front of the next event-loop turn without shortening the sum of it,
+ * which is what the responsiveness budget prices.
+ *
+ * Measured on the benchmark's `tail` corpus — 300 listed rows, ~883 KB stored
+ * per row — as that benchmark reports each figure (median of three fresh
+ * children, on the list + JSON time it asserts):
+ *
+ * | In flight | First list | Repeat list | Worst callback delay |
+ * |---|---:|---:|---:|
+ * | 1 | 3,262 ms | 3,183 ms | 4.0 ms |
+ * | 2 | 3,211 ms | 3,109 ms | 4.8 ms |
+ * | 4 | 3,210 ms | 3,115 ms | 52.2 ms (children 44.4 / 52.2 / 69.9) |
+ *
+ * Over the domain's point reads alone the same corpus measured 2,369 ms one at
+ * a time, 2,240 ms with 2 in flight, 2,213 ms with 4 (its floor), 2,355 ms
+ * with 8, and 2,382 ms with 16.
+ *
+ * Two is the setting to keep. The overlap is worth about 2 % of the listing
+ * and no more, because only the file read leaves this thread: the decode, the
+ * JSON parse, and the record validation are most of a row's cost and run here
+ * either way. Wider windows bought no further time and four already spends
+ * most of the 75 ms callback budget the benchmark enforces.
+ */
+export const COLD_READ_WINDOW = 2
+
+/**
+ * Swallow one queued read's rejection; the drain that awaits it still observes
+ * it. A cold summary only rejects when the listing is already failing — the
+ * projection read itself is fail-soft and answers `undefined` — so this handler
+ * exists to keep a rejection the window has not drained yet from surfacing as
+ * an unhandled rejection, and is not a branch a caller can reach.
+ */
+/* v8 ignore next 2 -- defensive: only a failing listing rejects a cold summary */
+const ignoreRejection = (): void => {}
+
 const sessionListMetadataSchema: z.ZodType<SessionListMetadata> = z.object({
   blank: z.boolean(),
   lastPromptAt: z.number().nullable(),
@@ -110,7 +154,7 @@ export class ApiSessionList {
    * @returns current list metadata and available projections.
    */
   summaryFor(session: Session): SessionSummary {
-    const projections = this.projectionsFor(session.header, session)
+    const projections = this.liveProjectionsFor(session)
     const metadata = projections?.values.sessionListMetadata
     return {
       sessionId: session.id,
@@ -125,6 +169,8 @@ export class ApiSessionList {
 
   /**
    * Read every visible attached and persisted Session without activating an Agent.
+   * Cold rows each cost one projection-cache point read, so they are read
+   * {@link COLD_READ_WINDOW} at a time and emitted in row order.
    * @param signal - optional cancellation for persistence reads and summary generation.
    * @returns visible Session summaries ordered by activity.
    */
@@ -149,22 +195,41 @@ export class ApiSessionList {
         yieldDeadline = performance.now() + this.workSliceMs
       }
     }
-    for (const header of cold) {
+    // Cold rows are read with {@link COLD_READ_WINDOW} of them in flight and
+    // emitted in row order, so a listing overlaps the medium's latency without
+    // reordering its rows. Every exit from this loop — the awaited result, the
+    // yield, and the return — re-checks the signal, so a cancellation still
+    // stops the list at a row boundary and never returns a partial list.
+    const pending: Promise<SessionSummary>[] = []
+    const emitNext = async (): Promise<void> => {
+      const next = pending.shift()
+      /* v8 ignore next -- every caller drains a non-empty window */
+      if (next === undefined) return
+      items.push(await next)
       signal?.throwIfAborted()
-      items.push(this.summarizeCold(header))
       if (performance.now() >= yieldDeadline) {
         await scheduler.yield()
         signal?.throwIfAborted()
         yieldDeadline = performance.now() + this.workSliceMs
       }
     }
+    for (const header of cold) {
+      signal?.throwIfAborted()
+      const summary = this.summarizeCold(header)
+      // A read the window (or a cancellation) never awaits must not surface as
+      // an unhandled rejection; the drain below still observes its failure.
+      void summary.catch(ignoreRejection)
+      pending.push(summary)
+      if (pending.length >= COLD_READ_WINDOW) await emitNext()
+    }
+    while (pending.length > 0) await emitNext()
     signal?.throwIfAborted()
     items.sort((left, right) => right.updatedAt - left.updatedAt)
     return items
   }
 
-  private summarizeCold(header: SessionHeader): SessionSummary {
-    const projections = this.projectionsFor(header, undefined)
+  private async summarizeCold(header: SessionHeader): Promise<SessionSummary> {
+    const projections = await this.projectionsFor(header)
     const metadata = projections?.values.sessionListMetadata
     return {
       sessionId: header.id,
@@ -286,21 +351,41 @@ export class ApiSessionList {
     }
   }
 
-  private projectionsFor(
-    header: SessionHeader,
-    session: Session | undefined,
-  ): SessionProjectionHints | undefined {
+  /**
+   * The projection block the live registry computed for an attached Session.
+   * Synchronous on purpose: `api-session/added` carries a complete summary out
+   * of an event listener, the registry holds this Session's cells in memory,
+   * and a live block is never read from the persisted cache.
+   * @param session - the attached Session to summarize.
+   * @returns the sequenced block, or `undefined` when the registry or the row failed.
+   */
+  private liveProjectionsFor(session: Session): SessionProjectionHints | undefined {
     try {
-      if (session !== undefined) {
-        // The live registry computed the block for this Session: its watermark
-        // shares the sequence space of the Session's baselines and frames.
-        return hintsOf('sequenced', this.ctx.sessionProjections.cachedSnapshot(session))
-      }
-      // A cold row reads the persisted cache by header alone; the cache serves
-      // seeded and unseeded lifecycles alike because a listing never seeds a
-      // fold. The watermark is the stored record's own.
+      // The live registry computed the block for this Session: its watermark
+      // shares the sequence space of the Session's baselines and frames.
+      return hintsOf('sequenced', this.ctx.sessionProjections.cachedSnapshot(session))
+    } catch (error) {
+      this.ctx.logger.warn(
+        `api-session.list: projection column for "${session.id}" failed; serving the row without it: ${String(error)}`,
+      )
+      return undefined
+    }
+  }
+
+  /**
+   * The projection block a cold row reads from the persisted cache by header
+   * alone. The cache serves seeded and unseeded lifecycles alike because a
+   * listing never seeds a fold, and the watermark is the stored record's own.
+   * The read is asynchronous: the cache answers a hot session from its
+   * resident copy and pays one point read of that session's stored document
+   * when it is cold.
+   * @param header - the listed session's header (no log read).
+   * @returns the cached block, or `undefined` when the cache served none.
+   */
+  private async projectionsFor(header: SessionHeader): Promise<SessionProjectionHints | undefined> {
+    try {
       const cache = this.ctx.get('sessionProjectionCache')
-      return hintsOf('cached', cache?.cachedSnapshot(header) ?? cache?.cachedPredecessorTitle(header))
+      return hintsOf('cached', await cache?.cachedSnapshot(header) ?? await cache?.cachedPredecessorTitle(header))
     } catch (error) {
       this.ctx.logger.warn(
         `api-session.list: projection column for "${header.id}" failed; serving the row without it: ${String(error)}`,

@@ -117,11 +117,11 @@ Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnp
 
 ### `ctx.sessionProjectionCache` — `SessionProjectionCache`
 
-The persisted projection cache service. Opens the `session_projcache` domain at init, checkpoints live sessions on a throttled write-behind (count/interval triggers from Config) plus three mandatory points — session creation, `turn/end`, and session disposal (the live-to-cold moment) — and serves the cached rows for a session header. Every durable write is fail-soft: failures log a warning and the cache self-heals on the next write. Reads are served from a budgeted resident copy of the domain's records; the domain table is the authority that copy is refilled from, and archiving a session (observed through the Workspace registry's commits) deletes its record from both.
+The persisted projection cache service. Opens the `session_projcache` domain at init, checkpoints live sessions on a throttled write-behind (count/interval triggers from Config) plus three mandatory points — session creation, `turn/end`, and session disposal (the live-to-cold moment) — and serves the cached rows for a session header. Every durable write is fail-soft: failures log a warning and the cache self-heals on the next write. Reads are served from a budgeted resident copy of the domain's records — the only resident state this service holds — and a record that copy has dropped is refilled by one durable point read of the domain table (which admits it back into the copy). Archiving a session (observed through the Workspace registry's commits) deletes its record from both.
 
 ```ts cordis-catalog
 /**
- * The zero-I/O listing read: whole values viewed straight from the stored
+ * The listing read: whole values viewed straight from the stored
  * rows (version-matching keys only) of the record bound to the caller's
  * lifecycle. The header is the only identity witness a listing holds, so
  * this face matches the lifecycle identity (`formatVersion`, `createdAt`,
@@ -134,15 +134,20 @@ The persisted projection cache service. Opens the `session_projcache` domain at 
  * cannot relate to the log the caller later opens. The Session list
  * therefore labels the block as cached, and the client lets every value the
  * connected Session produces supersede it whatever this number says.
+ *
+ * Not zero-I/O any more, and never a log read: a hot session is answered
+ * from the resident copy in the same tick, and a cold one pays one durable
+ * point read of that session's document, which admits the record it fetched
+ * back into the copy so the next listing read is hot again.
  * @param meta - the listed session's header (identity witness; no log read).
  * @param keys - optional projection keys required by the caller's audience.
  * @returns the viewed block, or `undefined` when no usable row exists for
  *   this lifecycle at the current Session format.
  */
-cachedSnapshot( meta: SessionHeader, keys?: readonly Extract<keyof SessionProjectionMap, string>[], ): ProjectionSnapshot | undefined
+async cachedSnapshot( meta: SessionHeader, keys?: readonly Extract<keyof SessionProjectionMap, string>[], ): Promise<ProjectionSnapshot | undefined>
 
 /**
- * Read only a predecessor checkpoint's title as a zero-I/O listing hint.
+ * Read only a predecessor checkpoint's title as a listing hint.
  *
  * The authoritative Session header supplies the lifecycle identity. A cache
  * checkpoint can lag that log but cannot lead it because writes flush the
@@ -150,24 +155,29 @@ cachedSnapshot( meta: SessionHeader, keys?: readonly Extract<keyof SessionProjec
  * fact from this Session. The registry still requires the current title
  * projection's row version and schema. No other predecessor projection is
  * exposed: format normalization can change their current meaning, and the
- * {@link cachedSnapshot} / hydration paths continue to reject them.
+ * {@link cachedSnapshot} / hydration paths continue to reject them. Its
+ * cost is {@link cachedSnapshot}'s: the resident copy when this session is
+ * hot, one point read (and an admission) when it is cold, never a log read.
  * @param meta - authoritative listed Session header.
  * @returns a title-only block at the stored title row's watermark, or
  *   `undefined` when the record is current, newer, unrelated, missing, or
  *   incompatible with the title unit.
  */
-cachedPredecessorTitle(meta: SessionHeader): ProjectionSnapshot | undefined
+async cachedPredecessorTitle(meta: SessionHeader): Promise<ProjectionSnapshot | undefined>
 
 /**
  * Hydrate projection cells for an already-prepared Session without another
  * persistence read. The cache seeds matching rows; the supplied exact log
  * advances every unit to the observation cut. No checkpoint is written
  * because the logical observation may contain recovery events not yet durable.
+ * The seed is the resident copy when this session is hot and one point read
+ * of its cache document when it is cold; the log the caller already holds
+ * stays the only log read on this path.
  * @param session - exact unpublished Session retained by persistence.
  * @param events - exact logical event prefix represented by the observation.
  * @returns all projection values at the event cut.
  */
-hydratePrepared( session: Session, events: readonly SessionEvent[], ): ProjectionSnapshot
+async hydratePrepared( session: Session, events: readonly SessionEvent[], ): Promise<ProjectionSnapshot>
 
 /**
  * Durably checkpoint one live session NOW (all mandatory points call
@@ -193,7 +203,7 @@ async write(session: Session): Promise<void>
  * @param events - the session's complete log, in seq order.
  * @returns the projection cut at the log end.
  */
-coldSnapshot( meta: SessionHeader, inheritedEventCount: SessionLogOffset, events: readonly SessionEvent[], ): ProjectionSnapshot
+async coldSnapshot( meta: SessionHeader, inheritedEventCount: SessionLogOffset, events: readonly SessionEvent[], ): Promise<ProjectionSnapshot>
 ```
 
 Types: [Session](session.md) · [SessionEvent](session.md) · [SessionHeader](persistence.md) · [SessionLogOffset](session.md)

@@ -543,7 +543,7 @@ describe('session.list projections column', () => {
     }) as never)
     ctx.provide('sessionProjectionCache', {
       // The carrier hands the listed header through as the identity witness.
-      cachedSnapshot: (meta: { id: unknown; createdAt: number }) =>
+      cachedSnapshot: async (meta: { id: unknown; createdAt: number }) =>
         (meta.id === coldId && meta.createdAt === 5
           ? {
             asOfSeq: SessionSeq(7),

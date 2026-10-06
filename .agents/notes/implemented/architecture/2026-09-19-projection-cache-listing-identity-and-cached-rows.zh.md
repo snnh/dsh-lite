@@ -124,7 +124,7 @@ seq 比较只在同一条 Host 连接内发生：`handleConnected` 先整表 `cl
 
 **由 persistence 或 session-query 维护每个会话 cut 的索引。** 新增一套 durable 索引及其一致性维护，只为服务一个展示读取。否决。
 
-**恢复有界正文探测。** #3400 删掉的 `probeSmallCold` 思路，或由客户端对可见 seeded 会话异步 `refreshProjections`。违背列表零 I/O 原则，且历史阈值 1KB 说明它从未覆盖过正常 fork。否决。
+**恢复有界正文探测。** #3400 删掉的 `probeSmallCold` 思路，或由客户端对可见 seeded 会话异步 `refreshProjections`。它违背列表不读取 Session 日志的原则，且历史阈值 1KB 说明它从未覆盖过正常 fork。否决。
 
 **只用 `asOfSeq: -1` 哨兵，不给 store 分层。** 服务端一处改动即可让提示在 seq 规则下永远落败。但它靠约定成立：一旦提示 seq 与基线 cut 相等或偏高（crash-repair 截断），`apply` 保留旧行，错值存活到下一帧。用户要求建连数据无条件覆盖提示，规则要写进 store 而不是靠 seq 约定模拟。
 

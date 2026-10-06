@@ -156,7 +156,7 @@ describe('checkpoint JSON preservation', () => {
     expect(archived.version).toBe(7)
     const ctx = await storageHarness(root)
     const domain = await ctx.storageDomain.open(projectionCacheDomainSpec)
-    const record = domain.table('sessions').get(id)!
+    const record = (await domain.table('sessions').read(id))!
     expect(JSON.stringify(record.rows)).toBe(JSON.stringify(archived.record.rows))
     const rewritten = { ...record, identity: { ...record.identity, formatVersion: SESSION_FORMAT_VERSION } }
     await domain.table('sessions').put(id, rewritten)
@@ -165,7 +165,7 @@ describe('checkpoint JSON preservation', () => {
 
     const reopenedCtx = await storageHarness(root)
     const reopened = await reopenedCtx.storageDomain.open(projectionCacheDomainSpec)
-    const restored = reopened.table('sessions').get(id)!
+    const restored = (await reopened.table('sessions').read(id))!
     expect(JSON.stringify(restored)).toBe(JSON.stringify(rewritten))
     expect(JSON.stringify(restored.rows)).toBe(JSON.stringify(archived.record.rows))
     const onDisk = JSON.parse(await readFile(join(root, projectionCacheDomainSpec.name, 'sessions', `${id}.json`), 'utf8')) as FixtureDoc
@@ -205,11 +205,11 @@ describe('archived version recovery', () => {
     const [sid, record] = Object.entries(archive.tables.sessions)[0]!
 
     const { ctx, cache } = await harness(root)
-    expect(cache.cachedSnapshot(
+    expect(await cache.cachedSnapshot(
       headerFor(SessionId(sid), record.identity),
       ['title'],
     )).toBeUndefined()
-    expect(cache.cachedPredecessorTitle(
+    expect(await cache.cachedPredecessorTitle(
       headerFor(SessionId(sid), record.identity),
     )).toEqual({
       asOfSeq: record.rows.title?.seq,
@@ -237,11 +237,11 @@ describe('archived version recovery', () => {
       expect(doc.version).toBe(storedVersion)
 
       const { ctx, cache } = await harness(root)
-      expect(cache.cachedSnapshot(
+      expect(await cache.cachedSnapshot(
         headerFor(id, doc.record.identity),
         ['title'],
       )).toBeUndefined()
-      expect(cache.cachedPredecessorTitle(
+      expect(await cache.cachedPredecessorTitle(
         headerFor(id, doc.record.identity),
       )).toEqual({
         asOfSeq: doc.record.rows.title?.seq,
@@ -284,14 +284,14 @@ describe('archived version recovery', () => {
       cwd: '/work',
       isSeeded: false,
     })
-    expect(cache.cachedPredecessorTitle(listed('older'))).toEqual({
+    expect(await cache.cachedPredecessorTitle(listed('older'))).toEqual({
       asOfSeq: 2,
       values: { title: 'older title' },
     })
-    expect(cache.cachedPredecessorTitle(listed('current'))).toBeUndefined()
-    expect(cache.cachedPredecessorTitle(listed('newer'))).toBeUndefined()
-    expect(cache.cachedPredecessorTitle(listed('stale-title'))).toBeUndefined()
-    expect(cache.cachedPredecessorTitle(listed('missing'))).toBeUndefined()
+    expect(await cache.cachedPredecessorTitle(listed('current'))).toBeUndefined()
+    expect(await cache.cachedPredecessorTitle(listed('newer'))).toBeUndefined()
+    expect(await cache.cachedPredecessorTitle(listed('stale-title'))).toBeUndefined()
+    expect(await cache.cachedPredecessorTitle(listed('missing'))).toBeUndefined()
   })
 
   it('refuses a lineage-less archive for a seeded caller (lifecycle mismatch, cold rebuild)', async () => {
@@ -301,11 +301,11 @@ describe('archived version recovery', () => {
 
     const { cache } = await harness(root)
     const seeded = { ...headerFor(id, doc.record.identity), isSeeded: true }
-    expect(cache.cachedSnapshot(seeded, ['title'])).toBeUndefined()
-    expect(cache.cachedPredecessorTitle(seeded)).toBeUndefined()
+    expect(await cache.cachedSnapshot(seeded, ['title'])).toBeUndefined()
+    expect(await cache.cachedPredecessorTitle(seeded)).toBeUndefined()
   })
 
-  it('backs up and skips a record that fails schema validation instead of failing the boot', async () => {
+  it('backs up and skips a record that fails schema validation: the read that meets it salvages, the boot never fails', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-projcache-fx-'))
     roots.push(root)
     const sessionsDir = join(root, projectionCacheDomainSpec.name, 'sessions')
@@ -328,6 +328,12 @@ describe('archived version recovery', () => {
     const error = vi.spyOn(ctx.logger, 'error').mockImplementation(() => {})
     // The boot survives the broken record — this line rejecting IS the fixed bug.
     await ctx.plugin(SessionProjectionCache, { writeEveryEvents: 100, writeIntervalMs: 60_000 })
+    const cache = ctx.sessionProjectionCache
+    // Lazy residency reads no record at open, so the broken document is still
+    // in place: the disposition happens on the read that meets it.
+    expect(await readdir(sessionsDir)).toContain('broken.json')
+    expect(await cache.cachedSnapshot(headerFor(SessionId('broken'), { createdAt: 0 })))
+      .toBeUndefined()
 
     // Concrete console diagnostics: which record, where it went, and why.
     expect(error).toHaveBeenCalledWith(expect.stringContaining("record 'broken'"))
@@ -341,12 +347,13 @@ describe('archived version recovery', () => {
     expect(JSON.parse(await readFile(join(sessionsDir, backup!), 'utf8')))
       .toMatchObject({ record: { rows: 'not-an-object' } })
 
-    // The broken record reads as absent; its predecessor-stamped neighbor
-    // remains available for a safe current rewrite.
-    const cache = ctx.sessionProjectionCache
-    expect(cache.cachedSnapshot(headerFor(SessionId('broken'), { createdAt: 0 })))
+    // The broken record reads as absent for good (and is not salvaged twice);
+    // its predecessor-stamped neighbor remains available for a safe current
+    // rewrite.
+    expect(await cache.cachedSnapshot(headerFor(SessionId('broken'), { createdAt: 0 })))
       .toBeUndefined()
-    expect(cache.cachedSnapshot(
+    expect(error).toHaveBeenCalledOnce()
+    expect(await cache.cachedSnapshot(
       headerFor(SessionId('survivor'), good.record.identity),
       ['title'],
     )).toBeUndefined()

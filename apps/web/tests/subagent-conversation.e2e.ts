@@ -86,7 +86,7 @@ async function waitForCacheRow(
   header: SessionHeader,
 ): Promise<void> {
   const deadline = Date.now() + 10_000
-  while (scaffold.ctx.sessionProjectionCache.cachedSnapshot(header) === undefined) {
+  while (await scaffold.ctx.sessionProjectionCache.cachedSnapshot(header) === undefined) {
     if (Date.now() >= deadline) throw new Error(`cache row for "${header.id}" did not land`)
     await new Promise<void>(resolve => setTimeout(resolve, 10))
   }
@@ -206,7 +206,7 @@ describe('web e2e: persisted subagent conversation and human continuation', () =
     ] as SessionEvent[]
     await oneShotHandle.append(oneShotEvents)
     await oneShotHandle.close()
-    scaffold.ctx.sessionProjectionCache.coldSnapshot(oneShotHeader, SessionLogOffset(0), oneShotEvents)
+    await scaffold.ctx.sessionProjectionCache.coldSnapshot(oneShotHeader, SessionLogOffset(0), oneShotEvents)
     await waitForCacheRow(scaffold, oneShotHeader)
     await page.getByRole('button', { name: '1 subagent', exact: true }).waitFor({ timeout: 15_000 })
     const catalogReads = apiCalls.filter(path => path === '/api/session/projections').length
@@ -270,7 +270,7 @@ describe('web e2e: persisted subagent conversation and human continuation', () =
     ] as SessionEvent[]
     await grandchildHandle.append(grandchildEvents)
     await grandchildHandle.close()
-    scaffold.ctx.sessionProjectionCache.coldSnapshot(grandchildHeader, SessionLogOffset(0), grandchildEvents)
+    await scaffold.ctx.sessionProjectionCache.coldSnapshot(grandchildHeader, SessionLogOffset(0), grandchildEvents)
     await waitForCacheRow(scaffold, grandchildHeader)
     const childHandle = await scaffold.ctx.sessionPersistence.open(childId, 'write')
     const childHeader = childHandle.header
@@ -290,7 +290,7 @@ describe('web e2e: persisted subagent conversation and human continuation', () =
     }
     await childHandle.append([grandchildCatalogEvent])
     await childHandle.close()
-    scaffold.ctx.sessionProjectionCache.coldSnapshot(
+    await scaffold.ctx.sessionProjectionCache.coldSnapshot(
       childHeader,
       childInheritedEventCount,
       [...childEvents, grandchildCatalogEvent],

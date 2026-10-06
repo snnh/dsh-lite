@@ -10,7 +10,7 @@ import { performance } from 'node:perf_hooks'
 import { scheduler } from 'node:timers/promises'
 import SessionController from '../src/index.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiSessionList } from '../src/list.ts'
+import { ApiSessionList, COLD_READ_WINDOW } from '../src/list.ts'
 
 type Phase = 'live' | 'cold'
 interface Row {
@@ -83,11 +83,13 @@ async function harness(rows: readonly Row[], summaryMs = 8, workSliceMs = 8) {
   const listSessions = vi.fn(async (_signal?: AbortSignal) => records)
   ctx.provide('sessionQuery', { listSessions } as never)
   ctx.provide('sessionProjectionCache', {
-    cachedSnapshot: (header: SessionRecord['header']) => {
+    // The read faces are asynchronous on the cache service; the stub keeps the
+    // counted work synchronous by resolving immediately.
+    cachedSnapshot: async (header: SessionRecord['header']) => {
       recordSummary('cold', header.id)
       return { asOfSeq: -1, values: { sessionListMetadata: { blank: false, lastPromptAt: null } } }
     },
-    cachedPredecessorTitle: () => undefined,
+    cachedPredecessorTitle: async () => undefined,
   } as never)
   const summaryFor = list.summaryFor.bind(list)
   vi.spyOn(list, 'summaryFor').mockImplementation((session) => {
@@ -100,8 +102,8 @@ async function harness(rows: readonly Row[], summaryMs = 8, workSliceMs = 8) {
 }
 
 describe('Session-list work slices', () => {
-  it.each<Phase>(['live', 'cold'])('keeps cheap %s summaries in one synchronous slice', async (phase) => {
-    const h = await harness([{ id: 'first', phase }, { id: 'middle', phase }, { id: 'last', phase }], 2)
+  it('keeps cheap live summaries in one synchronous slice', async () => {
+    const h = await harness([{ id: 'first', phase: 'live' }, { id: 'middle', phase: 'live' }, { id: 'last', phase: 'live' }], 2)
     const yieldWork = vi.spyOn(scheduler, 'yield')
     h.observer.summary = (_phase, id) => {
       if (id !== 'first') return
@@ -110,8 +112,30 @@ describe('Session-list work slices', () => {
     }
 
     await h.list.list()
+    // No await sits between two live summaries: the microtask the first row
+    // queued runs only after the whole synchronous slice.
     expect(yieldWork).not.toHaveBeenCalled()
-    expect(h.trace).toEqual([`${phase}:first`, `${phase}:middle`, `${phase}:last`, 'microtask'])
+    expect(h.trace).toEqual(['live:first', 'live:middle', 'live:last', 'microtask'])
+    await new Promise<void>((resolve) => { betweenRows(resolve) })
+    expect(h.trace.at(-1)).toBe('immediate')
+  })
+
+  it('keeps cheap cold summaries inside one work slice, one cache read each', async () => {
+    const h = await harness([{ id: 'first', phase: 'cold' }, { id: 'middle', phase: 'cold' }, { id: 'last', phase: 'cold' }], 2)
+    const yieldWork = vi.spyOn(scheduler, 'yield')
+    h.observer.summary = (_phase, id) => {
+      if (id !== 'first') return
+      queueMicrotask(() => { h.trace.push('microtask') })
+      betweenRows(() => { h.trace.push('immediate') })
+    }
+
+    await h.list.list()
+    // A cold row awaits the cache's read, so the microtask the first row queued
+    // runs at the first window boundary — before the rows that follow it start
+    // — while the whole pass stays one macrotask and the accumulated work stays
+    // under the budget, so nothing yields.
+    expect(yieldWork).not.toHaveBeenCalled()
+    expect(h.trace).toEqual(['cold:first', 'cold:middle', 'microtask', 'cold:last'])
     await new Promise<void>((resolve) => { betweenRows(resolve) })
     expect(h.trace.at(-1)).toBe('immediate')
   })
@@ -128,7 +152,11 @@ describe('Session-list work slices', () => {
     }
 
     await h.list.list()
-    expect(h.trace).toEqual(['live:first', 'cold:second', 'other-work', 'cold:last'])
+    // Both queued reads start as one window, so the classification work plus
+    // those starts reach the deadline set before the pass began; the wait
+    // restarts the deadline from the post-wait clock, which the interleaved
+    // other work no longer reaches.
+    expect(h.trace).toEqual(['live:first', 'cold:second', 'cold:last', 'other-work'])
     expect(yieldWork).toHaveBeenCalledTimes(1)
   })
 
@@ -189,25 +217,53 @@ describe('Session-list work slices', () => {
     const yieldWork = vi.spyOn(scheduler, 'yield')
     const result = await controller.list({}, new AbortController().signal)
     expect(result.items).toHaveLength(3)
-    expect(yieldWork).toHaveBeenCalledTimes(3)
+    // Read windows of two make the overridden budget yield at two drained
+    // results; the default 16 ms budget would not yield at all for this
+    // fixture, which is what makes the count evidence that the override reached
+    // the list.
+    expect(yieldWork).toHaveBeenCalledTimes(2)
   })
 
   it.each([0, -1, 0.5, Number.NaN, Number.POSITIVE_INFINITY])('rejects invalid work-slice budget %s', (listWorkSliceMs) => {
     expect(() => SessionController.Config({ listWorkSliceMs })).toThrow()
   })
 
-  it.each<Phase>(['live', 'cold'])('yields between %s summaries that each exhaust the work slice', async (phase) => {
-    const h = await harness([{ id: 'first', phase }, { id: 'middle', phase }, { id: 'last', phase }])
+  it('yields between live summaries that each exhaust the work slice', async () => {
+    const h = await harness([
+      { id: 'first', phase: 'live' }, { id: 'middle', phase: 'live' }, { id: 'last', phase: 'live' },
+    ])
     h.observer.summary = (_phase, id) => { betweenRows(() => { h.trace.push(`immediate:${id}`) }) }
 
     const items = await h.list.list()
     h.trace.push('resolved')
 
     expect(h.trace).toEqual([
-      `${phase}:first`, 'immediate:first', `${phase}:middle`, 'immediate:middle',
-      `${phase}:last`, 'immediate:last', 'resolved',
+      'live:first', 'immediate:first', 'live:middle', 'immediate:middle',
+      'live:last', 'immediate:last', 'resolved',
     ])
     expect(items.map(item => item.sessionId)).toEqual(['first', 'middle', 'last'])
+  })
+
+  it('yields between cold read windows that each exhaust the work slice', async () => {
+    // One row past a full window, so the first yield provably sits between two
+    // windows rather than after the last read.
+    const ids = Array.from({ length: COLD_READ_WINDOW + 1 }, (_, index) => `row-${index}`)
+    const h = await harness(ids.map(id => ({ id, phase: 'cold' as Phase })))
+    h.observer.summary = (_phase, id) => { betweenRows(() => { h.trace.push(`immediate:${id}`) }) }
+
+    const items = await h.list.list()
+    h.trace.push('resolved')
+
+    // The first window starts together, then the exhausted slice hands the
+    // loop back before the next row starts: every queued row's host callback
+    // runs before the list resolves, so the host is never held across the whole
+    // list.
+    expect(h.trace).toEqual([
+      ...ids.slice(0, COLD_READ_WINDOW).map(id => `cold:${id}`),
+      ...ids.slice(0, COLD_READ_WINDOW).map(id => `immediate:${id}`),
+      `cold:${ids[COLD_READ_WINDOW]}`, `immediate:${ids[COLD_READ_WINDOW]}`, 'resolved',
+    ])
+    expect(items.map(item => item.sessionId)).toEqual(ids)
   })
 
   it.each([
@@ -216,22 +272,47 @@ describe('Session-list work slices', () => {
     { phase: 'cold', abortAt: 'first' },
     { phase: 'cold', abortAt: 'last' },
   ] as const)('preserves cancellation after the $abortAt $phase row', async ({ phase, abortAt }) => {
-    const h = await harness([{ id: 'first', phase }, { id: 'middle', phase }, { id: 'last', phase }])
+    // The cold phase reads a window of rows at once, so its fixture is longer
+    // than that window: an abort must stop the list after the reads already in
+    // flight and never issue another.
+    const ids: readonly string[] = phase === 'cold'
+      ? Array.from({ length: COLD_READ_WINDOW + 2 }, (_, index) => `row-${index}`)
+      : ['first', 'middle', 'last']
+    const aborted = abortAt === 'first' ? ids[0] as string : ids.at(-1) as string
+    // Cancellation stops the list at the next boundary: a live row stops it
+    // there, a cold row after the window's reads that were already in flight.
+    const expected = abortAt === 'first'
+      ? ids.slice(0, phase === 'cold' ? COLD_READ_WINDOW : 1)
+      : ids
+    const h = await harness(ids.map(id => ({ id, phase })))
     const lookup = vi.spyOn(h.ctx.sessions, 'get')
     const controller = new AbortController()
     const reason = { cancellation: `${phase}-${abortAt}` }
     h.observer.summary = (_phase, id) => {
-      if (id === abortAt) betweenRows(() => { controller.abort(reason) })
+      if (id === aborted) betweenRows(() => { controller.abort(reason) })
     }
 
     await expect(h.list.list(controller.signal)).rejects.toBe(reason)
-    expect(h.trace).toEqual(abortAt === 'first'
-      ? [`${phase}:first`]
-      : [`${phase}:first`, `${phase}:middle`, `${phase}:last`])
+    expect(h.trace).toEqual(expected.map(id => `${phase}:${id}`))
     expect(h.listSessions).toHaveBeenCalledExactlyOnceWith(controller.signal)
     if (phase === 'live' && abortAt === 'first') {
       expect(lookup).toHaveBeenCalledExactlyOnceWith(SessionId('first'))
     }
+  })
+
+  it('starts no cold read beyond the read window once cancellation is observed', async () => {
+    const ids = Array.from({ length: COLD_READ_WINDOW + 3 }, (_, index) => `row-${index}`)
+    const h = await harness(ids.map(id => ({ id, phase: 'cold' as Phase })))
+    const controller = new AbortController()
+    const reason = new Error('stop inside the first window')
+    h.observer.summary = (_phase, id) => {
+      if (id === ids[0]) betweenRows(() => { controller.abort(reason) })
+    }
+
+    await expect(h.list.list(controller.signal)).rejects.toBe(reason)
+    // Exactly the window's reads were issued: the abort stops the list at the
+    // next drained result instead of walking the rest of the rows.
+    expect(h.trace).toEqual(ids.slice(0, COLD_READ_WINDOW).map(id => `cold:${id}`))
   })
 
   it('does not start cold summaries after cancellation during the last live row', async () => {

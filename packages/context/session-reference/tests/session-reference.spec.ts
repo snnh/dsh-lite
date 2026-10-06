@@ -74,7 +74,7 @@ function withProjectionCache(
   }>,
 ): void {
   ctx.provide('sessionProjectionCache', {
-    cachedSnapshot: (meta: { id: SessionId }) => {
+    cachedSnapshot: async (meta: { id: SessionId }) => {
       const row = rows[meta.id]
       if (!(meta.id in rows)) return undefined
       return {
