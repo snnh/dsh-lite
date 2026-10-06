@@ -394,7 +394,15 @@ export async function apply(ctx: Context, config?: Config): Promise<void> {
     // Refuse the exposure when nothing can authenticate it. The connection half
     // exchanges this same token for the browser cookie.
     await ensureAccessToken(dshHomePath(ACCESS_TOKEN_FILENAME))
-    ctx.logger.warn(exposureWarning(host, (ctx.get('profileContext') as ProfilePatchRef | undefined)?.patchPath))
+    const warning = exposureWarning(host, (ctx.get('profileContext') as ProfilePatchRef | undefined)?.patchPath)
+    // Two channels, because each is blind on its own: the logger renders
+    // through whichever exporter a composition mounts, and no shipped bundle
+    // mounts one — `logger-console` is a test fixture here, not a row any
+    // profile composes — while the console is where this harness already speaks
+    // to the operator at startup (`dsh web:` prints its URL there). A warning
+    // that reaches nobody is the silent exposure this row exists to prevent.
+    ctx.logger.warn(warning)
+    console.warn(warning)
   }
   ctx.provide(LAN_ACCESS_SERVICE, { host })
 }

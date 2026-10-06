@@ -71,7 +71,7 @@ The printed line carries the addresses the server answers on, loopback first and
 dsh web: http://127.0.0.1:3080/?token=… (LAN: http://192.168.1.5:3080/?token=…)
 ```
 
-A reachable bind also writes one warning into the startup log, stating what is bound, that the token is the only authenticator, and how to narrow the posture.
+A reachable bind also writes one warning to the startup log and the terminal, stating what is bound, that the token is the only authenticator, and how to narrow the posture.
 
 ### Returning to loopback
 
@@ -87,7 +87,7 @@ The default is deliberately not written back, and that is what keeps a start's p
 
 ### What the refusal covers
 
-A loopback bind needs nothing beyond the process-local authentication the connection half already applies. Every other bind — stated or shipped — requires the persistent token first: a harness home that cannot be written, or a configured value below the length floor, rejects the row, so no web server binds a network address it could not authenticate. The reachable bind then writes its startup warning through `ctx.logger.warn` and `console.warn`; the console copy is required, because the default Web exporter filters `warn` records and an operator-visible warning has to reach the terminal. The warning names the bound address, the token as the only authenticator, the patch file to edit, and the flag that narrows one run — never the token itself, and it is a warning rather than a prompt: exposure is a posture the operator states, and nothing here blocks the start.
+A loopback bind states no precondition of its own: the connection half authenticates every start with the persistent token it resolves, so there is nothing for this row to add when only this machine can reach the server. Every other bind — stated or shipped — requires the persistent token first: a harness home that cannot be written, or a configured value below the length floor, rejects the row, so no web server binds a network address it could not authenticate. The reachable bind then writes its startup warning through `ctx.logger.warn` and `console.warn`; the console copy is required, because the default Web exporter filters `warn` records and an operator-visible warning has to reach the terminal. The warning names the bound address, the token as the only authenticator, the patch file to edit, and the flag that narrows one run — never the token itself, and it is a warning rather than a prompt: exposure is a posture the operator states, and nothing here blocks the start.
 
 ## Further Exploration
 

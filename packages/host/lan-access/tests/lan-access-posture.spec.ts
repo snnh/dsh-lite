@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import { ACCESS_TOKEN_FILENAME } from '@deepseek-ai/dsh-access-token'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import {
   apply,
   BIND_ALL_HOST,
@@ -50,7 +50,23 @@ const tokenPath = (): string => join(home, ACCESS_TOKEN_FILENAME)
 /** The warn spy of one context, whose calls the cases assert against. */
 const watcher = (ctx: Context) => vi.spyOn(ctx.logger, 'warn')
 
+/**
+ * The console channel, spied for the whole suite: an exposed bind writes there
+ * too, and a case that asserted only the logger would both leave the console
+ * noisy and miss the channel an operator actually reads. No shipped profile
+ * mounts a logger exporter, so this one is not a duplicate of the logger — it
+ * is the only one of the two that reaches a terminal.
+ */
+let consoleWarn: MockInstance<typeof console.warn>
+
 describe('lan-access shipped posture', () => {
+  beforeEach(() => {
+    consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    consoleWarn.mockRestore()
+  })
   it('binds every IPv4 interface with no stated host and writes nothing', async () => {
     const ctx = contextOf()
     await apply(ctx)
@@ -101,6 +117,9 @@ describe('lan-access shipped posture', () => {
     expect(warn).toHaveBeenCalledTimes(1)
     // What is bound, what the token is worth, and both ways back to a narrow
     // posture — the exposure warning's whole job.
+    // Same text on both channels: the console is the one an operator reads.
+    expect(consoleWarn).toHaveBeenCalledTimes(1)
+    expect(consoleWarn).toHaveBeenCalledWith(String(warn.mock.calls[0]?.[0]))
     for (const fragment of [
       `bound ${BIND_ALL_HOST}, reachable by anything that can route to it`,
       'every IPv4 interface this machine holds, container bridges included, and never an IPv6 one',
