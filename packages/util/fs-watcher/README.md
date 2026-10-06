@@ -53,6 +53,17 @@ await watcher.close()
 
 `waitForReady()` resolves after the initial scan, rejects with the first failure — or with the abort reason of an optional signal — and keeps routing later failures to `onError`. See [`src/index.ts`](src/index.ts) for the exact TypeScript contract.
 
+A consumer that watches with a different Chokidar major than this package's own passes its module as the optional third argument, so the instance comes from the Chokidar it depends on:
+
+```ts
+import * as chokidar from 'chokidar'
+import { createWatcher } from '@deepseek-ai/dsh-fs-watcher'
+
+declare const root: string
+
+const watcher = createWatcher(root, { ignoreInitial: true }, chokidar)
+```
+
 -----
 
 <a id="understand-the-implementation"></a>

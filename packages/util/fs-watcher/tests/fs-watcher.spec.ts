@@ -254,4 +254,21 @@ describe('backend module shapes', () => {
     if (module.default !== undefined) Reflect.deleteProperty(module.default, 'watch')
     expect(() => createWatcher('/root', {})).toThrow('no watch factory')
   })
+
+  it('watches through an injected backend instead of the package default', async () => {
+    const { EventEmitter } = await import('node:events')
+    class Injected extends EventEmitter {
+      async close(): Promise<void> { this.removeAllListeners() }
+    }
+    const instance = new Injected()
+    const factory = vi.fn(() => instance)
+    const watcher = createWatcher('/injected', { depth: 0 }, { watch: factory })
+    opened.push(watcher)
+
+    expect(factory).toHaveBeenCalledExactlyOnceWith('/injected', { depth: 0 })
+    expect(backend.created).toHaveLength(0)
+    expect(backend.fallbackCreated).toHaveLength(0)
+    await watcher.close()
+    expect(liveWatcherCount()).toBe(0)
+  })
 })

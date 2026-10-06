@@ -53,6 +53,17 @@ await watcher.close()
 
 `waitForReady()` 在初次扫描完成后 resolve，以第一个失败——或可选 signal 的中止原因——reject，并把之后的失败继续路由给 `onError`。准确的 TypeScript 约定见 [`src/index.ts`](src/index.ts)。
 
+如果消费方监听的 Chokidar 大版本与本包自带的不同，把自己的模块作为可选的第三个参数传入，实例就来自它自己依赖的那个 Chokidar：
+
+```ts
+import * as chokidar from 'chokidar'
+import { createWatcher } from '@deepseek-ai/dsh-fs-watcher'
+
+declare const root: string
+
+const watcher = createWatcher(root, { ignoreInitial: true }, chokidar)
+```
+
 -----
 
 <a id="understand-the-implementation"></a>
