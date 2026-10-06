@@ -22,7 +22,7 @@ Session benchmark 使用固定参数合成 released-v0 输入：200 轮，每轮
 
 每个 access kind 与 endpoint 的样本都在全新、已编译的 Node 子进程中运行。模块加载、Host 服务初始化和 fixture 准备在测量开始前完成；测量进程不执行额外的预热解析。正常堆模式运行五个独立样本，报告全部样本及最小值、中位数和最大值，并以中位数执行各访问状态独立的固定预算。另一个子进程使用固定 128 MB old-space 上限运行同一路径，只判断能否完成；低堆限制引起的额外 GC 不进入正常时间基线。
 
-该 lane 包含三个独立的 Session 打开 benchmark，并保留 Client fold benchmark：
+该 lane 包含三个独立的 Session 打开 benchmark，并保留 Client fold benchmark；[内存姿态 benchmark](2026-10-06-memory-posture-performance-gate.zh.md)在同一 lane 中作为另一条形状不同的被测路径运行——已启动宿主的常驻集与空闲 CPU——且不与这些时间预算共用：
 
 | Benchmark | 被测路径 | 时间指标 |
 |---|---|---|

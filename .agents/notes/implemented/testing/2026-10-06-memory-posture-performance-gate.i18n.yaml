@@ -1,0 +1,34 @@
+# Bilingual-pair consistency record for 2026-10-06-memory-posture-performance-gate.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/testing/2026-10-06-memory-posture-performance-gate.md
+/agent-note-required-memory-posture-performance-gate-for-the-built-headless-cli-host:
+  en: 2c3b1acd5a919dec
+  zh: 84ef78877b8a61b0
+/agent-note-required-memory-posture-performance-gate-for-the-built-headless-cli-host/problem:
+  en: 3922b195ea6c64c4
+  zh: 4d94545510f91c48
+/agent-note-required-memory-posture-performance-gate-for-the-built-headless-cli-host/decision:
+  en: 3c25490fe70fb9c3
+  zh: 3a3926fd22fc21ac
+/agent-note-required-memory-posture-performance-gate-for-the-built-headless-cli-host/decision/the-measured-subject:
+  en: 32aefec25f46cc31
+  zh: 3fe9e8ef01ac7e1f
+/agent-note-required-memory-posture-performance-gate-for-the-built-headless-cli-host/decision/the-three-budgets:
+  en: 6efa4a9feb89d5dc
+  zh: 2e4cdf7189cbe53e
+/agent-note-required-memory-posture-performance-gate-for-the-built-headless-cli-host/decision/reference-posture:
+  en: 87c05e3aa749811e
+  zh: b26252c95f1896e6
+/agent-note-required-memory-posture-performance-gate-for-the-built-headless-cli-host/calibration-evidence:
+  en: 65a9bb82c41edef3
+  zh: 9708bf9fa3f16d5e
+/agent-note-required-memory-posture-performance-gate-for-the-built-headless-cli-host/deliberate-exclusions:
+  en: 5eca443ef706a2fb
+  zh: abd5cd4875d56272
+/agent-note-required-memory-posture-performance-gate-for-the-built-headless-cli-host/alternatives-considered:
+  en: eb44c3ef9cf7dad9
+  zh: 875d7d31f8fb60d7
+/agent-note-required-memory-posture-performance-gate-for-the-built-headless-cli-host/consequences:
+  en: 4c904305004e148d
+  zh: f99c4389dc8063bb

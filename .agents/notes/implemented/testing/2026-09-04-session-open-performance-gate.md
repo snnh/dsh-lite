@@ -22,7 +22,7 @@ Every Session endpoint runs at two user-lifecycle points. `first-open` starts wi
 
 Each access-kind and endpoint sample runs in a fresh compiled Node child process. Module imports, Host service initialization, and fixture preparation finish before measurement; the measured process performs no extra parse warm-up. Normal-heap mode runs five independent samples, reports every sample plus minimum, median, and maximum, and enforces access-specific fixed budgets against the median. Another child runs the same path under a fixed 128 MB old-space limit and checks only that it completes; extra GC caused by the constrained heap does not enter the normal timing baseline.
 
-The lane contains three independent Session-opening benchmarks and retains the Client-fold benchmark:
+The lane contains three independent Session-opening benchmarks and retains the Client-fold benchmark; the [memory-posture benchmark](2026-10-06-memory-posture-performance-gate.md) runs in the same lane as a differently shaped measured path — a booted host's resident set and idle CPU — and shares none of these time budgets:
 
 | Benchmark | Measured path | Timing metrics |
 |---|---|---|

@@ -66,4 +66,14 @@ export default defineConfig([
     clean: true,
     tsconfig: 'tsconfig.client.json',
   },
+  {
+    ...shared,
+    entry: {
+      'memory-posture.probe': 'memory-posture/memory-posture.probe.ts',
+      'memory-posture.model': 'memory-posture/memory-posture.model.ts',
+    },
+    outDir: '.dsh-build/memory-posture',
+    clean: true,
+    tsconfig: 'tsconfig.host.json',
+  },
 ])
