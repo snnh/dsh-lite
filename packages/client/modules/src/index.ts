@@ -946,16 +946,22 @@ export class ClientModuleRegistry extends Service {
   }
 
   /**
-   * Stat the activation-time client artifact, which is what the graph revision
-   * and the HMR watch need; the bytes are read when a combo is actually built.
+   * Read the activation-time client artifact once for its readability contract
+   * and its filesystem baseline; the bytes are not retained — a combo reads
+   * them again when it is actually built.
    * @param pkgName - package that declares the client bundle.
    * @param clientPath - absolute path of the built client artifact.
-   * @returns the immutable bytes plus the pre-read filesystem baseline.
+   * @returns the pre-read filesystem baseline.
    * @throws {MissingClientBundleError} when the read fails with `ENOENT`; other filesystem errors are rethrown unchanged.
    */
   private initialBaseline(pkgName: string, clientPath: string): ClientArtifactBaseline {
     try {
-      return this.captureArtifactBaseline(clientPath)
+      const baseline = this.captureArtifactBaseline(clientPath)
+      // Activation reports a non-ENOENT read failure (a directory, a denied
+      // path) exactly as the previous read-at-activation pass did; only a
+      // missing file becomes the source-build instruction.
+      readFileSync(clientPath)
+      return baseline
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
       throw new MissingClientBundleError(pkgName, clientPath, error)
