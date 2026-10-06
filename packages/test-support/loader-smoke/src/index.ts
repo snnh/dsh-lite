@@ -228,6 +228,12 @@ export async function runLoaderSmoke(options: LoaderSmokeOptions): Promise<Loade
       env: {
         DSH_HOME: join(cwd, '.dsh'),
         DSH_AGENTS_HOME: join(cwd, '.agents'),
+        // The process memory policy reports resident-set readings on a
+        // wall-clock cadence, so a smoke that crosses its startup delay would
+        // print a line whose numbers differ every run into the stderr these
+        // snapshots compare byte for byte. The policy is off for the whole
+        // harness: its own package asserts every line it can print.
+        DSH_GC: '0',
         ...options.env,
       },
     })

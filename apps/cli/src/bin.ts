@@ -37,10 +37,12 @@ export async function runCli(options: RunCliOptions = {}): Promise<void> {
       // Sampling starts before the host binds, and it outlives `runProfile`,
       // which resolves once the profile is composed rather than at shutdown.
       // Both timers are unref'd, so the policy never holds the process open.
+      // `DSH_GC=0` starts nothing and says nothing: an operator who turned the
+      // policy off asked for a quiet stderr, and a line about it would be the
+      // one report they did not ask for — the profile's own output is a channel
+      // its callers read.
       const policyOptions = policyOptionsFromEnv()
-      if (policyOptions === undefined) {
-        process.stderr.write('memory policy: disabled by DSH_GC=0\n')
-      } else {
+      if (policyOptions !== undefined) {
         startMemoryPolicy({ ...policyOptions, log: (line) => { process.stderr.write(`${line}\n`) } })
       }
       try {

@@ -98,7 +98,13 @@ async function bootWeb(root: string, flags: string[]): Promise<RunningWeb> {
   }
   lines.on('line', (line) => {
     if (line.startsWith('public-url-listen-port: ')) port = Number(line.slice('public-url-listen-port: '.length))
-    if (line.startsWith('dsh web: http')) startup = new URL(line.slice('dsh web: '.length))
+    if (line.startsWith('dsh web: http')) {
+      // The line may carry a trailing ` (LAN: <url>)` suffix naming the best
+      // address a peer can reach; the advertised root is the first token.
+      const advertised = line.slice('dsh web: '.length)
+      const end = advertised.indexOf(' ')
+      startup = new URL(end === -1 ? advertised : advertised.slice(0, end))
+    }
     announced()
   })
   void child.then((result) => {
