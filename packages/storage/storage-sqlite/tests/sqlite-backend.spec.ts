@@ -168,6 +168,59 @@ describe('sqlite backend specifics', () => {
     }
   }, 90_000)
 
+  it('serves one record or the global on demand, from a fresh connection', async () => {
+    const path = await freshDbPath()
+    const backend = backendAt(path)
+    const unit = await backend.kv.open(DESCRIPTOR)
+    await unit.putRecord('records', 'k', { n: 1 })
+    await unit.setGlobal({ g: 2 })
+    await backend.close()
+
+    // One prepared single-row select per read; the absent cases stay absent
+    // instead of becoming caller errors or an empty-table materialization.
+    const reopened = backendAt(path)
+    const unit2 = await reopened.kv.open(DESCRIPTOR)
+    expect(await unit2.readRecord('records', 'k')).toEqual({ n: 1 })
+    expect(await unit2.readRecord('records', 'missing')).toBeUndefined()
+    expect(await unit2.readRecord('undeclared', 'k')).toBeUndefined()
+    expect(await unit2.readGlobal()).toEqual({ g: 2 })
+    await reopened.close()
+
+    // A unit without a global slot has no global row to read.
+    const plain = backendAt(':memory:')
+    const noGlobal = await plain.kv.open({ ...DESCRIPTOR, hasGlobal: false })
+    expect(await noGlobal.readGlobal()).toBeNull()
+    await plain.close()
+  })
+
+  it('rejects an unparsable stored row or global on a point read with malformed-medium', async () => {
+    const path = await freshDbPath()
+    const backend = backendAt(path)
+    const unit = await backend.kv.open(DESCRIPTOR)
+    await unit.putRecord('records', 'good', { n: 1 })
+    await unit.setGlobal({ g: 1 })
+    await backend.close()
+
+    const db = new DatabaseSync(path)
+    db.prepare('UPDATE u_specimen_records SET value = ? WHERE key = ?').run('{not json', 'good')
+    db.prepare('UPDATE unit_globals SET value = ? WHERE unit = ?').run('][', 'specimen')
+    db.close()
+
+    // The point reads keep the loud path that `loadAll` has for unparsable
+    // JSON: a damaged medium is never served as an absent record.
+    const reopened = backendAt(path)
+    const damaged = await reopened.kv.open(DESCRIPTOR)
+    await expect(damaged.readRecord('records', 'good')).rejects.toMatchObject({
+      name: 'StorageError',
+      code: 'malformed-medium',
+    })
+    await expect(damaged.readGlobal()).rejects.toMatchObject({
+      name: 'StorageError',
+      code: 'malformed-medium',
+    })
+    await reopened.close()
+  })
+
   it('rejects unparsable stored JSON with malformed-medium', async () => {
     const path = await freshDbPath()
     const backend = backendAt(path)

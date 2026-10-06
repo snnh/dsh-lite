@@ -68,11 +68,7 @@ export async function openPerRecordUnit(
  */
 async function loadPerRecordState(descriptor: KvUnitDescriptor, dir: string): Promise<UnitState> {
   const versions = acceptedStamps(descriptor)
-  const state: UnitState = {
-    version: descriptor.version,
-    global: null,
-    tables: new Map(descriptor.tables.map(table => [table, new Map<string, unknown>()])),
-  }
+  const state = emptyState(descriptor)
   let entries: Dirent[] | undefined
   try {
     entries = await readdir(dir, { withFileTypes: true })
@@ -91,7 +87,7 @@ async function loadPerRecordState(descriptor: KvUnitDescriptor, dir: string): Pr
         }
       }
       if (entry.name === 'global.json' && descriptor.hasGlobal) {
-        const global = await readRecord(join(dir, entry.name), versions)
+        const global = await readRecordDocument(join(dir, entry.name), versions)
         if (global !== undefined) state.global = global
         return true
       }
@@ -99,6 +95,60 @@ async function loadPerRecordState(descriptor: KvUnitDescriptor, dir: string): Pr
     }))).some(Boolean)
   if (!hasNewDocuments) await bootstrapLegacyUnit(descriptor, dir, state)
   return state
+}
+
+/** The empty unit shape: every declared table present and empty, and a never-written global. */
+function emptyState(descriptor: KvUnitDescriptor): UnitState {
+  return {
+    version: descriptor.version,
+    global: null,
+    tables: new Map(descriptor.tables.map(table => [table, new Map<string, unknown>()])),
+  }
+}
+
+/**
+ * Reject a unit directory that exists but cannot be listed. A missing
+ * directory is the empty tree, and a per-document read failure stays
+ * `undefined` (the per-record contract); a directory-level failure is loud,
+ * exactly as {@link loadPerRecordState} reports it.
+ * @param dir - Absolute unit directory path.
+ */
+async function assertTreeReachable(dir: string): Promise<void> {
+  try {
+    await readdir(dir)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+}
+
+/**
+ * Whether the per-record tree already holds a document path — the gate that
+ * suppresses the legacy whole-unit bootstrap. Mirrors the detection inside
+ * {@link loadPerRecordState}: any `.json` entry in a declared table's
+ * directory counts, readable or not, while a `global.json` counts only when it
+ * parses as a document whose version is accepted.
+ * @param descriptor - Static identity and shape of the unit.
+ * @param dir - Absolute unit directory path.
+ * @returns whether the tree's own documents are authoritative.
+ */
+async function hasUnitDocuments(descriptor: KvUnitDescriptor, dir: string): Promise<boolean> {
+  let entries: Dirent[]
+  try {
+    entries = await readdir(dir, { withFileTypes: true })
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    return false
+  }
+  const versions = acceptedStamps(descriptor)
+  for (const entry of entries) {
+    if (entry.isDirectory() && descriptor.tables.includes(entry.name)) {
+      const files = await readdir(join(dir, entry.name), { withFileTypes: true })
+      if (files.some(file => file.name.endsWith('.json'))) return true
+    } else if (entry.name === 'global.json' && descriptor.hasGlobal) {
+      if (await readRecordDocument(join(dir, entry.name), versions) !== undefined) return true
+    }
+  }
+  return false
 }
 
 /** The version stamps this unit reads as its own: current plus declared compatible versions. */
@@ -168,7 +218,7 @@ async function loadTableRecords(records: Map<string, unknown>, versions: readonl
     if (!file.name.endsWith('.json')) return
     const key = file.name.slice(0, -'.json'.length)
     if (!SAFE_KEY_RE.test(key)) return
-    const record = await readRecord(join(dir, file.name), versions)
+    const record = await readRecordDocument(join(dir, file.name), versions)
     if (record !== undefined) return [key, record] as const
   }))
   for (const record of loaded) {
@@ -178,7 +228,7 @@ async function loadTableRecords(records: Map<string, unknown>, versions: readonl
 }
 
 /** Read one record document; a foreign (unreadable or stale) one reads as absent. */
-async function readRecord(path: string, versions: readonly number[]): Promise<unknown> {
+async function readRecordDocument(path: string, versions: readonly number[]): Promise<unknown> {
   try {
     return parseRecord(await readFile(path, 'utf8'), versions)
   } catch {
@@ -212,6 +262,52 @@ export class PerRecordJsonUnit implements KvUnit {
       tables[table] = Object.fromEntries(records)
     }
     return { tables, global: state.global }
+  }
+
+  /**
+   * Read one record document without walking the tree: the exact value
+   * `loadAll` serves for that table and key. Absence reads as `undefined` —
+   * an undeclared table, a key spelling that could never be a path segment, a
+   * document that is not there, a malformed document, and a document stamped
+   * with a version outside the accepted set. When the tree holds no document
+   * path at all, the legacy whole-unit bootstrap runs first (exactly when
+   * `loadAll` would run it), so a point read also observes records that only
+   * the bootstrap surfaces.
+   * @param table - Declared table name; an undeclared one reads as absent.
+   * @param key - Record key; an unsafe one reads as absent.
+   * @returns the stored record, or `undefined` when it is absent.
+   */
+  // oxlint-disable-next-line typescript/no-redundant-type-constituents -- absent is explicit: `undefined` names the absent result
+  async readRecord(table: string, key: string): Promise<unknown | undefined> {
+    this.assertOpen()
+    if (!this.descriptor.tables.includes(table) || !SAFE_KEY_RE.test(key)) return undefined
+    const versions = acceptedStamps(this.descriptor)
+    const path = join(this.dir, table, `${key}.json`)
+    const stored = await readRecordDocument(path, versions)
+    if (stored !== undefined) return stored
+    // Absent from the tree: a legacy whole-unit file may still be the source of
+    // this record. Mirror `loadAll`'s gate (an empty tree is exactly the
+    // fresh-upgrade shape) and re-read the document the bootstrap just wrote.
+    if (await hasUnitDocuments(this.descriptor, this.dir)) return undefined
+    await bootstrapLegacyUnit(this.descriptor, this.dir, emptyState(this.descriptor))
+    return readRecordDocument(path, versions)
+  }
+
+  /**
+   * Read the global document only; `null` when it was never written or the
+   * descriptor declares no global slot, exactly as `loadAll` reports it. An
+   * unreadable or stale global document reads as `null` (the per-record rule
+   * `loadAll` applies to it too), while a unit directory that cannot be listed
+   * at all stays loud. The legacy bootstrap seeds records only, so it cannot
+   * change this answer.
+   * @returns the stored global value, or `null`.
+   */
+  async readGlobal(): Promise<unknown> {
+    this.assertOpen()
+    if (!this.descriptor.hasGlobal) return null
+    await assertTreeReachable(this.dir)
+    const stored = await readRecordDocument(join(this.dir, 'global.json'), acceptedStamps(this.descriptor))
+    return stored ?? null
   }
 
   /** Durably replace one record: its own document, atomically. */

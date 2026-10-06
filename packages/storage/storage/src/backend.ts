@@ -91,6 +91,34 @@ export interface KvUnit {
   loadAll(): Promise<{ tables: Record<string, Record<string, unknown>>; global: unknown }>
 
   /**
+   * Read one record on demand instead of materializing its table: exactly the
+   * value {@link loadAll} reports for that table and key, without reading the
+   * rest of the unit. Everything outside the readable set reads as `undefined`
+   * rather than rejecting — an undeclared table, an unwritten key, a malformed
+   * record, and (in the `per-record` layout) a record whose stored version the
+   * descriptor does not accept or whose key spelling cannot be a path segment.
+   * Writes keep their loud path for those same spellings; a read never rejects
+   * for absence, because asking about a record that is not there is not a
+   * caller bug. In the `per-record` layout the legacy whole-unit bootstrap
+   * still runs when, and only when, {@link loadAll} would run it, so a point
+   * read observes the same readable set.
+   * @param table - Table name; an undeclared table reads as absent.
+   * @param key - Record key; a spelling the medium cannot hold reads as absent.
+   * @returns the stored record, or `undefined` when it is absent.
+   */
+  // oxlint-disable-next-line typescript/no-redundant-type-constituents -- absent is explicit: `undefined` names the absent result
+  readRecord(table: string, key: string): Promise<unknown | undefined>
+
+  /**
+   * Read only the global singleton, without materializing any table: exactly
+   * the value {@link loadAll} reports as `global`. Medium-level read failures
+   * reject the same way {@link loadAll} rejects them.
+   * @returns the stored global value, or `null` when it was never written or
+   * the descriptor declares no global slot.
+   */
+  readGlobal(): Promise<unknown>
+
+  /**
    * Upsert one record durably. Overwrite semantics: an existing key is replaced.
    * @param table - Declared table name.
    * @param key - Record key. In the `per-record` layout a key becomes a path

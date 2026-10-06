@@ -112,6 +112,8 @@ function selectiveFailureBackend(
         const unit = await inner.kv.open(descriptor)
         return {
           loadAll: () => unit.loadAll(),
+          readRecord: (table, key) => unit.readRecord(table, key),
+          readGlobal: () => unit.readGlobal(),
           putRecord: async (table, key, value) => {
             puts += 1
             if (puts === failure.putAt) throw new Error('selected bootstrap put failure')

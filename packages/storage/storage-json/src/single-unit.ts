@@ -71,6 +71,30 @@ class SingleJsonUnit implements KvUnit {
     return { tables, global: this.state.global }
   }
 
+  /**
+   * Read one record from the in-memory projection: the exact value `loadAll`
+   * serves for that table and key, without rebuilding the table maps. An
+   * undeclared table reads as absent, like a key this unit never stored.
+   * @param table - Table name; an undeclared table reads as absent.
+   * @param key - Record key.
+   * @returns the stored record, or `undefined` when it is absent.
+   */
+  // oxlint-disable-next-line typescript/no-redundant-type-constituents, typescript/require-await -- absent is explicit; the guard rejects
+  async readRecord(table: string, key: string): Promise<unknown | undefined> {
+    this.assertOpen()
+    return this.state.tables.get(table)?.get(key)
+  }
+
+  /**
+   * Read the global singleton from the in-memory projection.
+   * @returns the stored global value, or `null` when it was never written.
+   */
+  // oxlint-disable-next-line typescript/require-await -- async keeps the closed guard a rejection, not a synchronous throw
+  async readGlobal(): Promise<unknown> {
+    this.assertOpen()
+    return this.state.global
+  }
+
   async putRecord(table: string, key: string, value: unknown): Promise<void> {
     this.assertOpen()
     const records = this.records(table)

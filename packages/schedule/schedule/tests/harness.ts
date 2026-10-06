@@ -40,6 +40,8 @@ export function gatedScheduleBackend(
         const backup = unit.backupRecord?.bind(unit)
         return {
           loadAll: () => unit.loadAll(),
+          readRecord: (table, key) => unit.readRecord(table, key),
+          readGlobal: () => unit.readGlobal(),
           putRecord: async (table, key, value) => {
             await traps.putRecord?.(table, key)
             await unit.putRecord(table, key, value)

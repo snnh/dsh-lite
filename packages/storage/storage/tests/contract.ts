@@ -15,6 +15,14 @@ export interface KvBackendContractHarness {
   backend: StorageBackend
   /** Open a NEW backend instance over the SAME medium, as after a process restart. */
   reopen(): Promise<StorageBackend>
+  /**
+   * Whether this backend stamps a unit version per record document in the
+   * `per-record` layout. Such a backend opens a unit whose descriptor version
+   * moved on and drops only the affected records; a backend that stamps one
+   * version per unit (the `single` layout, a row store) refuses the whole unit
+   * with `version-mismatch` instead. Omitted means per-unit stamps.
+   */
+  readonly perRecordVersionStamps?: boolean
 }
 
 const DESCRIPTOR: KvUnitDescriptor = {
@@ -22,6 +30,21 @@ const DESCRIPTOR: KvUnitDescriptor = {
   version: 3,
   tables: ['alpha', 'beta'],
   hasGlobal: true,
+}
+
+/**
+ * The same shape in the `per-record` layout: that layout's record documents
+ * carry their own version stamp, which is what the unaccepted-version clause
+ * observes. A backend serving only one layout reads such a unit as a foreign
+ * document and keeps its own per-unit stamp, so the clause branches on
+ * {@link KvBackendContractHarness.perRecordVersionStamps}.
+ */
+const PER_RECORD: KvUnitDescriptor = {
+  name: 'contract_records',
+  version: 3,
+  tables: ['alpha', 'beta'],
+  hasGlobal: true,
+  layout: 'per-record',
 }
 
 /**
@@ -71,6 +94,78 @@ export function runKvBackendContract(label: string, create: () => Promise<KvBack
       await backend.close()
     })
 
+    it('serves one record or the global on demand, without materializing a table', async () => {
+      const harness = await create()
+      const unit = await harness.backend.kv!.open(DESCRIPTOR)
+      await unit.putRecord('alpha', 'k1', { n: 1 })
+      await unit.putRecord('beta', 'k2', { n: 2 })
+      await unit.setGlobal({ counter: 7 })
+      await harness.backend.close()
+
+      // A fresh instance over the same medium: the point read serves exactly the
+      // value `loadAll` serves for that table and key, and the global without it.
+      const reopened = await harness.reopen()
+      const unit2 = await reopened.kv!.open(DESCRIPTOR)
+      await expect(unit2.readRecord('alpha', 'k1')).resolves.toEqual({ n: 1 })
+      await expect(unit2.readRecord('beta', 'k2')).resolves.toEqual({ n: 2 })
+      await expect(unit2.readGlobal()).resolves.toEqual({ counter: 7 })
+      expect((await unit2.loadAll()).tables['alpha']).toEqual({ k1: { n: 1 } })
+      await reopened.close()
+    })
+
+    it('reads an absent key, table, or global as absent without rejecting', async () => {
+      const { backend } = await create()
+      const unit = await backend.kv!.open(DESCRIPTOR)
+      await unit.putRecord('alpha', 'k1', { n: 1 })
+      // An unwritten key, a declared table holding nothing, and a table the
+      // descriptor does not declare — absent to `loadAll`, which only ever
+      // surfaces declared tables, so absent to a point read too.
+      await expect(unit.readRecord('alpha', 'never-written')).resolves.toBeUndefined()
+      await expect(unit.readRecord('beta', 'never-written')).resolves.toBeUndefined()
+      await expect(unit.readRecord('undeclared', 'k')).resolves.toBeUndefined()
+      // The global slot was never written: `null`, the value `loadAll` reports.
+      await expect(unit.readGlobal()).resolves.toBeNull()
+      await backend.close()
+    })
+
+    it('reads a per-record key spelling the layout cannot hold as absent', async () => {
+      const { backend } = await create()
+      const unit = await backend.kv!.open(PER_RECORD)
+      // These spellings can never be a path segment, so no such document is part
+      // of the readable set: a point read reports absence like `loadAll`, rather
+      // than rejecting the way the write primitives do.
+      await expect(unit.readRecord('alpha', 'a/b')).resolves.toBeUndefined()
+      await expect(unit.readRecord('alpha', '..')).resolves.toBeUndefined()
+      await expect(unit.readRecord('alpha', 'unsafe%2Fkey')).resolves.toBeUndefined()
+      await expect(unit.readRecord('undeclared', 'a/b')).resolves.toBeUndefined()
+      await backend.close()
+    })
+
+    it('never serves a record whose stored version the descriptor does not accept', async () => {
+      const harness = await create()
+      const unit = await harness.backend.kv!.open(PER_RECORD)
+      await unit.putRecord('alpha', 'stale', { v: 1 })
+      await harness.backend.close()
+
+      const reopened = await harness.reopen()
+      const bumped = { ...PER_RECORD, version: PER_RECORD.version + 1 }
+      if (harness.perRecordVersionStamps === true) {
+        // A stamp per document: the unit opens on the version bump and drops
+        // only the stale record, which the point read and `loadAll` agree is gone.
+        const unit2 = await reopened.kv!.open(bumped)
+        await expect(unit2.readRecord('alpha', 'stale')).resolves.toBeUndefined()
+        expect((await unit2.loadAll()).tables['alpha']).toEqual({})
+      } else {
+        // One stamp per unit: the medium refuses the bump outright, so no record
+        // is ever served under a version the unit does not accept.
+        await expect(reopened.kv!.open(bumped)).rejects.toMatchObject({
+          name: 'StorageError',
+          code: 'version-mismatch',
+        })
+      }
+      await reopened.close()
+    })
+
     it('rejects a version mismatch on reopen without touching the data', async () => {
       const harness = await create()
       const unit = await harness.backend.kv!.open(DESCRIPTOR)
@@ -95,6 +190,8 @@ export function runKvBackendContract(label: string, create: () => Promise<KvBack
       await unit.close()
       await expect(unit.putRecord('alpha', 'k', {})).rejects.toMatchObject({ code: 'closed' })
       await expect(unit.loadAll()).rejects.toMatchObject({ code: 'closed' })
+      await expect(unit.readRecord('alpha', 'k')).rejects.toMatchObject({ code: 'closed' })
+      await expect(unit.readGlobal()).rejects.toMatchObject({ code: 'closed' })
       await backend.close()
       await backend.close()
     })

@@ -79,6 +79,20 @@ class MemoryKvUnit implements KvUnit {
     return { tables, global: this.medium.global }
   }
 
+  /** Read one pooled record; an undeclared table or an unwritten key is absent, exactly as `loadAll` reports it. */
+  // oxlint-disable-next-line typescript/no-redundant-type-constituents -- absent is explicit: `undefined` names the absent result
+  async readRecord(table: string, key: string): Promise<unknown | undefined> {
+    this.assertOpen()
+    if (!this.descriptor.tables.includes(table)) return undefined
+    return this.medium.tables.get(table)?.get(key)
+  }
+
+  /** Read the pooled global slot; `null` until the first `setGlobal`, exactly as `loadAll` reports it. */
+  async readGlobal(): Promise<unknown> {
+    this.assertOpen()
+    return this.medium.global
+  }
+
   async putRecord(table: string, key: string, value: unknown): Promise<void> {
     this.assertOpen()
     this.pool.consumeInjectedFailure()

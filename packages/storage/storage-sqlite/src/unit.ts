@@ -17,6 +17,7 @@ interface TableStatements {
   upsert: StatementSync
   remove: StatementSync
   selectAll: StatementSync
+  selectOne: StatementSync
 }
 
 /**
@@ -50,6 +51,7 @@ export class SqliteKvUnit implements KvUnit {
         ),
         remove: db.prepare(`DELETE FROM "${physical}" WHERE key = ?`),
         selectAll: db.prepare(`SELECT key, value FROM "${physical}"`),
+        selectOne: db.prepare(`SELECT value FROM "${physical}" WHERE key = ?`),
       })
     }
     this.globalUpsert = descriptor.hasGlobal
@@ -74,13 +76,44 @@ export class SqliteKvUnit implements KvUnit {
         }
         tables[name] = records
       }
-      let global: unknown = null
-      if (this.globalSelect !== undefined) {
-        const row = this.globalSelect.get(this.descriptor.name) as { value: string } | undefined
-        if (row !== undefined) global = this.parseValue(row.value, 'global slot')
-      }
-      return { tables, global }
+      return { tables, global: this.readGlobalValue() }
     })
+  }
+
+  /**
+   * Read one record with a single-row select; the exact value `loadAll` serves
+   * for that table and key. An undeclared table reads as absent (as it is to
+   * `loadAll`, which only surfaces declared tables), and an absent row reads as
+   * `undefined`; a stored value that is not JSON still rejects with
+   * `malformed-medium`, exactly like the full read.
+   * @param table - Table name; an undeclared table reads as absent.
+   * @param key - Record key.
+   * @returns the stored record, or `undefined` when it is absent.
+   */
+  // oxlint-disable-next-line typescript/no-redundant-type-constituents -- absent is explicit: `undefined` names the absent result
+  readRecord(table: string, key: string): Promise<unknown | undefined> {
+    return this.settle(() => {
+      const statements = this.tables.get(table)
+      if (statements === undefined) return undefined
+      const row = statements.selectOne.get(key) as { value: string } | undefined
+      return row === undefined ? undefined : this.parseValue(row.value, `table '${table}' key '${key}'`)
+    })
+  }
+
+  /**
+   * Read only the global slot; the exact value `loadAll` reports as `global`.
+   * @returns the stored global value, or `null` when it was never written or
+   * the descriptor declares no global slot.
+   */
+  readGlobal(): Promise<unknown> {
+    return this.settle(() => this.readGlobalValue())
+  }
+
+  /** Read the global row for this unit; `null` when it is absent or undeclared. */
+  private readGlobalValue(): unknown {
+    if (this.globalSelect === undefined) return null
+    const row = this.globalSelect.get(this.descriptor.name) as { value: string } | undefined
+    return row === undefined ? null : this.parseValue(row.value, 'global slot')
   }
 
   /** Parse one stored value column, mapping bad JSON to `malformed-medium`. */

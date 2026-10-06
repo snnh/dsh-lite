@@ -24,6 +24,9 @@ runKvBackendContract('json', async () => {
   return {
     backend: new JsonStorageBackend(root),
     reopen: async () => new JsonStorageBackend(root),
+    // The per-record layout stamps each record document with the unit version,
+    // so a version bump discards just the stale record instead of the unit.
+    perRecordVersionStamps: true,
   }
 })
 
@@ -328,6 +331,10 @@ describe('per-record layout', () => {
     await writeFile(join(root, 'recs'), 'not a directory', 'utf8')
     const unit = await backend.kv.open(descriptor)
     await expect(unit.loadAll()).rejects.toMatchObject({ code: 'ENOTDIR' })
+    // The point read is just as loud: it cannot judge the tree without the
+    // directory the tree lives in.
+    await expect(unit.readRecord('t', 'k')).rejects.toMatchObject({ code: 'ENOTDIR' })
+    await expect(unit.readGlobal()).rejects.toMatchObject({ code: 'ENOTDIR' })
     await unit.close()
     const noGlobal = { name: 'plain', version: 1, layout: 'per-record' as const, tables: ['t'], hasGlobal: false }
     const unit2 = await backend.kv.open(noGlobal)
@@ -411,6 +418,151 @@ describe('per-record layout', () => {
       .toEqual({ version: 4, record: { v: 1 } })
     await unit2.close()
     await backend2.close()
+  })
+
+  it('reads a table directory holding no document path as empty', async () => {
+    const root = await freshRoot()
+    await mkdir(join(root, 'recs', 't'), { recursive: true })
+    await writeFile(join(root, 'recs', 't', 'not-a-document.txt'), 'ignored', 'utf8')
+    const backend = new JsonStorageBackend(root)
+    const unit = await backend.kv.open(descriptor)
+    // A directory with no `.json` entry is no document path at all: the tree
+    // stays eligible for the legacy bootstrap, and the read reports absence.
+    expect(await unit.readRecord('t', 'k')).toBeUndefined()
+    expect(await unit.loadAll()).toEqual({ tables: { t: {} }, global: null })
+    await backend.close()
+  })
+
+  it('rejects a failed per-record write and leaves the medium unchanged', async () => {
+    const root = await freshRoot()
+    // A file where the table directory should be: creating the parent directory
+    // of the record document fails with EEXIST on every platform.
+    await mkdir(join(root, 'recs'), { recursive: true })
+    await writeFile(join(root, 'recs', 't'), 'not a directory', 'utf8')
+    const backend = new JsonStorageBackend(root)
+    const unit = await backend.kv.open(descriptor)
+    await expect(unit.putRecord('t', 'k', { v: 1 })).rejects.toMatchObject({ code: 'EEXIST' })
+    // The rejected write is drained by close() and left nothing half-written.
+    expect(await unit.loadAll()).toEqual({ tables: { t: {} }, global: null })
+    await unit.close()
+    await backend.close()
+  })
+
+  it('serves one record and the global on demand without materializing the tree', async () => {
+    const root = await freshRoot()
+    const backend = new JsonStorageBackend(root)
+    const unit = await backend.kv.open(descriptor)
+    await unit.putRecord('t', 'k', { v: 1 })
+    await unit.setGlobal('G')
+    expect(await unit.readRecord('t', 'k')).toEqual({ v: 1 })
+    expect(await unit.readGlobal()).toBe('G')
+    // Absent key, undeclared table, unsafe spelling: absent, never an error.
+    expect(await unit.readRecord('t', 'missing')).toBeUndefined()
+    expect(await unit.readRecord('undeclared', 'k')).toBeUndefined()
+    expect(await unit.readRecord('t', 'a/b')).toBeUndefined()
+    await unit.close()
+
+    // A read never materializes the unit: opening one fresh and reading it
+    // leaves the medium exactly as it was.
+    const fresh = { name: 'untouched', version: 1, layout: 'per-record' as const, tables: ['t'], hasGlobal: true }
+    const readOnly = await backend.kv.open(fresh)
+    expect(await readOnly.readRecord('t', 'k')).toBeUndefined()
+    expect(await readOnly.readGlobal()).toBeNull()
+    await expect(readdir(join(root, 'untouched'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await readOnly.close()
+    await backend.close()
+  })
+
+  it('serves a legacy whole-unit record on a point read, migrating exactly like loadAll', async () => {
+    const root = await freshRoot()
+    const legacy = JSON.stringify({
+      unit: { name: 'recs', version: descriptor.version },
+      global: null,
+      tables: { t: { old1: { v: 1 } }, undeclared: { k: { v: 0 } } },
+    })
+    await writeFile(join(root, 'recs.json'), legacy, 'utf8')
+    const backend = new JsonStorageBackend(root)
+    const unit = await backend.kv.open(descriptor)
+    // The empty tree holds no document path, so the point read runs the same
+    // bootstrap `loadAll` runs and serves the record it migrated…
+    expect(await unit.readRecord('t', 'old1')).toEqual({ v: 1 })
+    expect(JSON.parse(await readFile(recordPath(root, 'old1'), 'utf8')))
+      .toEqual({ version: descriptor.version, record: { v: 1 } })
+    // …the legacy file stays untouched, and a table it carries but the
+    // descriptor does not declare stays unreadable.
+    await expect(readFile(join(root, 'recs.json'), 'utf8')).resolves.toBe(legacy)
+    expect(await unit.readRecord('undeclared', 'k')).toBeUndefined()
+    await unit.close()
+    await backend.close()
+  })
+
+  it('does not bootstrap a tree that already holds one document path', async () => {
+    const root = await freshRoot()
+    await mkdir(join(root, 'recs'), { recursive: true })
+    await writeFile(join(root, 'recs', 'global.json'), JSON.stringify({ version: descriptor.version, record: 'G' }), 'utf8')
+    await writeFile(join(root, 'recs.json'), JSON.stringify({
+      unit: { name: 'recs', version: descriptor.version },
+      global: null,
+      tables: { t: { old: { v: 1 } } },
+    }), 'utf8')
+    const backend = new JsonStorageBackend(root)
+    const unit = await backend.kv.open(descriptor)
+    // A readable global document is a document path: the tree is authoritative,
+    // so the point read reports the key absent instead of resurrecting the
+    // legacy record `loadAll` also refuses to serve.
+    expect(await unit.readRecord('t', 'old')).toBeUndefined()
+    expect(await unit.loadAll()).toEqual({ tables: { t: {} }, global: 'G' })
+    await expect(readFile(recordPath(root, 'old'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+    await backend.close()
+  })
+
+  it('reads a tree whose only global document is unreadable as empty', async () => {
+    const root = await freshRoot()
+    await mkdir(join(root, 'recs'), { recursive: true })
+    // An unreadable global document is no document path at all — the same
+    // judgment `loadAll` makes, so the legacy bootstrap still runs here.
+    await writeFile(join(root, 'recs', 'global.json'), '{oops', 'utf8')
+    const backend = new JsonStorageBackend(root)
+    const unit = await backend.kv.open(descriptor)
+    expect(await unit.readRecord('t', 'k')).toBeUndefined()
+    expect(await unit.readGlobal()).toBeNull()
+    expect(await unit.loadAll()).toEqual({ tables: { t: {} }, global: null })
+    await backend.close()
+  })
+
+  it('reads the global of a unit without a global slot as null', async () => {
+    const root = await freshRoot()
+    await mkdir(join(root, 'plain'), { recursive: true })
+    // A foreign global document in a unit that declares no slot is ignored.
+    await writeFile(join(root, 'plain', 'global.json'), JSON.stringify({ version: 1, record: 'G' }), 'utf8')
+    const backend = new JsonStorageBackend(root)
+    const unit = await backend.kv.open({
+      name: 'plain', version: 1, layout: 'per-record', tables: ['t'], hasGlobal: false,
+    })
+    expect(await unit.readGlobal()).toBeNull()
+    expect(await unit.readRecord('t', 'k')).toBeUndefined()
+    expect(await unit.loadAll()).toEqual({ tables: { t: {} }, global: null })
+    await backend.close()
+  })
+
+  it('applies the record document rules (accepted version, malformed, unsafe key) to a point read', async () => {
+    const root = await freshRoot()
+    const compat = { ...descriptor, compatibleVersions: [1] }
+    await mkdir(join(root, 'recs', 't'), { recursive: true })
+    await writeFile(recordPath(root, 'old'), JSON.stringify({ version: 1, record: { v: 'old' } }), 'utf8')
+    await writeFile(recordPath(root, 'ancient'), JSON.stringify({ version: 0, record: { v: 'no' } }), 'utf8')
+    await writeFile(recordPath(root, 'broken'), '{oops', 'utf8')
+    await writeFile(recordPath(root, 'unsafe%2Fkey'), JSON.stringify({ version: descriptor.version, record: { v: 0 } }), 'utf8')
+    const backend = new JsonStorageBackend(root)
+    const unit = await backend.kv.open(compat)
+    // A declared compatible stamp is served; every other spelling of "not
+    // readable" is absent, exactly as `loadAll` judges the same tree.
+    expect(await unit.readRecord('t', 'old')).toEqual({ v: 'old' })
+    expect(await unit.readRecord('t', 'ancient')).toBeUndefined()
+    expect(await unit.readRecord('t', 'broken')).toBeUndefined()
+    expect(await unit.readRecord('t', 'unsafe%2Fkey')).toBeUndefined()
+    expect(await unit.loadAll()).toEqual({ tables: { t: { old: { v: 'old' } } }, global: null })
+    await backend.close()
   })
 
   it('backupRecord moves the document aside; reads see it absent and a write recreates it', async () => {

@@ -129,6 +129,9 @@ describe('DomainFacility.open', () => {
       kv: {
         open: async () => ({
           loadAll: async () => ({ tables: {}, global: null }),
+          // The sparse backend answers point reads from the same empty shape.
+          readRecord: async () => undefined,
+          readGlobal: async () => null,
           putRecord: async () => {},
           deleteRecord: async () => {},
           setGlobal: async () => {},
