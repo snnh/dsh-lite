@@ -105,7 +105,11 @@ export class OfficeToPdf extends TypertRemoteService {
   private readonly remoteLifetime = new AbortController()
   private readonly remoteRequests = new Set<Promise<RenderedDocumentBytes>>()
   private readonly slots: Slot[] = []
-  /** The kit module, imported once on the first conversion and reused by every slot. */
+  /**
+   * The kit module, imported once on the first conversion and reused by
+   * every slot. A rejected import clears the memo so the next conversion
+   * retries instead of failing every slot with the cached rejection.
+   */
   private kit: Promise<typeof import('@deepseek-ai/libreoffice-kit')> | undefined
   private readonly queue: ConversionQueue
   private readonly options: ConverterOptions
@@ -241,6 +245,13 @@ export class OfficeToPdf extends TypertRemoteService {
     try {
       if (slot.converter === undefined) {
         this.kit ??= import('@deepseek-ai/libreoffice-kit')
+          .catch((error: unknown) => {
+            // The single rejection handler registered at creation runs before
+            // any later reaction on this promise, so the memo is clear before
+            // another conversion can observe the rejected import.
+            this.kit = undefined
+            throw error
+          })
         slot.converter = this.kit
           .then(module => module.createConverter(this.options))
           .catch((error: unknown) => {
