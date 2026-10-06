@@ -117,9 +117,10 @@ type WatchFactory = (paths: string | string[], options: WatchOptions) => WatchIn
  * The two export shapes Chokidar's factory appears under. Every released major
  * exposes `watch` by name AND as a member of a default-export object carrying
  * `watch` and `FSWatcher`; a backend substituted for Chokidar may implement only
- * one of the two.
+ * one of the two. Exported so a consumer can pass the module it depends on when
+ * it watches with a different Chokidar major than this package's own.
  */
-interface ChokidarNamespace {
+export interface ChokidarNamespace {
   watch?: WatchFactory
   default?: { watch?: WatchFactory }
 }
@@ -174,10 +175,13 @@ class ChokidarWatcher implements Watcher {
  * decision; this module only owns the instance's lifetime.
  * @param paths One path or a list of paths, resolved by Chokidar against the options' `cwd`.
  * @param options Watcher options, passed through unchanged.
+ * @param backend The Chokidar-compatible module the factory comes from. A
+ *   consumer watching with its own Chokidar major passes the module it depends
+ *   on; every other consumer gets this package's own dependency.
  * @returns The live watcher, registered until it is closed.
  */
-export function createWatcher(paths: string | string[], options: WatchOptions): Watcher {
-  const create = resolveFactory(chokidar)
+export function createWatcher(paths: string | string[], options: WatchOptions, backend: ChokidarNamespace = chokidar): Watcher {
+  const create = resolveFactory(backend)
   if (create === undefined) throw new Error('the loaded watcher backend exposes no watch factory')
   const watcher = new ChokidarWatcher(create(paths, options))
   liveWatchers.add(watcher)

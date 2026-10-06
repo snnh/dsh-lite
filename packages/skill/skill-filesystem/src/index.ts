@@ -16,6 +16,7 @@ import { homedir } from 'node:os'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type Schema from '@deepseek-ai/schemastery'
+import * as chokidar from 'chokidar'
 import { parse as parseYaml } from 'yaml'
 import type { FileSystem, FsDirEntry, FsTarget } from '@deepseek-ai/dsh-fs'
 import { canonicalizeWatchPath, resolveDshHome } from '@deepseek-ai/dsh-home-paths'
@@ -503,7 +504,7 @@ class SkillWatchManager {
       },
       usePolling: this.config.usePolling,
       interval: this.config.pollIntervalMs,
-    })
+    }, chokidar)
     const handle: WatchHandle = {
       mode,
       close: () => watcher.close(),
