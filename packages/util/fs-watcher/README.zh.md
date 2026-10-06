@@ -56,10 +56,11 @@ await watcher.close()
 如果消费方监听的 Chokidar 大版本与本包自带的不同，把自己的模块作为可选的第三个参数传入，实例就来自它自己依赖的那个 Chokidar：
 
 ```ts
-import * as chokidar from 'chokidar'
-import { createWatcher } from '@deepseek-ai/dsh-fs-watcher'
+import { createWatcher, type ChokidarNamespace } from '@deepseek-ai/dsh-fs-watcher'
 
 declare const root: string
+/** The consumer's own `chokidar` module, whatever major it depends on. */
+declare const chokidar: ChokidarNamespace
 
 const watcher = createWatcher(root, { ignoreInitial: true }, chokidar)
 ```

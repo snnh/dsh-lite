@@ -56,10 +56,11 @@ await watcher.close()
 A consumer that watches with a different Chokidar major than this package's own passes its module as the optional third argument, so the instance comes from the Chokidar it depends on:
 
 ```ts
-import * as chokidar from 'chokidar'
-import { createWatcher } from '@deepseek-ai/dsh-fs-watcher'
+import { createWatcher, type ChokidarNamespace } from '@deepseek-ai/dsh-fs-watcher'
 
 declare const root: string
+/** The consumer's own `chokidar` module, whatever major it depends on. */
+declare const chokidar: ChokidarNamespace
 
 const watcher = createWatcher(root, { ignoreInitial: true }, chokidar)
 ```
