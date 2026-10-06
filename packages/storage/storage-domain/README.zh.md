@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-使用本包声明经过 schema 校验的键值领域，并通过 `ctx.storageDomain` 在已配置的存储后端上打开它们。读取同步返回经过校验的内存状态；每次写入在完成前都已达到持久状态，并按顺序发出 `domain/changed`。产品包使用领域句柄，而不直接访问存储后端。这些宿主侧状态不会添加工具、提示词或会话事件，因此模型与 agent loop（智能体循环）无法看到它们。
+使用本包声明经过 schema 校验的键值领域，并通过 `ctx.storageDomain` 在已配置的存储后端上打开它们。读取同步返回经过校验的内存状态——除非领域声明了 `residency: 'lazy'`，此时改为按点查读取介质（见下文「延迟驻留」）——每次写入在完成前都已达到持久状态，并按顺序发出 `domain/changed`。产品包使用领域句柄，而不直接访问存储后端。这些宿主侧状态不会添加工具、提示词或会话事件，因此模型与 agent loop（智能体循环）无法看到它们。
 
 ## 目录
 
@@ -33,7 +33,7 @@ kind: "package-reference"
 
 ### 声明领域
 
-所属包用 `defineDomain` 声明一次领域——名称、版本与 zod 记录 schema——并导出它。名称非法、版本不是非负整数、或全局 schema 接受 `null` 时，`defineDomain` 会在模块加载时明确报错。
+所属包用 `defineDomain` 声明一次领域——名称、版本与 zod 记录 schema——并导出它。名称非法、版本不是非负整数、`layout`／`residency` 取值超出允许范围、或全局 schema 接受 `null` 时，`defineDomain` 会在模块加载时明确报错。
 
 ```text
 // Owning package, once:
@@ -57,6 +57,26 @@ domain.table('workspaces').update(id, (r) => ({ ...r, path: newPath }))
 
 调用方拥有句柄的生命周期，并在功能关闭时用 `domain.close()` 释放它（通常作为其自身的 `ctx.effect` 资源释放函数）；插件卸载时，设施会关闭仍处于打开状态的领域。
 
+### 延迟驻留：只做点查，不做物化
+
+只按键读取记录的领域可以声明 `residency: 'lazy'`，从而完全不物化：`open` 不物化任何表（只读取 global slot），所有表都留在介质上，`Domain.table()` 返回 `LazyKvTable`，其 `read(key)` 是一次持久化点读，每次调用都按表的 schema 重新校验。
+
+```text
+const pointSpec = defineDomain({
+  name: 'point_lookup',
+  version: 1,
+  residency: 'lazy', // open materializes no table
+  tables: { entries: domainTable(entrySchema) },
+})
+
+const domain = await ctx.storageDomain.open(pointSpec)
+const entries = domain.table('entries') // LazyKvTable: read/put/delete/update
+await entries.put(id, record)
+const record = await entries.read(id) // durable point read, schema-checked per call
+```
+
+这一取舍是刻意的：lazy 句柄没有同步的 `get`，也没有 `entries`／`keys`／`size`，因为对一条并不驻留的记录做同步读取只能是撒谎——整表遍历属于 eager 领域的职责。写入行为不变：同一条写链、同样的「先持久化后 resolve」、同样的 `domain/changed` 事件。校验也不变，只是时机变了：不符合 schema 的记录会在读取遇到它时报错（`invalid-record`），而不是让 open 失败，并且沿用同一套 `invalidRecords` 策略。
+
 ### 把领域路由到后端
 
 哪个后端服务哪个领域由领域插件的配置决定——绝非枢纽。`backend` 指定默认路由；`routes` 按领域名覆盖。路由到未注册后端的领域会在打开时以 `backend-not-found` 明确报错。
@@ -70,7 +90,7 @@ domain.table('workspaces').update(id, (r) => ({ ...r, path: newPath }))
 
 ### 可观察行为与失败
 
-每次写入都要等后端确认已持久化后才完成，并按写入顺序各发出一次 `domain/changed` 事件。失败携带稳定的 `DomainError` 代码：`already-open`（名称已打开或仍在关闭）、`facet-unsupported`（已路由后端不提供 `kv` 分面）、`invalid-record`（已存记录或全局不符合其 schema，并指明表与键）、`missing-key`（对不存在的记录执行 `update`）与 `closed`（关闭后的任何使用）。`version-mismatch` 等后端失败会原样透传。
+每次写入都要等后端确认已持久化后才完成，并按写入顺序各发出一次 `domain/changed` 事件。失败携带稳定的 `DomainError` 代码：`already-open`（名称已打开或仍在关闭）、`facet-unsupported`（已路由后端不提供 `kv` 分面）、`invalid-record`（已存记录或全局不符合其 schema，并指明表与键——eager 领域在 open 时报出，lazy 领域则在某次读取遇到该记录时报出）、`missing-key`（对不存在的记录执行 `update`）与 `closed`（关闭后的任何使用）。`version-mismatch` 等后端失败会原样透传。
 
 -----
 
@@ -85,13 +105,13 @@ domain.table('workspaces').update(id, (r) => ({ ...r, path: newPath }))
 ### 设计理念
 
 - **spec 对象是唯一真源。** `defineDomain` 固定 spec 的字面类型，并在所属包的模块加载时、任何介质被触碰之前校验其字段。记录 schema 使用 zod，因此 `z.infer` 可避免重复定义消费方类型；插件 `Config` 仍由 schemastery 负责。
-- **内存具有最终决定权；介质是持久投影。** 读取同步取自经过校验的内存状态。每次写入都在每个领域一条的写入链上排队：先到达后端持久状态，再变更内存，然后发出 `domain/changed`——被拒绝的后端写入不会触碰内存，因此读取永远不会与介质分叉。
+- **驻留模式决定什么具有最终决定权。** eager 领域把所有表放在内存里，并同步读取内存；lazy 领域不驻留任何记录，`read` 因此直达介质，并重新校验取回的内容。无论哪种模式，每次写入都在每个领域一条的写入链上排队：先到达后端持久状态，再发布新值（eager 领域发布到内存，lazy 领域发布到介质），然后发出 `domain/changed`——被拒绝的后端写入不会触碰可读状态，因此读取永远不会与介质分叉。
 - **每个领域一条写入链。** `put`、`delete`、`update` 与 `global.set` 都在其上排队；`update` 的变换在链上自己的槽位运行，因此并发更新绝不会交错。记录是普通不可变数据——返回值就是已存对象本身，绝不能原地修改。
 - **写入在提交点之后发出。** `domain/changed` 是通知，不是事务参与者：监听器抛出异常时，系统会隔离该异常并记录警告，而不会让已经持久的写入被拒绝。
 
 ### 打开顺序
 
-`DomainFacility.open(spec)` 按严格顺序执行，任一步骤失败都会让整个调用失败：拒绝已打开或仍在关闭的名称（`already-open`）；解析路由（`backend-not-found`）；要求 `kv` 分面（`facet-unsupported`）；打开单元（后端 `version-mismatch`／`malformed-medium` 透传）；加载并根据 spec 的 schema 校验每条已存记录与全局（`invalid-record`）；构造领域。调用方持有句柄；设施会在卸载时关闭任何仍打开的领域，已关闭领域的名称只在资源销毁完成后才能重新打开。
+`DomainFacility.open(spec)` 按严格顺序执行，任一步骤失败都会让整个调用失败：拒绝已打开或仍在关闭的名称（`already-open`）；解析路由（`backend-not-found`）；要求 `kv` 分面（`facet-unsupported`）；打开单元（后端 `version-mismatch`／`malformed-medium` 透传）；只按 spec 的 residency 读取所需内容——eager 领域加载并根据 spec 的 schema 校验每条已存记录与全局（`invalid-record`），lazy 领域只读取自己的 global slot，绝不调用 `loadAll`；构造领域。调用方持有句柄；设施会在卸载时关闭任何仍打开的领域，已关闭领域的名称只在资源销毁完成后才能重新打开。
 
 ### 源码地图
 
@@ -99,7 +119,7 @@ domain.table('workspaces').update(id, (r) => ({ ...r, path: newPath }))
 |---|---|
 | [`src/index.ts`](src/index.ts) | 插件入口：`DomainFacility`、路由、`Config`、数据形式挂载 |
 | [`src/spec.ts`](src/spec.ts) | 领域声明：`defineDomain`、`domainTable`、描述符投影 |
-| [`src/domain.ts`](src/domain.ts) | 已打开领域的运行时：写入链、表与全局句柄、关闭 |
+| [`src/domain.ts`](src/domain.ts) | 已打开领域的运行时：写入链、常驻表与延迟表句柄、全局句柄、关闭 |
 | [`src/events.ts`](src/events.ts) | `domain/changed` 事件词汇 |
 | [`src/error.ts`](src/error.ts) | `DomainError` 代码 |
 

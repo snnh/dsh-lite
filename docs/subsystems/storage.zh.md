@@ -85,6 +85,27 @@ interface DomainSpec {
    * to the rejecting default. The global slot always rejects.
    */
   readonly invalidRecords?: 'backup-and-skip'
+  /**
+   * Whether an open domain keeps its tables resident in memory. Absent (the
+   * default), the domain is `'eager'`: `open` materializes every declared
+   * table through `KvUnit.loadAll` and the table handle serves synchronous
+   * reads from that memory — whole-table iteration included (`entries`,
+   * `keys`, `size`), which is what a domain that scans or diffs its tables
+   * needs.
+   *
+   * `'lazy'` is the opt-in for a domain that only ever performs point
+   * lookups: `open` materializes nothing (it reads the global slot alone),
+   * `KvUnit.readRecord` serves each read, and every read re-validates the
+   * record it fetched, so per-record schema validation happens at read time
+   * instead of at open. What a lazy domain gives up is exactly what residency
+   * bought: no whole-table iteration and no synchronous `get` — its table
+   * handle is a `LazyKvTable` (`read`/`put`/`delete`/`update`) — and an
+   * unread invalid record no longer fails the whole open, it fails the read
+   * that meets it (under the {@link invalidRecords} policy). Choose it for
+   * domains whose resident set would otherwise dominate memory, typically
+   * because the data is large, sparse, or disposable.
+   */
+  readonly residency?: 'eager' | 'lazy'
   /** Optional global singleton slot. */
   readonly global?: DomainGlobalSpec<unknown>
   /** Table declarations keyed by table name; each name must match `UNIT_NAME_RE`. */
@@ -92,7 +113,9 @@ interface DomainSpec {
 }
 ```
 
-`defineDomain(spec)` 固定 spec 的字面量类型，并在拥有方的模块加载时、任何介质被触碰之前就明确报错：领域名或表名不匹配 `UNIT_NAME_RE`、版本不是非负整数、global schema 接受 `null`，这些都会抛出（`null` 是介质的「从未写入」哨兵值，可空的 global 一旦存储就无法往返还原）。`domainTable<K, V>(schema)` 声明一张表，其键类型是仅存在于编译期的 phantom 类型（通常是[品牌化 id](core.zh.md#branded-ids)）；`descriptorOf(spec)` 投影出面向后端的 unit 描述符。
+`defineDomain(spec)` 固定 spec 的字面量类型，并在拥有方的模块加载时、任何介质被触碰之前就明确报错：领域名或表名不匹配 `UNIT_NAME_RE`、版本不是非负整数、`layout` 或 `residency` 取值超出各自的两个允许值、global schema 接受 `null`，这些都会抛出（`null` 是介质的「从未写入」哨兵值，可空的 global 一旦存储就无法往返还原）。`residency` 是 spec 上唯一的内存开关：缺省即 `'eager'`（所有表常驻，也就是今天的行为），`'lazy'` 则为只按键查记录的领域放弃物化（见[打开的领域](#the-open-domain)）。`domainTable<K, V>(schema)` 声明一张表，其键类型是仅存在于编译期的 phantom 类型（通常是[品牌化 id](core.zh.md#branded-ids)）；`descriptorOf(spec)` 投影出面向后端的 unit 描述符。
+
+<a id="the-open-domain"></a>
 
 ## 打开的领域
 
@@ -105,11 +128,16 @@ interface Domain<S extends DomainSpec> {
   readonly global: DomainGlobalHandleOf<S>
   /**
    * Resolve one declared table handle. Handles are stable — repeated calls
-   * return the same instance.
+   * return the same instance. Which shape a handle has follows the spec's
+   * `residency`: only `residency: 'lazy'` yields a {@link LazyKvTable}
+   * (durable point reads, nothing resident); every other domain yields the
+   * fully resident {@link KvTable}.
    * @param name - Declared table name.
    * @returns the typed table handle.
    */
-  table<N extends keyof S['tables'] & string>(name: N): KvTable<TableKeyOf<S, N>, TableValueOf<S, N>>
+  table<N extends keyof S['tables'] & string>(name: N): S extends { readonly residency: 'lazy' }
+    ? LazyKvTable<TableKeyOf<S, N>, TableValueOf<S, N>>
+    : KvTable<TableKeyOf<S, N>, TableValueOf<S, N>>
 
   /**
    * Close this domain: reject new writes immediately, drain already-queued
@@ -123,11 +151,13 @@ interface Domain<S extends DomainSpec> {
 }
 ```
 
-读取是同步的，来自权威的内存态：`KvTable` 暴露 `get`/`entries`/`keys`/`size`（快照迭代器，在排队写入落地期间保持稳定），global 句柄的 `get()` 在第一次 `set` 将 slot 物化到介质之前一直返回 spec 的 `initial`。每次写入——`put`、`delete`、`update`、`global.set`——都在同一条逐领域写链上排队，先在后端完成持久化，再更新内存，最后发出 `domain/changed`；后端写入被拒时内存原样不动，因此读取绝不会偏离介质。`update(key, fn)` 在其写链 slot 上是一次原子的读-改-写（键缺失时拒绝 `missing-key`）；`delete` 一个不存在的键 resolve 为 `false`，不产生写入也不产生事件。返回的记录就是存储的对象本身，不是副本——请经 `put`/`update` 整体替换，绝不要就地修改。
+读取是同步的，来自权威的内存态：`KvTable` 暴露 `get`/`entries`/`keys`/`size`（快照迭代器，在排队写入落地期间保持稳定），global 句柄的 `get()` 在第一次 `set` 将 slot 物化到介质之前一直返回 spec 的 `initial`。每次写入——`put`、`delete`、`update`、`global.set`——都在同一条逐领域写链上排队，先在后端完成持久化，再更新内存，最后发出 `domain/changed`；后端写入被拒时内存原样不动，因此读取绝不会偏离介质。`update(key, fn)` 在其写链 slot 上是一次原子的读-改-写（键缺失时拒绝 `missing-key`）；`delete` 一个不存在的键 resolve 为 `false`，不产生写入也不产生事件。返回的记录就是存储的对象本身，不是副本——请经 `put`/`update` 整体替换，绝不要就地修改。 global slot 与驻留模式无关：两种模式下它都在 open 时读取一次，之后由内存提供。
+
+`residency: 'lazy'` 的领域不驻留任何表。`open` 什么都不物化（只读取 global slot），`Domain.table()` 返回的是 `LazyKvTable`——`read`/`put`/`delete`/`update`——而不是常驻的 `KvTable`。`read(key)` 是经 `KvUnit.readRecord` 的一次持久化点读，每次调用都会重新校验取回的记录，因此记录不符合 schema 时，是在读取遇到它时报错，而不是在 open 时报错，并且沿用同一套 `invalidRecords` 策略（`'backup-and-skip'` 在这里同样逐记录生效）。这套接口刻意更小：同步的 `get` 以及 `entries`/`keys`/`size` 都会承诺一个领域并不持有的记录或整表，因此 lazy 句柄一个都不提供。写入行为不变——同一条写链、同样的「先持久化后发布」顺序、同样的 `domain/changed` 事件——其余约定也不变：缺失内容读作 `undefined`，对不存在的键执行 `update` 拒绝 `missing-key`，`delete` 仍然报告此前是否存在。
 
 ## 领域 facility：`ctx.storageDomain`
 
-`DomainFacility`（[签名](#ctxstoragedomain--domainfacility)）在经过路由的后端之上打开已声明的领域。路由是领域插件的配置，绝不属于枢纽：`backend` 指定必填的默认路由，`routes` 按领域名逐个覆盖。`open(spec)` 按严格顺序执行，每一步失败都使整个调用失败：拒绝已打开或仍在关闭中的名称（`already-open`），解析路由（`backend-not-found`），要求后端具备 `kv` facet（`facet-unsupported`），打开 unit（后端的 `version-mismatch`/`malformed-medium` 原样透传），并按 spec 的 zod schema 校验每条已存储记录和 global（`invalid-record`，附带出错的表与键）。调用方拥有返回的句柄，并用 `Domain.close()` 释放它；插件卸载时仍处于打开状态的领域由 facility 负责关闭，已关闭领域的名称只有在拆除完全结束后才释放出来供重新打开。`get(name)` 是无类型的诊断查找，命中的是每个类型化句柄背后包内私有的 `DomainImpl` 运行时；`closeAll()` 是卸载路径。
+`DomainFacility`（[签名](#ctxstoragedomain--domainfacility)）在经过路由的后端之上打开已声明的领域。路由是领域插件的配置，绝不属于枢纽：`backend` 指定必填的默认路由，`routes` 按领域名逐个覆盖。`open(spec)` 按严格顺序执行，每一步失败都使整个调用失败：拒绝已打开或仍在关闭中的名称（`already-open`），解析路由（`backend-not-found`），要求后端具备 `kv` facet（`facet-unsupported`），打开 unit（后端的 `version-mismatch`/`malformed-medium` 原样透传），并按 spec 的 residency 只做它需要的事——eager 领域按 spec 的 zod schema 校验每条已存储记录和 global（`invalid-record`，附带出错的表与键），lazy 领域只读取自己的 global slot，绝不调用 `KvUnit.loadAll`。调用方拥有返回的句柄，并用 `Domain.close()` 释放它；插件卸载时仍处于打开状态的领域由 facility 负责关闭，已关闭领域的名称只有在拆除完全结束后才释放出来供重新打开。`get(name)` 是无类型的诊断查找，命中的是每个类型化句柄背后包内私有的 `DomainImpl` 运行时；`closeAll()` 是卸载路径。
 
 ## 变更事件：`domain/changed`
 
@@ -198,11 +228,14 @@ The mounted domain facility. Opens declared domains over routed backends; one fa
  * name that is already open (`already-open`); resolve the backend route
  * (`backend-not-found` passes through from the hub); require its `kv` facet
  * (`facet-unsupported`); open the unit projected from the spec (backend
- * `version-mismatch`/`malformed-medium` pass through); load and validate
- * every stored record against the spec's zod schemas (`invalid-record`
- * with the offending table and key — unless the spec declares
+ * `version-mismatch`/`malformed-medium` pass through); read what the spec's
+ * residency asks for — an eager domain loads and validates every stored
+ * record against the spec's zod schemas (`invalid-record` with the
+ * offending table and key — unless the spec declares
  * `invalidRecords: 'backup-and-skip'` and the unit can move documents aside, in
- * which case the failing record is backed up, logged, and skipped);
+ * which case the failing record is backed up, logged, and skipped), while a
+ * lazy domain (`residency: 'lazy'`) materializes no table at all and reads
+ * its global slot alone (`KvUnit.readGlobal`), never `KvUnit.loadAll`;
  * construct the domain.
  *
  * Lifecycle: the CALLER owns the returned handle and closes it via

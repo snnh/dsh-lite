@@ -85,6 +85,27 @@ interface DomainSpec {
    * to the rejecting default. The global slot always rejects.
    */
   readonly invalidRecords?: 'backup-and-skip'
+  /**
+   * Whether an open domain keeps its tables resident in memory. Absent (the
+   * default), the domain is `'eager'`: `open` materializes every declared
+   * table through `KvUnit.loadAll` and the table handle serves synchronous
+   * reads from that memory — whole-table iteration included (`entries`,
+   * `keys`, `size`), which is what a domain that scans or diffs its tables
+   * needs.
+   *
+   * `'lazy'` is the opt-in for a domain that only ever performs point
+   * lookups: `open` materializes nothing (it reads the global slot alone),
+   * `KvUnit.readRecord` serves each read, and every read re-validates the
+   * record it fetched, so per-record schema validation happens at read time
+   * instead of at open. What a lazy domain gives up is exactly what residency
+   * bought: no whole-table iteration and no synchronous `get` — its table
+   * handle is a `LazyKvTable` (`read`/`put`/`delete`/`update`) — and an
+   * unread invalid record no longer fails the whole open, it fails the read
+   * that meets it (under the {@link invalidRecords} policy). Choose it for
+   * domains whose resident set would otherwise dominate memory, typically
+   * because the data is large, sparse, or disposable.
+   */
+  readonly residency?: 'eager' | 'lazy'
   /** Optional global singleton slot. */
   readonly global?: DomainGlobalSpec<unknown>
   /** Table declarations keyed by table name; each name must match `UNIT_NAME_RE`. */
@@ -92,7 +113,9 @@ interface DomainSpec {
 }
 ```
 
-`defineDomain(spec)` pins the spec's literal types and fails loud at the owner's module load, before any medium is touched: a domain or table name outside `UNIT_NAME_RE`, a version that is not a non-negative integer, or a global schema that accepts `null` all throw (`null` is the medium's "never written" sentinel, so a stored nullable global could not round-trip). `domainTable<K, V>(schema)` declares one table with a phantom compile-time key type (typically a [branded id](core.md#branded-ids)); `descriptorOf(spec)` projects the backend-facing unit descriptor.
+`defineDomain(spec)` pins the spec's literal types and fails loud at the owner's module load, before any medium is touched: a domain or table name outside `UNIT_NAME_RE`, a version that is not a non-negative integer, a `layout` or `residency` outside its two values, or a global schema that accepts `null` all throw (`null` is the medium's "never written" sentinel, so a stored nullable global could not round-trip). `residency` is the spec's one memory knob: absent means `'eager'` (every table resident, today's behaviour), `'lazy'` opts out of materialization for a domain that only ever looks records up by key ([The open domain](#the-open-domain)). `domainTable<K, V>(schema)` declares one table with a phantom compile-time key type (typically a [branded id](core.md#branded-ids)); `descriptorOf(spec)` projects the backend-facing unit descriptor.
+
+<a id="the-open-domain"></a>
 
 ## The open domain
 
@@ -105,11 +128,16 @@ interface Domain<S extends DomainSpec> {
   readonly global: DomainGlobalHandleOf<S>
   /**
    * Resolve one declared table handle. Handles are stable — repeated calls
-   * return the same instance.
+   * return the same instance. Which shape a handle has follows the spec's
+   * `residency`: only `residency: 'lazy'` yields a {@link LazyKvTable}
+   * (durable point reads, nothing resident); every other domain yields the
+   * fully resident {@link KvTable}.
    * @param name - Declared table name.
    * @returns the typed table handle.
    */
-  table<N extends keyof S['tables'] & string>(name: N): KvTable<TableKeyOf<S, N>, TableValueOf<S, N>>
+  table<N extends keyof S['tables'] & string>(name: N): S extends { readonly residency: 'lazy' }
+    ? LazyKvTable<TableKeyOf<S, N>, TableValueOf<S, N>>
+    : KvTable<TableKeyOf<S, N>, TableValueOf<S, N>>
 
   /**
    * Close this domain: reject new writes immediately, drain already-queued
@@ -123,11 +151,13 @@ interface Domain<S extends DomainSpec> {
 }
 ```
 
-Reads are synchronous from authoritative in-memory state: `KvTable` exposes `get`/`entries`/`keys`/`size` (snapshot iterators that stay stable while queued writes land), and the global handle's `get()` serves the spec's `initial` until the first `set` materializes the slot on the medium. Every write — `put`, `delete`, `update`, `global.set` — queues on one per-domain chain and reaches backend durability first, then mutates memory, then emits `domain/changed`; a rejected backend write leaves memory untouched, so reads never diverge from the medium. `update(key, fn)` is an atomic read-modify-write at its chain slot (a missing key rejects `missing-key`); `delete` of an absent key resolves `false` with no write and no event. Returned records are the stored objects themselves, not copies — replace via `put`/`update`, never mutate in place.
+Reads are synchronous from authoritative in-memory state: `KvTable` exposes `get`/`entries`/`keys`/`size` (snapshot iterators that stay stable while queued writes land), and the global handle's `get()` serves the spec's `initial` until the first `set` materializes the slot on the medium. Every write — `put`, `delete`, `update`, `global.set` — queues on one per-domain chain and reaches backend durability first, then mutates memory, then emits `domain/changed`; a rejected backend write leaves memory untouched, so reads never diverge from the medium. `update(key, fn)` is an atomic read-modify-write at its chain slot (a missing key rejects `missing-key`); `delete` of an absent key resolves `false` with no write and no event. Returned records are the stored objects themselves, not copies — replace via `put`/`update`, never mutate in place. The global slot is residency-independent: it is read once at open and served from memory either way.
+
+A `residency: 'lazy'` domain holds no table at all. `open` materializes nothing (it reads the global slot alone), and `Domain.table()` returns a `LazyKvTable` — `read`/`put`/`delete`/`update` — instead of the resident `KvTable`. `read(key)` is a durable point read through `KvUnit.readRecord` whose record is re-validated on every call, so a record that fails its schema is reported when a read meets it rather than at open, under the same `invalidRecords` policy (`'backup-and-skip'` applies per record here too). The surface is smaller on purpose: a synchronous `get`, and `entries`/`keys`/`size`, would promise a record or a whole table the domain does not hold, so a lazy handle carries none of them. Writes are unchanged — same write chain, same durability-before-publish order, same `domain/changed` events — and so is the rest of the contract: absent content reads `undefined`, `update` on a missing key rejects `missing-key`, and `delete` still reports prior existence.
 
 ## The domain facility: `ctx.storageDomain`
 
-`DomainFacility` ([signatures](#ctxstoragedomain--domainfacility)) opens declared domains over routed backends. Routing is the domain plugin's configuration, never the hub's: `backend` names the required default route and `routes` overrides it per domain name. `open(spec)` runs a strict sequence, each step failing the whole call: it rejects a name already open or still closing (`already-open`), resolves the route (`backend-not-found`), requires the backend's `kv` facet (`facet-unsupported`), opens the unit (backend `version-mismatch`/`malformed-medium` pass through), and validates every stored record and global against the spec's zod schemas (`invalid-record` with the offending table and key). The caller owns the returned handle and releases it with `Domain.close()`; domains still open when the plugin unmounts are closed by the facility, and a closed domain's name frees for reopening only after teardown fully completes. `get(name)` is an untyped diagnostic lookup onto the package-private `DomainImpl` runtime behind every typed handle; `closeAll()` is the unmount path.
+`DomainFacility` ([signatures](#ctxstoragedomain--domainfacility)) opens declared domains over routed backends. Routing is the domain plugin's configuration, never the hub's: `backend` names the required default route and `routes` overrides it per domain name. `open(spec)` runs a strict sequence, each step failing the whole call: it rejects a name already open or still closing (`already-open`), resolves the route (`backend-not-found`), requires the backend's `kv` facet (`facet-unsupported`), opens the unit (backend `version-mismatch`/`malformed-medium` pass through), and reads what the spec's residency asks of it — an eager domain loads and validates every stored record and the global against the spec's zod schemas (`invalid-record` with the offending table and key), while a lazy one reads its global slot alone and never calls `KvUnit.loadAll`. The caller owns the returned handle and releases it with `Domain.close()`; domains still open when the plugin unmounts are closed by the facility, and a closed domain's name frees for reopening only after teardown fully completes. `get(name)` is an untyped diagnostic lookup onto the package-private `DomainImpl` runtime behind every typed handle; `closeAll()` is the unmount path.
 
 ## The change event: `domain/changed`
 
@@ -198,11 +228,14 @@ The mounted domain facility. Opens declared domains over routed backends; one fa
  * name that is already open (`already-open`); resolve the backend route
  * (`backend-not-found` passes through from the hub); require its `kv` facet
  * (`facet-unsupported`); open the unit projected from the spec (backend
- * `version-mismatch`/`malformed-medium` pass through); load and validate
- * every stored record against the spec's zod schemas (`invalid-record`
- * with the offending table and key — unless the spec declares
+ * `version-mismatch`/`malformed-medium` pass through); read what the spec's
+ * residency asks for — an eager domain loads and validates every stored
+ * record against the spec's zod schemas (`invalid-record` with the
+ * offending table and key — unless the spec declares
  * `invalidRecords: 'backup-and-skip'` and the unit can move documents aside, in
- * which case the failing record is backed up, logged, and skipped);
+ * which case the failing record is backed up, logged, and skipped), while a
+ * lazy domain (`residency: 'lazy'`) materializes no table at all and reads
+ * its global slot alone (`KvUnit.readGlobal`), never `KvUnit.loadAll`;
  * construct the domain.
  *
  * Lifecycle: the CALLER owns the returned handle and closes it via

@@ -2,6 +2,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { MessageId } from '@deepseek-ai/dsh-llm/brand'
+import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { ScheduleId, ScheduleInputError, createAfterScheduleRecord } from '../src/domain.ts'
 import { scheduleDomain, type ScheduleTask } from '../src/storage.ts'
@@ -129,7 +130,9 @@ it.each(['every', 'daily'] as const)('retains real %s receipts and immutable pro
     messageId: followup.mock.calls[0]![0].id, prompt: 'Original prompt',
   }
   expect(JSON.stringify(followup.mock.calls[0]![0].content)).toContain(firstReceipt.prompt)
-  const table = first.ctx.storageDomain.get('schedule')!.table('tasks')
+  // The diagnostic lookup is untyped: this domain is eager (`KvTable`), so the
+  // resident-table view is the one to name here.
+  const table = first.ctx.storageDomain.get('schedule')!.table('tasks') as KvTable<string, ScheduleTask>
   const task = table.get(record.id) as ScheduleTask
   // Timing edits cannot change prompts; direct storage mutation exercises retention of older prompt snapshots.
   await table.put(record.id, { ...task, record: { ...task.record, prompt: 'Next prompt' } })

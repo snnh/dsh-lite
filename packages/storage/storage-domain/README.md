@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-Use this package to declare schema-validated key-value domains and open them through `ctx.storageDomain` over a configured storage backend. Reads return synchronously from validated in-memory state, while each write becomes durable before it resolves and emits `domain/changed` in order. Product packages use domain handles instead of accessing storage backends directly. This host-side state does not add tools, prompts, or session events, so it remains invisible to the model and agent loop.
+Use this package to declare schema-validated key-value domains and open them through `ctx.storageDomain` over a configured storage backend. Reads return synchronously from validated in-memory state — unless the domain declares `residency: 'lazy'`, which reads the medium per point lookup (see *Lazy residency* below) — while each write becomes durable before it resolves and emits `domain/changed` in order. Product packages use domain handles instead of accessing storage backends directly. This host-side state does not add tools, prompts, or session events, so it remains invisible to the model and agent loop.
 
 ## Table of Contents
 
@@ -33,7 +33,7 @@ Choose it for any host-side data that must survive restarts and stay valid again
 
 ### Declaring a domain
 
-The owning package declares the domain once with `defineDomain` — name, version, and zod record schemas — and exports it. `defineDomain` fails loudly at module load on a bad name, a version that is not a non-negative integer, or a global schema that accepts `null`.
+The owning package declares the domain once with `defineDomain` — name, version, and zod record schemas — and exports it. `defineDomain` fails loudly at module load on a bad name, a version that is not a non-negative integer, a `layout`/`residency` outside its accepted values, or a global schema that accepts `null`.
 
 ```text
 // Owning package, once:
@@ -57,6 +57,26 @@ domain.table('workspaces').update(id, (r) => ({ ...r, path: newPath }))
 
 The caller owns the handle's lifecycle and releases it with `domain.close()` when the feature shuts down (typically its own `ctx.effect` disposer); domains still open when the plugin unmounts are closed by the facility.
 
+### Lazy residency: point lookups without materialization
+
+A domain that only ever reads records by key can declare `residency: 'lazy'` and skip materialization entirely: `open` materializes no table (it reads the global slot alone), every table stays on the medium, and `Domain.table()` returns a `LazyKvTable` whose `read(key)` is a durable point read, re-validated against the table's schema on every call.
+
+```text
+const pointSpec = defineDomain({
+  name: 'point_lookup',
+  version: 1,
+  residency: 'lazy', // open materializes no table
+  tables: { entries: domainTable(entrySchema) },
+})
+
+const domain = await ctx.storageDomain.open(pointSpec)
+const entries = domain.table('entries') // LazyKvTable: read/put/delete/update
+await entries.put(id, record)
+const record = await entries.read(id) // durable point read, schema-checked per call
+```
+
+The trade is deliberate: a lazy handle has no synchronous `get`, and no `entries`/`keys`/`size`, because a synchronous read of a record that is not resident could only be a lie — whole-table iteration is what an eager domain is for. Writes are unchanged: same write chain, same durability before resolution, same `domain/changed` events. So is validation, only its timing moves: a record that fails its schema is reported when a read meets it (`invalid-record`) instead of failing the open, under the same `invalidRecords` policy.
+
 ### Routing domains to backends
 
 The domain plugin's configuration decides which backend serves which domain — never the hub. `backend` names the default route; `routes` overrides it per domain name. A route naming an unregistered backend fails loudly at open with `backend-not-found`.
@@ -70,7 +90,7 @@ The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-a
 
 ### Observable behavior and failures
 
-Every write resolves only after the backend acknowledges durability, and each emits one `domain/changed` event in write order. Failures carry stable `DomainError` codes: `already-open` (the name is open or still closing), `facet-unsupported` (the routed backend serves no `kv` facet), `invalid-record` (a stored record or global fails its schema, naming the table and key), `missing-key` (an `update` on an absent record), and `closed` (any use after close). Backend failures such as `version-mismatch` pass through unchanged.
+Every write resolves only after the backend acknowledges durability, and each emits one `domain/changed` event in write order. Failures carry stable `DomainError` codes: `already-open` (the name is open or still closing), `facet-unsupported` (the routed backend serves no `kv` facet), `invalid-record` (a stored record or global fails its schema, naming the table and key — reported at open for an eager domain, and when a read meets the record in a lazy one), `missing-key` (an `update` on an absent record), and `closed` (any use after close). Backend failures such as `version-mismatch` pass through unchanged.
 
 -----
 
@@ -85,13 +105,13 @@ The domain layer is a single implementation, not an abstracted seam: consumers d
 ### Design concept
 
 - **The spec object is the single source of truth.** `defineDomain` pins the spec's literal types and validates its fields at the owning package's module load, before any medium is touched. Record schemas are zod, so `z.infer` avoids duplicating consumer types; plugin `Config` stays schemastery.
-- **Memory is authoritative; the medium is the durable projection.** Reads are synchronous from validated in-memory state. Every write queues on one per-domain write chain: backend durability first, then memory mutation, then `domain/changed` — a rejected backend write leaves memory untouched, so reads never diverge from the medium.
+- **Residency decides what is authoritative.** An eager domain keeps every table in memory and reads synchronously from it; a lazy one keeps nothing resident, so `read` goes to the medium and re-validates what it fetched. Either way every write queues on one per-domain write chain: backend durability first, then the new value is published (to memory for an eager domain, to the medium for a lazy one), then `domain/changed` — a rejected backend write leaves the readable state untouched, so reads never diverge from the medium.
 - **One write chain per domain.** `put`, `delete`, `update`, and `global.set` all queue on it; `update`'s transform runs at its chain slot, so concurrent updates never interleave. Records are plain immutable data — returned values are the stored objects themselves and must not be mutated in place.
 - **Writes emit after the commit point.** `domain/changed` is a notification, not a transaction participant: a throwing listener is contained with a logged warning rather than rejecting the already-durable write.
 
 ### Open sequence
 
-`DomainFacility.open(spec)` runs a strict sequence, each step failing the whole call: reject a name already open or still closing (`already-open`); resolve the route (`backend-not-found`); require the `kv` facet (`facet-unsupported`); open the unit (backend `version-mismatch`/`malformed-medium` pass through); load and validate every stored record and the global against the spec's schemas (`invalid-record`); construct the domain. The caller owns the handle; the facility closes any domain left open when it unmounts, and a closed domain's name frees for reopening only after teardown completes.
+`DomainFacility.open(spec)` runs a strict sequence, each step failing the whole call: reject a name already open or still closing (`already-open`); resolve the route (`backend-not-found`); require the `kv` facet (`facet-unsupported`); open the unit (backend `version-mismatch`/`malformed-medium` pass through); read what the spec's residency asks of the unit — an eager domain loads and validates every stored record and the global against the spec's schemas (`invalid-record`), a lazy one reads its global slot alone and never calls `loadAll`; construct the domain. The caller owns the handle; the facility closes any domain left open when it unmounts, and a closed domain's name frees for reopening only after teardown completes.
 
 ### Source map
 
@@ -99,7 +119,7 @@ The domain layer is a single implementation, not an abstracted seam: consumers d
 |---|---|
 | [`src/index.ts`](src/index.ts) | Plugin entry: `DomainFacility`, routing, `Config`, form mounting |
 | [`src/spec.ts`](src/spec.ts) | Domain declarations: `defineDomain`, `domainTable`, descriptor projection |
-| [`src/domain.ts`](src/domain.ts) | Open-domain runtime: write chain, table and global handles, close |
+| [`src/domain.ts`](src/domain.ts) | Open-domain runtime: write chain, resident and lazy table handles, global handle, close |
 | [`src/events.ts`](src/events.ts) | The `domain/changed` event vocabulary |
 | [`src/error.ts`](src/error.ts) | `DomainError` codes |
 

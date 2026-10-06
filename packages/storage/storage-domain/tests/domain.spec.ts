@@ -2,10 +2,11 @@ import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { z } from 'zod'
 import Storage, { storageBackendServiceKey } from '@deepseek-ai/dsh-storage'
+import type { StorageBackend } from '@deepseek-ai/dsh-storage'
 import { apply, defineDomain, descriptorOf, DomainFacility, domainTable } from '../src/index.ts'
 import type { Config } from '../src/index.ts'
 import type { DomainChanged } from '../src/events.ts'
-import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
+import { backupCapableBackend, MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
 
 const itemSchema = z.object({ label: z.string(), count: z.number().int() })
 type Item = z.infer<typeof itemSchema>
@@ -26,10 +27,14 @@ const bareSpec = defineDomain({
 })
 
 /** Boot a context with the storage hub, one memory backend, and a facility over it. */
-async function harness(options?: { pool?: MemoryMediaPool; config?: Partial<Config> }) {
+async function harness(options?: {
+  pool?: MemoryMediaPool
+  config?: Partial<Config>
+  backend?: StorageBackend
+}) {
   const ctx = new Context()
   await ctx.plugin(Storage)
-  const backend = new MemoryStorageBackend(options?.pool)
+  const backend = options?.backend ?? new MemoryStorageBackend(options?.pool)
   ctx.storage.backend.register('memory', backend)
   const facility = new DomainFacility(ctx, { backend: 'memory', routes: {}, ...options?.config })
   ctx.storage.mount('domain', facility)
@@ -178,6 +183,36 @@ describe('DomainFacility.open', () => {
       code: 'invalid-record',
       detail: { table: 'items', key: 'bad' },
     })
+  })
+
+  it('backs up and skips an invalid stored record when the unit can move documents', async () => {
+    // The same policy under a backend that CAN move the document aside: the
+    // open continues without the rejected record and logs what moved where.
+    const salvageSpec = defineDomain({
+      name: 'salvage',
+      version: 1,
+      invalidRecords: 'backup-and-skip',
+      tables: { items: domainTable<string, Item>(itemSchema) },
+    })
+    const pool = new MemoryMediaPool()
+    const stored = { label: 'x', count: 'NaN' }
+    pool.media.set('salvage', {
+      tables: new Map([['items', new Map<string, unknown>([['good', { label: 'x', count: 1 }], ['bad', stored]])]]),
+      global: null,
+    })
+    const { backend, moved } = backupCapableBackend(pool)
+    const { ctx, facility } = await harness({ backend })
+    const errors = vi.spyOn(ctx.logger, 'error')
+
+    const domain = await facility.open(salvageSpec)
+    expect([...domain.table('items').keys()]).toEqual(['good'])
+    expect(moved).toEqual([['items', 'bad']])
+    expect(errors).toHaveBeenCalledWith(
+      "domain 'salvage': stored record 'bad' in table 'items' failed schema validation; "
+      + `moved to 'backup/items/bad.json' and treated as absent. Cause: ${String(itemSchema.safeParse(stored).error)}`,
+    )
+    // The rejected record is gone from the medium, not merely from memory.
+    expect(pool.media.get('salvage')!.tables.get('items')!.has('bad')).toBe(false)
   })
 
   it('rejects a stored global that fails its schema with the global marker', async () => {

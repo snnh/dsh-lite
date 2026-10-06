@@ -65,6 +65,27 @@ export interface DomainSpec {
    * to the rejecting default. The global slot always rejects.
    */
   readonly invalidRecords?: 'backup-and-skip'
+  /**
+   * Whether an open domain keeps its tables resident in memory. Absent (the
+   * default), the domain is `'eager'`: `open` materializes every declared
+   * table through `KvUnit.loadAll` and the table handle serves synchronous
+   * reads from that memory — whole-table iteration included (`entries`,
+   * `keys`, `size`), which is what a domain that scans or diffs its tables
+   * needs.
+   *
+   * `'lazy'` is the opt-in for a domain that only ever performs point
+   * lookups: `open` materializes nothing (it reads the global slot alone),
+   * `KvUnit.readRecord` serves each read, and every read re-validates the
+   * record it fetched, so per-record schema validation happens at read time
+   * instead of at open. What a lazy domain gives up is exactly what residency
+   * bought: no whole-table iteration and no synchronous `get` — its table
+   * handle is a `LazyKvTable` (`read`/`put`/`delete`/`update`) — and an
+   * unread invalid record no longer fails the whole open, it fails the read
+   * that meets it (under the {@link invalidRecords} policy). Choose it for
+   * domains whose resident set would otherwise dominate memory, typically
+   * because the data is large, sparse, or disposable.
+   */
+  readonly residency?: 'eager' | 'lazy'
   /** Optional global singleton slot. */
   readonly global?: DomainGlobalSpec<unknown>
   /** Table declarations keyed by table name; each name must match `UNIT_NAME_RE`. */
@@ -130,6 +151,14 @@ export function defineDomain<S extends DomainSpec>(spec: S): S {
     const policy: string = spec.invalidRecords
     if (policy !== 'backup-and-skip') {
       throw new Error(`domain '${spec.name}' invalidRecords must be 'backup-and-skip' when present, got ${policy}`)
+    }
+  }
+  if (spec.residency !== undefined) {
+    // Runtime boundary: as with `layout`, the union type is compile-time
+    // only — a spec built from config could carry any value.
+    const residency: string = spec.residency
+    if (residency !== 'eager' && residency !== 'lazy') {
+      throw new Error(`domain '${spec.name}' residency must be 'eager' or 'lazy', got ${residency}`)
     }
   }
   for (const table of Object.keys(spec.tables)) {

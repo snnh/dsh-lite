@@ -1,16 +1,26 @@
 /**
- * Runtime of one open domain: authoritative in-memory state, the single
- * per-domain write chain, and change-event emission. Reads are synchronous
- * from memory; every write queues on the chain, awaits backend durability
- * FIRST, then mutates memory, then emits `domain/changed` — a rejected
- * backend write leaves memory untouched (no divergence between reads and the
- * medium), and events carry values that equal the in-memory state at
+ * Runtime of one open domain: authoritative state, the single per-domain
+ * write chain, and change-event emission. An eager domain (the default) keeps
+ * every table resident and serves reads synchronously from that memory; a
+ * lazy domain holds no record at all and serves reads as durable point reads.
+ * Either way every write queues on the chain, awaits backend durability
+ * FIRST, then publishes the new value (to memory for an eager domain, to the
+ * medium for a lazy one), then emits `domain/changed` — a rejected backend
+ * write leaves the readable state untouched (no divergence between reads and
+ * the medium), and events carry values that equal the readable state at
  * emission, in write order.
+ *
+ * This module also owns the durable-boundary validation pair that the runtime
+ * and the facility share: {@link parseRecord} (one zod parse, failure
+ * translated to `invalid-record` with its location) and
+ * {@link skipInvalidRecord} (the spec's `invalidRecords` policy applied to one
+ * failing record).
  * @module @deepseek-ai/dsh-storage-domain/src/domain
  */
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { KvUnit } from '@deepseek-ai/dsh-storage'
+import type { ZodType } from 'zod'
 import { DomainError } from './error.ts'
 import type { DomainSpec, DomainGlobalSpec, TableKeyOf, TableValueOf } from './spec.ts'
 import type { DomainChanged } from './events.ts'
@@ -35,9 +45,10 @@ export interface DomainGlobal<G> {
 }
 
 /**
- * Handle on one declared table. Records are plain immutable data: returned
- * values are the stored objects themselves (no defensive copies) and must not
- * be mutated in place — replace via `put`/`update`.
+ * Handle on one declared table of a table-resident (eager) domain. Records
+ * are plain immutable data: returned values are the stored objects themselves
+ * (no defensive copies) and must not be mutated in place — replace via
+ * `put`/`update`.
  */
 export interface KvTable<K extends string, V> {
   /**
@@ -89,6 +100,64 @@ export interface KvTable<K extends string, V> {
   update(key: K, fn: (current: V) => V): Promise<V>
 }
 
+/**
+ * Handle on one declared table of a lazy-residency domain
+ * (`residency: 'lazy'`). Nothing is resident: every read is a durable point
+ * read through the unit and re-validates the record it just fetched.
+ *
+ * The surface is deliberately smaller than {@link KvTable}. A synchronous
+ * `get`, and `entries`/`keys`/`size`, all promise the record, the whole
+ * table, or its membership from memory — a lazy domain holds none of that, so
+ * a synchronous read of a non-resident record could only return a lie (or a
+ * value a queued write is about to replace). Point reads are asynchronous
+ * precisely because the answer lives on the medium.
+ *
+ * Records are plain immutable data: returned values are the stored objects
+ * themselves (no defensive copies) and must not be mutated in place — replace
+ * via `put`/`update`.
+ */
+export interface LazyKvTable<K extends string, V> {
+  /**
+   * Read one record durably from the medium, validated against the table's
+   * schema. Absent content — an unwritten key, an undeclared table, or a
+   * record the unit cannot read — resolves `undefined`; a stored record that
+   * fails the schema follows the spec's `invalidRecords` policy instead
+   * (rejecting `invalid-record` by default, backed up and read as absent
+   * under `'backup-and-skip'`).
+   * @param key - Record key.
+   * @returns the validated record, or `undefined` when absent.
+   */
+  read(key: K): Promise<V | undefined>
+
+  /**
+   * Insert or overwrite one record durably. Queued on the domain's write
+   * chain like every other write.
+   * @param key - Record key.
+   * @param value - The full new record (no partial merge).
+   * @returns resolution after durability and event emission.
+   */
+  put(key: K, value: V): Promise<void>
+
+  /**
+   * Delete one record durably.
+   * @param key - Record key.
+   * @returns `true` when the record existed, `false` when it was already
+   * absent (no write and no event in that case). Existence is decided at the
+   * job's chain slot, so an earlier queued `put` of the same key is observed.
+   */
+  delete(key: K): Promise<boolean>
+
+  /**
+   * Atomic read-modify-write on the domain's write chain: the record is
+   * re-read from the medium at this job's queue slot, so concurrent updates
+   * never interleave.
+   * @param key - Record key; a missing key rejects with `missing-key`.
+   * @param fn - Synchronous pure transform from current to next record.
+   * @returns the stored next record.
+   */
+  update(key: K, fn: (current: V) => V): Promise<V>
+}
+
 /** Global handle of a spec: typed when declared, `never` (inaccessible) when not. */
 export type DomainGlobalHandleOf<S extends DomainSpec> =
   S extends { readonly global: DomainGlobalSpec<infer G> } ? DomainGlobal<G> : never
@@ -101,11 +170,16 @@ export interface Domain<S extends DomainSpec> {
   readonly global: DomainGlobalHandleOf<S>
   /**
    * Resolve one declared table handle. Handles are stable — repeated calls
-   * return the same instance.
+   * return the same instance. Which shape a handle has follows the spec's
+   * `residency`: only `residency: 'lazy'` yields a {@link LazyKvTable}
+   * (durable point reads, nothing resident); every other domain yields the
+   * fully resident {@link KvTable}.
    * @param name - Declared table name.
    * @returns the typed table handle.
    */
-  table<N extends keyof S['tables'] & string>(name: N): KvTable<TableKeyOf<S, N>, TableValueOf<S, N>>
+  table<N extends keyof S['tables'] & string>(name: N): S extends { readonly residency: 'lazy' }
+    ? LazyKvTable<TableKeyOf<S, N>, TableValueOf<S, N>>
+    : KvTable<TableKeyOf<S, N>, TableValueOf<S, N>>
 
   /**
    * Close this domain: reject new writes immediately, drain already-queued
@@ -128,20 +202,89 @@ interface TableHost {
   assertReadable(): void
   /** Emit `domain/changed` for one durably landed write. */
   emitChanged(change: DomainChanged): void
+  /** Emit the `domain/changed` `put` notification of one durably landed record. */
+  emitPut(table: string, key: string, value: unknown): void
+  /** Apply the spec's invalid-record policy to one record that failed its schema. */
+  skipInvalidRecord(table: string, key: string, error: unknown): Promise<void>
 }
 
 const noop = () => {}
 
 /**
+ * Run one zod parse, translating failure to `invalid-record` with its
+ * location. The single construction point of that error: the eager open and
+ * the lazy read path both validate through here, so both report a failure
+ * identically.
+ * @param domain - Owning domain name.
+ * @param table - Table holding the record; `''` for the global singleton.
+ * @param key - Record key; `''` for the global singleton.
+ * @param parse - The throwing parse to run.
+ * @returns whatever `parse` returns.
+ */
+export function parseRecord<T>(domain: string, table: string, key: string, parse: () => T): T {
+  try {
+    return parse()
+  } catch (error) {
+    const slot = table === '' ? 'global' : `record '${key}' in table '${table}'`
+    throw new DomainError(
+      'invalid-record',
+      `domain '${domain}': stored ${slot} does not match its schema`,
+      { detail: { table, key }, cause: error },
+    )
+  }
+}
+
+/**
+ * Apply the spec's `invalidRecords` policy to one record that failed its
+ * schema. With `'backup-and-skip'` and a unit that can move documents aside
+ * (`KvUnit.backupRecord`), the record's document is moved out of the readable
+ * set, the concrete failure is logged, and the caller continues with that
+ * record absent; every other case rethrows the `invalid-record` error, so a
+ * backend that cannot move a document keeps the loud path.
+ * @param ctx - Context carrying the logger.
+ * @param spec - The domain declaration carrying the policy and the name.
+ * @param unit - The opened unit; its optional `backupRecord` decides whether the policy can apply.
+ * @param table - Table holding the failing record.
+ * @param key - Key of the failing record.
+ * @param error - The `invalid-record` error {@link parseRecord} threw.
+ * @returns resolution once the record was moved aside and logged.
+ */
+export async function skipInvalidRecord(
+  ctx: Context,
+  spec: DomainSpec,
+  unit: KvUnit,
+  table: string,
+  key: string,
+  error: unknown,
+): Promise<void> {
+  if (spec.invalidRecords !== 'backup-and-skip' || unit.backupRecord === undefined) throw error
+  const moved = await unit.backupRecord(table, key)
+  // parseRecord always wraps the zod failure as the cause.
+  ctx.logger.error(
+    `domain '${spec.name}': stored record '${key}' in table '${table}' failed schema validation; `
+    + `moved to '${moved}' and treated as absent. Cause: ${String((error as DomainError).cause)}`,
+  )
+}
+
+/** Throw the `missing-key` error of an `update` whose target record is absent. */
+function missingKey(domain: string, table: string, key: string): never {
+  throw new DomainError(
+    'missing-key',
+    `domain '${domain}' table '${table}' has no record '${key}' to update`,
+  )
+}
+
+/**
  * The single domain implementation behind the {@link Domain} interface. The
- * facility constructs it from a validated `loadAll` snapshot and erases it to
- * `Domain<S>`; nothing outside this package constructs one.
+ * facility constructs it from a validated `loadAll` snapshot (an eager
+ * domain) or from the spec alone (a lazy one) and erases it to `Domain<S>`;
+ * nothing outside this package constructs one.
  */
 export class DomainImpl {
   /** Domain name from the spec. */
   readonly name: string
 
-  private readonly tables = new Map<string, KvTableImpl<string, unknown>>()
+  private readonly tables = new Map<string, KvTable<string, unknown> | LazyKvTable<string, unknown>>()
   private globalValue: unknown
   private readonly globalHandle?: DomainGlobal<unknown>
 
@@ -157,9 +300,11 @@ export class DomainImpl {
    * @param ctx - Context that carries `domain/changed` emissions.
    * @param spec - The domain declaration.
    * @param unit - The opened backend unit; this instance owns its lifecycle.
-   * @param records - Validated records from the unit's `loadAll`, one entry
-   * per declared table (empty maps included) — the facility builds it from
-   * the spec, so the entry set IS the table set.
+   * @param records - For an eager domain, the validated records from the
+   * unit's `loadAll`, one entry per declared table (empty maps included) —
+   * the facility builds it from the spec, so the entry set IS the table set.
+   * `undefined` selects lazy residency: no record map is held, and every
+   * table handle reads the medium.
    * @param globalValue - Validated stored global, or the spec's `initial`
    * when the medium held none; `undefined` when the spec declares no global.
    * @param onClosed - Facility hook run once after teardown completes; frees
@@ -169,7 +314,7 @@ export class DomainImpl {
     private readonly ctx: Context,
     spec: DomainSpec,
     private readonly unit: KvUnit,
-    records: Map<string, Map<string, unknown>>,
+    records: Map<string, Map<string, unknown>> | undefined,
     globalValue: unknown,
     private readonly onClosed: () => void,
   ) {
@@ -180,9 +325,21 @@ export class DomainImpl {
       enqueue: job => this.enqueue(job),
       assertReadable: () => { this.assertReadable() },
       emitChanged: (change) => { this.emitChanged(change) },
+      emitPut: (table, key, value) => {
+        this.emitChanged({ domain: spec.name, table, key, operation: 'put', value })
+      },
+      skipInvalidRecord: (table, key, error) => skipInvalidRecord(this.ctx, spec, unit, table, key, error),
     }
-    for (const [table, tableRecords] of records) {
-      this.tables.set(table, new KvTableImpl(host, table, tableRecords))
+    if (records === undefined) {
+      // Lazy residency: nothing is resident, so the declared tables alone
+      // produce the stable handles and every read goes to the medium.
+      for (const [table, tableSpec] of Object.entries(spec.tables)) {
+        this.tables.set(table, new LazyKvTableImpl(host, table, tableSpec.valueSchema))
+      }
+    } else {
+      for (const [table, tableRecords] of records) {
+        this.tables.set(table, new KvTableImpl(host, table, tableRecords))
+      }
     }
     if (spec.global !== undefined) {
       this.globalValue = globalValue
@@ -210,11 +367,12 @@ export class DomainImpl {
 
   /**
    * Resolve one declared table handle; an undeclared name is a caller bug
-   * and throws.
+   * and throws. The handle's shape follows the spec's `residency` — resident
+   * `KvTable` for an eager domain, `LazyKvTable` for a lazy one.
    * @param name - Declared table name.
    * @returns the stable table handle.
    */
-  table(name: string): KvTable<string, unknown> {
+  table(name: string): KvTable<string, unknown> | LazyKvTable<string, unknown> {
     const table = this.tables.get(name)
     if (table === undefined) {
       throw new Error(`domain '${this.name}' declares no table '${name}'`)
@@ -245,8 +403,9 @@ export class DomainImpl {
 
   /**
    * Dispatch one post-durability change notification, containing observer
-   * failures: the write is already committed (medium and memory both hold
-   * the new state), so a throwing listener must not retroactively reject it.
+   * failures: the write is already committed (the medium — and, for an eager
+   * domain, memory — holds the new state), so a throwing listener must not
+   * retroactively reject it.
    */
   private emitChanged(change: DomainChanged): void {
     try {
@@ -308,7 +467,7 @@ class KvTableImpl<K extends string, V> implements KvTable<K, V> {
     return this.host.enqueue(async () => {
       await this.host.unit.putRecord(this.tableName, key, value)
       this.records.set(key, value)
-      this.emitPut(key, value)
+      this.host.emitPut(this.tableName, key, value)
     })
   }
 
@@ -331,27 +490,77 @@ class KvTableImpl<K extends string, V> implements KvTable<K, V> {
 
   update(key: K, fn: (current: V) => V): Promise<V> {
     return this.host.enqueue(async () => {
-      if (!this.records.has(key)) {
-        throw new DomainError(
-          'missing-key',
-          `domain '${this.host.domainName}' table '${this.tableName}' has no record '${key}' to update`,
-        )
-      }
+      if (!this.records.has(key)) missingKey(this.host.domainName, this.tableName, key)
       const next = fn(this.records.get(key) as V)
       await this.host.unit.putRecord(this.tableName, key, next)
       this.records.set(key, next)
-      this.emitPut(key, next)
+      this.host.emitPut(this.tableName, key, next)
       return next
     })
   }
+}
 
-  private emitPut(key: K, value: V): void {
-    this.host.emitChanged({
-      domain: this.host.domainName,
-      table: this.tableName,
-      key,
-      operation: 'put',
-      value,
+/**
+ * Table handle of a lazy domain: no record map behind it, so `read` is a
+ * durable point read through the unit, validated with the same zod schema the
+ * eager open applies, and every write goes straight to the unit on the
+ * domain's write chain.
+ */
+class LazyKvTableImpl<K extends string, V> implements LazyKvTable<K, V> {
+  constructor(
+    private readonly host: TableHost,
+    private readonly tableName: string,
+    private readonly schema: ZodType<V>,
+  ) {}
+
+  async read(key: K): Promise<V | undefined> {
+    this.host.assertReadable()
+    const raw = await this.host.unit.readRecord(this.tableName, key)
+    if (raw === undefined) return undefined
+    try {
+      return parseRecord(this.host.domainName, this.tableName, key, () => this.schema.parse(raw))
+    } catch (error) {
+      // The eager open's policy, applied per record at read time instead: the
+      // record it rejects is the one this read just met on the medium.
+      await this.host.skipInvalidRecord(this.tableName, key, error)
+      return undefined
+    }
+  }
+
+  put(key: K, value: V): Promise<void> {
+    return this.host.enqueue(async () => {
+      await this.host.unit.putRecord(this.tableName, key, value)
+      this.host.emitPut(this.tableName, key, value)
+    })
+  }
+
+  delete(key: K): Promise<boolean> {
+    return this.host.enqueue(async () => {
+      // Existence is decided at this job's chain slot, not at call time: this
+      // durable read observes every earlier queued put of the key. Raw
+      // presence decides it — a record that fails its schema still exists.
+      if (await this.host.unit.readRecord(this.tableName, key) === undefined) return false
+      await this.host.unit.deleteRecord(this.tableName, key)
+      this.host.emitChanged({
+        domain: this.host.domainName,
+        table: this.tableName,
+        key,
+        operation: 'deleted',
+      })
+      return true
+    })
+  }
+
+  update(key: K, fn: (current: V) => V): Promise<V> {
+    return this.host.enqueue(async () => {
+      // Re-read at this job's chain slot, so concurrent updates never
+      // interleave; the read validates what the transform receives.
+      const current = await this.read(key)
+      if (current === undefined) missingKey(this.host.domainName, this.tableName, key)
+      const next = fn(current)
+      await this.host.unit.putRecord(this.tableName, key, next)
+      this.host.emitPut(this.tableName, key, next)
+      return next
     })
   }
 }

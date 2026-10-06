@@ -124,6 +124,43 @@ class MemoryKvUnit implements KvUnit {
 }
 
 /**
+ * Memory backend whose unit can move a record's document aside, the way a
+ * `per-record` medium does: `backupRecord` records the move and removes the
+ * record from the medium, so reads see it absent and a later write recreates
+ * it. The plain backend omits the member (it has no per-record document), so
+ * the domain layer's `'backup-and-skip'` path needs this wrapper.
+ * @param pool - Media to serve; a fresh private pool when omitted.
+ * @returns the backend, the `backupRecord` calls it recorded, and its pool.
+ */
+export function backupCapableBackend(pool: MemoryMediaPool = new MemoryMediaPool()) {
+  const memory = new MemoryStorageBackend(pool)
+  const moved: Array<[string, string]> = []
+  const backend: StorageBackend = {
+    close: () => memory.close(),
+    kv: {
+      open: async (descriptor: KvUnitDescriptor): Promise<KvUnit> => {
+        const unit = await memory.kv.open(descriptor)
+        return {
+          loadAll: () => unit.loadAll(),
+          readRecord: (table, key) => unit.readRecord(table, key),
+          readGlobal: () => unit.readGlobal(),
+          putRecord: (table, key, value) => unit.putRecord(table, key, value),
+          deleteRecord: (table, key) => unit.deleteRecord(table, key),
+          backupRecord: async (table, key) => {
+            moved.push([table, key])
+            await unit.deleteRecord(table, key)
+            return `backup/${table}/${key}.json`
+          },
+          setGlobal: value => unit.setGlobal(value),
+          close: () => unit.close(),
+        }
+      },
+    },
+  }
+  return { backend, moved, pool }
+}
+
+/**
  * In-memory storage backend with a `kv` facet. Pass a shared
  * {@link MemoryMediaPool} to let a second instance reopen the same media;
  * omit it for a throwaway isolated pool.
