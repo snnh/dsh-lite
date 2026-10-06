@@ -83,7 +83,7 @@ describe('ensureAccessToken', () => {
 
   it('generates, persists, and then reuses one owner-only token', async () => {
     const first = await ensureAccessToken(tokenPath, {})
-    expect(first).toMatch(/^[0-9a-f]{64}$/u)
+    expect(first).toMatch(/^[A-Za-z0-9_-]{43}$/u)
     expect(await readFile(tokenPath, 'utf8')).toBe(`${first}\n`)
     expect((await stat(tokenPath)).mode & 0o777).toBe(0o600)
     expect(await ensureAccessToken(tokenPath, {})).toBe(first)

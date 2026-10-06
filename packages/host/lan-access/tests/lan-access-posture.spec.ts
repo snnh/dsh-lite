@@ -59,7 +59,7 @@ describe('lan-access shipped posture', () => {
     // the token the reachable bind requires.
     expect(existsSync(join(home, 'cordis.patch.yml'))).toBe(false)
     expect(existsSync(join(home, 'profiles'))).toBe(false)
-    expect((readFileSync(tokenPath(), 'utf8')).trim()).toMatch(/^[0-9a-f]{64}$/u)
+    expect((readFileSync(tokenPath(), 'utf8')).trim()).toMatch(/^[A-Za-z0-9_-]{43}$/u)
     expect(statSync(tokenPath()).mode & 0o777).toBe(0o600)
   })
 

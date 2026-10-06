@@ -9,7 +9,7 @@ kind: "package-library"
 
 ## 概述
 
-`@deepseek-ai/dsh-access-token` 解析宿主用于浏览器请求认证的令牌，并让它跨重启存活。每个进程新生成的令牌会让网络地址变得无用：用户打开或分享链接、重启 harness，链接随即失效。解析顺序为 `DSH_ACCESS_TOKEN`、Harness home 下的 `access-token` 文件，最后是重新生成的 32 字节 hex 值并以其属主专用权限写回。删除该文件（或改动环境变量）即在下一次启动时轮换令牌。请把它当作直接的库依赖使用，而不是通过 `cordis.yml`。
+`@deepseek-ai/dsh-access-token` 解析宿主用于浏览器请求认证的令牌，并让它跨重启存活。每个进程新生成的令牌会让网络地址变得无用：用户打开或分享链接、重启 harness，链接随即失效。解析顺序为 `DSH_ACCESS_TOKEN`、Harness home 下的 `access-token` 文件，最后是重新生成的 32 字节 base64url 值（43 个字符，与进程本地 launch token 同形状）并以其属主专用权限写回。删除该文件（或改动环境变量）即在下一次启动时轮换令牌。请把它当作直接的库依赖使用，而不是通过 `cordis.yml`。
 
 ## 目录
 

@@ -88,7 +88,7 @@ describe('lan-access', () => {
     // The shipped posture is the wildcard, and a reachable bind always carries
     // the persistent token.
     expect(provided(ctx)?.host).toBe('0.0.0.0')
-    expect((await readFile(tokenPath, 'utf8')).trim()).toMatch(/^[0-9a-f]{64}$/u)
+    expect((await readFile(tokenPath, 'utf8')).trim()).toMatch(/^[A-Za-z0-9_-]{43}$/u)
   })
 
   it('asks nothing of an explicit loopback bind', async () => {
@@ -102,7 +102,7 @@ describe('lan-access', () => {
     const ctx = newContext()
     await apply(ctx, { host: '0.0.0.0' })
     expect(provided(ctx)?.host).toBe('0.0.0.0')
-    expect((await readFile(tokenPath, 'utf8')).trim()).toMatch(/^[0-9a-f]{64}$/u)
+    expect((await readFile(tokenPath, 'utf8')).trim()).toMatch(/^[A-Za-z0-9_-]{43}$/u)
     expect((await stat(tokenPath)).mode & 0o777).toBe(0o600)
   })
 

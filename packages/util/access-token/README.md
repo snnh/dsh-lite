@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`@deepseek-ai/dsh-access-token` resolves the token a host authenticates browser requests with, and keeps it across restarts. A token generated per process makes a network address useless: the operator opens or shares a link, restarts the harness, and the link is dead. The resolution order is `DSH_ACCESS_TOKEN`, then the harness home's `access-token` file, then a freshly generated 32-byte hex value written back with owner-only permissions. Deleting the file (or changing the environment value) rotates the token on the next start. Use it as a direct library dependency, not through `cordis.yml`.
+`@deepseek-ai/dsh-access-token` resolves the token a host authenticates browser requests with, and keeps it across restarts. A token generated per process makes a network address useless: the operator opens or shares a link, restarts the harness, and the link is dead. The resolution order is `DSH_ACCESS_TOKEN`, then the harness home's `access-token` file, then a freshly generated 32-byte base64url value (43 characters, the shape the process-local launch token uses) written back with owner-only permissions. Deleting the file (or changing the environment value) rotates the token on the next start. Use it as a direct library dependency, not through `cordis.yml`.
 
 ## Table of Contents
 

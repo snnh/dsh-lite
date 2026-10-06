@@ -27,13 +27,18 @@ export const ACCESS_TOKEN_ENV = 'DSH_ACCESS_TOKEN'
 export const ACCESS_TOKEN_FILENAME = 'access-token'
 
 /**
- * Minimum accepted token length, in characters. A generated token is hex of
- * {@link TOKEN_BYTES} random bytes, so the floor only rejects configured values
- * that would be weaker than the generated one.
+ * Minimum accepted token length, in characters. A generated token is base64url
+ * of {@link TOKEN_BYTES} random bytes, so the floor only rejects configured
+ * values that would be weaker than the generated one.
  */
 export const MIN_ACCESS_TOKEN_LENGTH = 32
 
-/** Random bytes behind a generated token; hex encoding doubles the character count. */
+/**
+ * Random bytes behind a generated token. Base64url keeps the result at 43
+ * characters, the shape the process-local launch token already mints: the
+ * access token is the value a printed URL carries, so encoding it differently
+ * would advertise which of the two a given run resolved.
+ */
 const TOKEN_BYTES = 32
 
 /**
@@ -104,7 +109,7 @@ export async function ensureAccessToken(path: string, env: NodeJS.ProcessEnv = p
   if (configured !== undefined) return configured
   const persisted = await readPersistedAccessToken(path)
   if (persisted !== undefined) return persisted
-  const generated = randomBytes(TOKEN_BYTES).toString('hex')
+  const generated = randomBytes(TOKEN_BYTES).toString('base64url')
   await persistAccessToken(path, generated)
   return generated
 }
