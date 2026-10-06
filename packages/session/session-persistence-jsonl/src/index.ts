@@ -359,6 +359,10 @@ class JsonlSessionPersistence extends SessionPersistence {
         cursor: 0,
         materialized: true,
         inheritedEventCount: stored.inheritedEventCount,
+        // A prepared historical generation has no current artifact to resolve
+        // on read, so the handle carries the migrated view. A current-
+        // generation open carries none: its reads resolve the artifact.
+        ...(stored.status === 'prepared' ? { primed: stored } : {}),
       }))
     }
     // A pending entry always belongs to an ACTIVE creator handle (close erases

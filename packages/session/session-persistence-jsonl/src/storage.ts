@@ -72,6 +72,14 @@ export interface StorageHandleState {
   recoveredTail?: SessionEvent[] | undefined
   /** Exact fork-inherited prefix length stored with the log; `0` when unseeded. */
   inheritedEventCount: SessionLogOffset
+  /**
+   * The migrated view of a historical generation that has no current-
+   * generation artifact on disk yet. A read open retains it so reads keep
+   * serving the prepared log; it is dropped as soon as a current generation
+   * appears. A current-generation open never sets it, so the handle pins no
+   * parsed history of its own.
+   */
+  primed?: SessionHandleReadResult | undefined
 }
 
 /**
@@ -124,6 +132,18 @@ export class JsonlSessionHandle implements SessionHandle {
       throw new TypeError(`read length must be a non-negative safe integer, got ${String(length)}`)
     }
     options?.signal?.throwIfAborted()
+    const primed = this.state.primed
+    if (primed !== undefined) {
+      // A prepared historical generation stays this handle's view until a
+      // current-generation artifact appears — this process's own publication
+      // or another writer's. Only then does the newer artifact take over.
+      const primedPath = await this.storage.resolveCurrentLog(this.id, options?.signal)
+      if (primedPath === undefined) {
+        return this.readPrimed(primed, offset, length)
+      }
+      this.state.primed = undefined
+      return await this.readCurrent(primedPath, offset, length, options?.signal)
+    }
     if (this.access === 'write' && !this.state.materialized) {
       return { eventState: 'detached', events: [] }
     }
@@ -135,6 +155,12 @@ export class JsonlSessionHandle implements SessionHandle {
       return { eventState: 'detached', events: [] }
     }
     throw new SessionPersistenceNotFoundError(this.id)
+  }
+
+  /** Read one slice from the prepared historical prefix retained by this handle. */
+  private readPrimed(source: SessionHandleReadResult, offset: number, length: number): SessionHandleReadResult {
+    this.observedLength = Math.max(this.observedLength, source.events.length)
+    return { eventState: source.eventState, events: source.events.slice(offset, offset + length) }
   }
 
   /** Read one current physical generation and enforce this handle's monotonic view. */
