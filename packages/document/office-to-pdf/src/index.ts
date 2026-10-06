@@ -105,6 +105,8 @@ export class OfficeToPdf extends TypertRemoteService {
   private readonly remoteLifetime = new AbortController()
   private readonly remoteRequests = new Set<Promise<RenderedDocumentBytes>>()
   private readonly slots: Slot[] = []
+  /** The kit module, imported once on the first conversion and reused by every slot. */
+  private kit: Promise<typeof import('@deepseek-ai/libreoffice-kit')> | undefined
   private readonly queue: ConversionQueue
   private readonly options: ConverterOptions
 
@@ -238,9 +240,8 @@ export class OfficeToPdf extends TypertRemoteService {
     let directory: string | undefined
     try {
       if (slot.converter === undefined) {
-        // The kit is a large dependency that only a real conversion needs: keep it out of
-        // the boot path and pay for it on the first request.
-        slot.converter = import('@deepseek-ai/libreoffice-kit')
+        this.kit ??= import('@deepseek-ai/libreoffice-kit')
+        slot.converter = this.kit
           .then(module => module.createConverter(this.options))
           .catch((error: unknown) => {
             delete slot.converter
