@@ -1463,7 +1463,7 @@ export interface Config {
 
 ## `@deepseek-ai/dsh-host-lan-access`
 
-- `source`: [`packages/host/lan-access/src/index.ts:155`](../packages/host/lan-access/src/index.ts)
+- `source`: [`packages/host/lan-access/src/index.ts:158`](../packages/host/lan-access/src/index.ts)
 
 ```ts config-catalog
 /** Row configuration surface; see {@link Config.host} for the posture default. */
@@ -2918,7 +2918,7 @@ export interface Config {
 ## `@deepseek-ai/dsh-skill-filesystem`
 
 - `inject`: `skills`
-- `source`: [`packages/skill/skill-filesystem/src/index.ts:49`](../packages/skill/skill-filesystem/src/index.ts)
+- `source`: [`packages/skill/skill-filesystem/src/index.ts:50`](../packages/skill/skill-filesystem/src/index.ts)
 
 ```ts config-catalog
 /** Local filesystem skill provider configuration. */
