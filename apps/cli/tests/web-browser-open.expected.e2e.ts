@@ -31,6 +31,18 @@ interface BrowserOpenRecord {
   dshHomePresent: boolean
 }
 
+/**
+ * Normalize one stderr capture for snapshotting: the shipped posture warning
+ * names the profile patch file inside this run's private root, so that path
+ * becomes a placeholder like the port and token above.
+ * @param stderr - the child's raw stderr.
+ * @param root - this run's private root.
+ * @returns the capture with every occurrence of `root` replaced by `{{temp}}`.
+ */
+function normalizeStderr(stderr: string, root: string): string {
+  return stderr.split(root).join('{{temp}}')
+}
+
 function normalizeLocalUrl(url: string): string {
   return url
     .replace(/:\d+/u, ':{{port}}')
@@ -80,7 +92,7 @@ describe.skipIf(!builtArtifactsExist)('dsh web browser-open assembled snapshot',
       bootManifest: opened.bootManifest,
       apiKeyPresent: opened.apiKeyPresent,
       dshHomePresent: opened.dshHomePresent,
-      stderr: result.stderr,
+      stderr: normalizeStderr(result.stderr, root),
     }).toMatchInlineSnapshot(`
       {
         "apiKeyPresent": false,
@@ -91,7 +103,7 @@ describe.skipIf(!builtArtifactsExist)('dsh web browser-open assembled snapshot',
         "opening": true,
         "readyUrl": "http://127.0.0.1:{{port}}/?token={{token}}",
         "status": 200,
-        "stderr": "",
+        "stderr": "lan-access: bound 0.0.0.0, reachable by anything that can route to it. 0.0.0.0 publishes every IPv4 interface this machine holds, container bridges included, and never an IPv6 one. The persistent access token is the only authenticator on that surface. For a narrower posture set "host: 127.0.0.1" in {{temp}}/.dsh/profiles/web/cordis.patch.yml, or one LAN address such as 192.168.1.5 to publish a single network; --host 127.0.0.1 does the same for one run.",
       }
     `)
   })
@@ -178,14 +190,14 @@ describe.skipIf(!builtArtifactsExist)('dsh web browser-open assembled snapshot',
       opening: result.stdout.includes(openingMessage),
       readyUrl: readyUrl === undefined ? undefined : normalizeLocalUrl(readyUrl),
       opened: result.stdout.includes('dsh browser-open: '),
-      stderr: result.stderr,
+      stderr: normalizeStderr(result.stderr, root),
     }).toMatchInlineSnapshot(`
       {
         "exitCode": 0,
         "opened": false,
         "opening": false,
         "readyUrl": "http://127.0.0.1:{{port}}/?token={{token}}",
-        "stderr": "",
+        "stderr": "lan-access: bound 0.0.0.0, reachable by anything that can route to it. 0.0.0.0 publishes every IPv4 interface this machine holds, container bridges included, and never an IPv6 one. The persistent access token is the only authenticator on that surface. For a narrower posture set "host: 127.0.0.1" in {{temp}}/.dsh/profiles/web/cordis.patch.yml, or one LAN address such as 192.168.1.5 to publish a single network; --host 127.0.0.1 does the same for one run.",
       }
     `)
   })
