@@ -1,0 +1,25 @@
+# Bilingual-pair consistency record for 2026-10-07-remote-operator-surface-opt-in.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-10-07-remote-operator-surface-opt-in.md
+/agent-note-an-opt-in-remote-operator-surface:
+  en: 65606ae99f04ae2e
+  zh: f814d45190bb40ff
+/agent-note-an-opt-in-remote-operator-surface/problem:
+  en: 55fb9e5949c027cb
+  zh: a881fd80bdad6697
+/agent-note-an-opt-in-remote-operator-surface/decision:
+  en: a15c7c13f167e5ac
+  zh: a15c7c13f167e5ac
+/agent-note-an-opt-in-remote-operator-surface/decision/the-owning-row-states-the-posture:
+  en: 0b877af4a323144c
+  zh: 39f88884262b7e58
+/agent-note-an-opt-in-remote-operator-surface/decision/the-served-document-is-the-proof-of-token-validation:
+  en: a56e1803196a36f1
+  zh: 54707fd99d763a46
+/agent-note-an-opt-in-remote-operator-surface/decision/isloopback-keeps-its-name-and-its-readers:
+  en: 39ea70ac84f6944d
+  zh: 149c2440a2747ba0
+/agent-note-an-opt-in-remote-operator-surface/consequences:
+  en: dcd8662135b515ac
+  zh: 39bd216c3a134ca7

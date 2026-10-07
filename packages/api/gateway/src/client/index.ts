@@ -193,8 +193,13 @@ class ClientRemoteService extends Service implements ClientRemote {
     // compare by reference, so a fresh object is minted only when the fact
     // itself changed. isLoopback is fixed for the page lifetime.
     const home = this.connection.generation.getSnapshot()?.host.home
-    if (this.hostFacts === undefined || this.hostFacts.home !== home) {
-      this.hostFacts = { home, isLoopback: this.connection.isLoopback }
+    // A `trusted` operator surface is granted only to a page this Host served:
+    // the document route is behind the access-token gate (`browser-auth`), so
+    // the page exists only after token validation, and every /api request it
+    // makes still passes the Host/Origin fence and the session check.
+    const privileged = this.connection.isLoopback || this.connection.operatorSurface === 'trusted'
+    if (this.hostFacts === undefined || this.hostFacts.home !== home || this.hostFacts.isLoopback !== privileged) {
+      this.hostFacts = { home, isLoopback: privileged }
     }
     return this.hostFacts
   }

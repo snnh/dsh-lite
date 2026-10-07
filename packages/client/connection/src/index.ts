@@ -103,6 +103,16 @@ export interface ConnectionConfig {
    * bind. An entry that is not a bare, canonical authority fails plugin load.
    */
   trustedHosts?: string[]
+  /**
+   * Which pages count as this deployment's operator surface — the privileged
+   * side that reads and writes settings documents, plugin configuration, and
+   * provider credentials. `loopback` (the default) keeps it on a page whose own
+   * authority is loopback. `trusted` extends it to every page this Host serves
+   * and admits through the `/api` Host/Origin fence, which is what makes remote
+   * administration of a LAN deployment possible; that fence and the access
+   * token remain the only authenticators either way.
+   */
+  operatorSurface?: 'loopback' | 'trusted'
   /** Absolute browser-session lifetime in days. Default: 30. */
   cookieMaxAgeDays?: number
   /** Maximum buffered JSON body for every `/api` request. Default: 300 MiB. */
@@ -112,6 +122,7 @@ export interface ConnectionConfig {
 export const Config: z<ConnectionConfig> = z.object({
   recovery: ConnectionRecoveryConfigSchema.default({}),
   trustedHosts: z.array(String).default([]),
+  operatorSurface: z.union([z.const('loopback'), z.const('trusted')]).default('loopback'),
   cookieMaxAgeDays: z.natural().min(1).default(30),
   maxRequestBodyBytes: z.natural().min(1).default(DEFAULT_MAX_REQUEST_BODY_BYTES),
 })
@@ -127,6 +138,7 @@ export async function apply(ctx: Context, config?: ConnectionConfig): Promise<vo
   const recovery = resolveConnectionConfig(config?.recovery)
   // The Loader resolves schema defaults; hand-built test contexts may pass none.
   const trustedHosts = config?.trustedHosts ?? []
+  const operatorSurface = config?.operatorSurface ?? 'loopback'
   const cookieMaxAgeDays = config?.cookieMaxAgeDays ?? 30
   const maxRequestBodyBytes = config?.maxRequestBodyBytes ?? DEFAULT_MAX_REQUEST_BODY_BYTES
   // Config boundary: a malformed entry fails the load loudly here rather than
@@ -149,6 +161,9 @@ export async function apply(ctx: Context, config?: ConnectionConfig): Promise<vo
     assertImageBodyCapacity(webCtx, maxRequestBodyBytes)
     webCtx.on('webserver/index-inject', (table) => {
       table.push({ kind: 'global', name: '__DSH_CONNECTION_RECOVERY__', value: recovery })
+      // The served page cannot see the Host's trust fence, so the Host states
+      // the posture it resolved here; the client half reads it back.
+      table.push({ kind: 'global', name: '__DSH_OPERATOR_SURFACE__', value: operatorSurface })
     })
     const fetchHandler = connection.createSharedFetchHandler(API_PATH)
     const route: WebRoute = {

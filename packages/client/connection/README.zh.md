@@ -42,6 +42,9 @@ cookie 签名密钥是 `ctx.credentials` 中由 `client-connection/browser-sessi
 
 认证之前，每个请求仍经过 `src/api-request-trust.ts`。其 `Host` 必须是 loopback，或与 `trustedHosts` 条目匹配：带端口的 `host:port` 精确匹配，不带端口的条目匹配任意端口，两侧均经 WHATWG 归一化。若附带 `Origin`，它必须等于该 Host；`sec-fetch-site: cross-site` 一律拒绝。畸形配置 authority 会让插件加载失败。这些检查防御 DNS rebinding 与跨站浏览器请求，绝不建立身份。Host/Origin 校验失败返回 403；Host 可信但未认证的请求返回 401。诸如 `dsh web --host 0.0.0.0` 这类可达绑定会被接纳，而认证它的是持久访问令牌。配置的条目在插件加载时即固定：派生的 LAN 字面量只是启动时的一次采样，因此浏览器实际输入的 authority——容器以宿主端口发布的地址，或因新租约而变化的局域网地址——必须显式点名：在 web bundle 中用 `--trusted-host <host-ip>[:port]`，或在拥有该行的 patch 中写成 `trustedHosts` 值。决策记录：[浏览器请求信任](../../../.agents/notes/implemented/architecture/2026-07-28-api-browser-trust-boundary.zh.md)与[浏览器令牌认证](../../../.agents/notes/implemented/architecture/2026-08-24-browser-token-authentication.zh.md)。
 
+一个页面能否*管理*本 Host 是另一个决策，由本行的 `operatorSurface` 声明，默认 `loopback`：设置文档、插件配置与提供商凭据仍然只限 authority 为回环的页面，与从前完全一致。`trusted` 把该特权面扩展到本 Host 提供并经上述围栏接纳的每个页面，这正是 LAN 部署能在它被提供服务的地址上配置自己的原因。这次放宽无需额外检查：Host 自己的文档路由本就在访问令牌闸之后——`GET /` 对令牌交换回应会话 cookie，其余一律 `writeUnauthorized`——因此能存在的页面必已出示有效令牌，而它发起的每个请求仍要过该围栏与会话检查。授予是刻意同步的：在插件的 `apply` 里 await 连接 generation 会死锁，因为连接循环在客户端挂载之后才启动。
+
+
 每个被接纳的请求都代表同一个 Peer——操作者。`ctx.connection.operator` 就是这个 `PeerScope`：其 `ctx` 是拥有连接期注册的 Cordis scope，随 Connection 一起释放。`ctx.connection.admit(request)` 执行信任与认证检查，以拒绝状态或操作者作答；`/api` 路由与 Gateway 的 WebSocket 升级都经它接纳，每个 RPC 处理器都收到本次调用的 Peer。`OperatorPeer` 对外导出，供没有 Connection 的组合（例如 Gateway 的进程内载体）以同一约定拥有一个操作者 scope。
 
 通过认证的共享 HTTP 请求在传输请求体之前经过 `connection/request` waterfall。监听器可以拒绝新请求，或等待 `next()` 直到响应完成；释放所属 fiber 会移除准入行为。Desktop 使用此扩展点，在已批准的安装期间锁住新的 API 工作，而不取消已接纳的工作。客户端断开会中止处理函数的信号；桥接器停止写入 socket，并排空剩余响应块。WebSocket 流仍由 API Gateway 负责。

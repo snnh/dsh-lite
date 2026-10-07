@@ -110,6 +110,8 @@ export interface ClientTransportHooks {
 interface ClientTransportGlobal {
   __DSH_TRANSPORT__?: ClientTransportHooks
   __DSH_CONNECTION_RECOVERY__?: unknown
+  /** The Host's resolved `operatorSurface`; absent in shells that compose their own transport. */
+  __DSH_OPERATOR_SURFACE__?: unknown
 }
 
 /** Browser location fields used to classify loopback authority. */
@@ -125,6 +127,8 @@ export interface ConnectionInstallOptions {
   readonly recovery?: ConnectionRecoveryConfig
   /** Page location; omit for a non-browser composition. */
   readonly location?: ConnectionLocation
+  /** The Host's injected operator-surface posture; omit for the loopback default. */
+  readonly operatorSurface?: 'loopback' | 'trusted'
 }
 
 /**
@@ -138,6 +142,14 @@ export interface ConnectionHandle {
    * ({@link ClientTransportHooks.ownsHost}), or the context is not a browser.
    */
   readonly isLoopback: boolean
+  /**
+   * The Host's resolved operator-surface posture. `trusted` states that the
+   * Host admits served pages through its Host/Origin fence and access token,
+   * so a page whose own authority is not loopback may still reach the
+   * privileged surface once an authenticated generation exists. Only the Host
+   * decides this; a shell composing its own transport reports `loopback`.
+   */
+  readonly operatorSurface: 'loopback' | 'trusted'
   /** Current Remote event generation and the Host facts carried by its opening frame. */
   readonly generation: ConnectionGenerationState
   /** Current recovery lifecycle for connection-specific consumers. */
@@ -246,6 +258,7 @@ export function installConnection(ctx: Context, options: ConnectionInstallOption
   }
   const handle: ConnectionHandle = {
     isLoopback: transport?.ownsHost === true || pageLocation === undefined || isLoopbackHostname(pageLocation.hostname),
+    operatorSurface: options.operatorSurface === 'trusted' ? 'trusted' : 'loopback',
     generation: {
       getSnapshot: () => generation,
       subscribe: (listener) => {
@@ -321,6 +334,7 @@ export function apply(ctx: Context): void {
   installConnection(ctx, {
     ...(transport === undefined ? {} : { transport }),
     recovery: resolveConnectionConfig(globals.__DSH_CONNECTION_RECOVERY__),
+    ...(globals.__DSH_OPERATOR_SURFACE__ === 'trusted' ? { operatorSurface: 'trusted' as const } : {}),
     ...(pageLocation === undefined ? {} : { location: pageLocation }),
   })
 }
