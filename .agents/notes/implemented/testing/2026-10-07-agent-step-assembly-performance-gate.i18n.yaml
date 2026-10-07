@@ -1,0 +1,31 @@
+# Bilingual-pair consistency record for 2026-10-07-agent-step-assembly-performance-gate.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/testing/2026-10-07-agent-step-assembly-performance-gate.md
+/agent-note-per-step-prompt-and-tool-assembly-performance-gate:
+  en: 901bf522017c5742
+  zh: d5d2ef1f017a653d
+/agent-note-per-step-prompt-and-tool-assembly-performance-gate/problem:
+  en: 03df1e75fb35d350
+  zh: 95b7cc3ac56ba701
+/agent-note-per-step-prompt-and-tool-assembly-performance-gate/decision:
+  en: fee277e5dbac9dec
+  zh: 903707717cd4f506
+/agent-note-per-step-prompt-and-tool-assembly-performance-gate/decision/the-measured-subject:
+  en: f2cdb0693d3c501b
+  zh: 43d1debbffa4a689
+/agent-note-per-step-prompt-and-tool-assembly-performance-gate/decision/the-budget:
+  en: a2e3228c71c40f2b
+  zh: 540e7c23d09c503d
+/agent-note-per-step-prompt-and-tool-assembly-performance-gate/decision/reference-run-and-attribution:
+  en: dc6e162c667ad6d8
+  zh: 2556ac62b1acd913
+/agent-note-per-step-prompt-and-tool-assembly-performance-gate/consequences:
+  en: 52ff2d2e71fe09b5
+  zh: 1900efbc4de897ff
+/agent-note-per-step-prompt-and-tool-assembly-performance-gate/alternatives-considered:
+  en: 6ad79e8e568e8dd4
+  zh: cfb78b5d4ceb1793
+/agent-note-per-step-prompt-and-tool-assembly-performance-gate/deliberate-exclusions:
+  en: e4805b1da5defff2
+  zh: c9e49aa9ea0b00cc

@@ -76,4 +76,11 @@ export default defineConfig([
     clean: true,
     tsconfig: 'tsconfig.host.json',
   },
+  {
+    ...shared,
+    entry: { 'agent-step.worker': 'agent-step/agent-step.worker.ts' },
+    outDir: '.dsh-build/agent-step',
+    clean: true,
+    tsconfig: 'tsconfig.host.json',
+  },
 ])
