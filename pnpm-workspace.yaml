@@ -16,6 +16,11 @@ packages:
 
 overrides:
   'extract-zip>yauzl': '3.4.0'
+  # One `micromark-util-types` for the whole graph: `mdast-util-from-markdown`
+  # and `micromark-core-commonmark` were resolving 2.0.2 and 2.0.3, and their
+  # divergent declaration files make mdast's extension types unassignable to
+  # micromark's parameter type in ui-primitives' markdown parse.
+  'micromark-util-types': '2.0.3'
   '@deepseek-ai/cosmokit': 'link:vendor/cosmokit'
   '@deepseek-ai/schemastery': 'link:vendor/schemastery'
 
