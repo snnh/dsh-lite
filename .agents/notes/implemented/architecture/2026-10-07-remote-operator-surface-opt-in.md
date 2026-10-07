@@ -26,6 +26,12 @@ An earlier revision gated the flag on an authenticated connection generation and
 
 `$host.isLoopback` is the one fact every privileged consumer already reads ([gateway client](../../../../packages/api/gateway/src/client/index.ts)), so the posture joins it there rather than behind a second flag each consumer would have to learn. The name now means "the privileged surface is reachable for this page", which is what its readers always asked.
 
+## Alternatives considered
+
+**Keep the loopback-only surface and nothing else.** Rejected: it is the posture every existing deployment has and it stays the default, so a deployment that wants administration confined to the machine still reaches the loopback address over a tunnel without stating anything new. What it cannot do is serve the operator who holds the LAN address: the access token already runs Sessions and tools for that operator, so this posture withheld administration of the very documents those Sessions obey, and the frozen `memory` mode discarded their writes without saying so.
+
+**Gate the privileged flag on an authenticated connection generation.** Rejected: waiting for a generation would have made the privilege follow a live authenticated connection rather than a served document. The connection loop starts after the client mounts, so a settings plugin awaiting it never settles and the application stops at `Loading plugins…` on loopback as well as over the LAN. The access-token gate on the document route is the same evidence, and it is available synchronously.
+
 ## Consequences
 
 - A LAN deployment administers itself from the address it is served at: settings, the plugin inventory, and plugin pages such as a profile-installed bundle's own settings surface all work at `http://<lan-ip>:<port>/?token=…`.
