@@ -151,13 +151,49 @@ describe('profile validation', () => {
     })).toThrow(/unknown modality/)
   })
 
-  it('refuses image input this adapter does not carry yet', () => {
-    expect(refused({ models: [{ id: 'm', capabilities: { modalities: ['image'] } }] })).toMatch(/does not carry yet/)
+  it('carries image input with the model pixel budget it declares', () => {
+    const profile = resolved({ models: [{ id: 'm', capabilities: { modalities: ['text', 'image'] }, imagePixelBudget: 'low' }] })
+    const model = modelOf(profile, 'm')
+    expect(model.modalities).toEqual(['text', 'image'])
+    expect(model.imagePixelBudget).toBe(512 * 512)
+    expect(model.imageMaxBytes).toBeUndefined()
+  })
+
+  it('carries a numeric pixel budget and an explicit byte target unchanged', () => {
+    const profile = resolved({
+      models: [{ id: 'm', capabilities: { modalities: ['image'] }, imagePixelBudget: 1024 * 1024, imageMaxBytes: 1024 }],
+    })
+    const model = modelOf(profile, 'm')
+    expect(model.imagePixelBudget).toBe(1024 * 1024)
+    expect(model.imageMaxBytes).toBe(1024)
+  })
+
+  it('resolves the route image request budget with its published defaults', () => {
+    const profile = resolved({})
+    expect(profile.imageRequestBudget).toEqual({
+      representation: 'base64',
+      maxBytes: 20 * 1024 * 1024,
+      maxImages: 600,
+      byteQuantum: 10 * 1024 * 1024,
+      countQuantum: 20,
+    })
+  })
+
+  it('takes the route image request budget from the profile', () => {
+    const profile = resolved({
+      imageRequestMaxBytes: 4096, imageRequestMaxImages: 2, imageOffloadByteQuantum: 512, imageOffloadCountQuantum: 1,
+    })
+    expect(profile.imageRequestBudget).toMatchObject({ maxBytes: 4096, maxImages: 2, byteQuantum: 512, countQuantum: 1 })
+  })
+
+  it('refuses an image knob on a model that declares no image input', () => {
+    expect(refused({ models: [{ id: 'm', imagePixelBudget: 512 * 512 }] })).toMatch(/without declaring image input/)
+    expect(refused({ models: [{ id: 'm', imageMaxBytes: 1024 }] })).toMatch(/without declaring image input/)
   })
 
   it('refuses the other declared modalities the transport does not carry', () => {
-    // OWC's vocabulary names video as well; the refusal follows the same rule
-    // as images rather than accepting a declaration no request acts on.
+    // OWC's vocabulary names video as well; this wire has no video part, so the
+    // declaration is refused rather than accepted with nothing acting on it.
     expect(refused({ models: [{ id: 'm', capabilities: { modalities: ['video'] } }] })).toMatch(/declares video input/)
   })
 

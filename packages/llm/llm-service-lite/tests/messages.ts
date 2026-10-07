@@ -2,6 +2,7 @@
 
 import { MessageId, ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, GenerateOptions, Message, ModelMessageSource, ToolSchema } from '@deepseek-ai/dsh-llm'
+import type { ImageAttachmentRef, ImageMediaType, RequestImageAttachment } from '@deepseek-ai/dsh-attachment'
 
 /** One system-prompt message carrying the given text. */
 export function system(text: string, id = 'system'): Message {
@@ -41,6 +42,42 @@ export function toolResult(callId: string, text: string, id = `result-${callId}`
 /** One tool call the model requested. */
 export function toolCall(id: string, name: string, args: string): ContentBlock {
   return { type: 'tool-call', id: ToolCallId(id), name, arguments: args }
+}
+
+/** One durable image block, as the session layer hands it to a request. */
+export function image(
+  attachmentId: string,
+  overrides: Partial<ImageAttachmentRef> = {},
+  offloaded = false,
+): ContentBlock {
+  return {
+    type: 'image',
+    attachment: {
+      attachmentId: attachmentId as ImageAttachmentRef['attachmentId'],
+      mediaType: 'image/png',
+      bytes: 3,
+      width: 2,
+      height: 2,
+      ...overrides,
+    },
+    ...offloaded ? { offloaded: true as const } : {},
+  }
+}
+
+/** One prepared request version carrying the given bytes. */
+export function requestImage(data = 'abc', mediaType: ImageMediaType = 'image/png'): RequestImageAttachment {
+  return {
+    variantId: 'v' as RequestImageAttachment['variantId'],
+    attachment: { attachmentId: 'sha256:x' as ImageAttachmentRef['attachmentId'], mediaType, bytes: data.length, width: 2, height: 2 },
+    data: new TextEncoder().encode(data),
+    mediaType,
+    bytes: data.length,
+    width: 2,
+    height: 2,
+    depth: 'uchar',
+    space: 'srgb',
+    hasAlpha: false,
+  }
 }
 
 /** Plain text block. */

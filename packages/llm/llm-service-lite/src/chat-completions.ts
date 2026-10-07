@@ -18,6 +18,8 @@
 
 import { attributionHeaders, LlmError, ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, FinishReason, GenerateOptions, RequestMessage, StreamChunk, TokenUsage } from '@deepseek-ai/dsh-llm'
+import type { RequestImageAttachment } from '@deepseek-ai/dsh-attachment'
+import { imageDataUrl, offloadedImageText } from './images.ts'
 import type { ResolvedOwcModel, ResolvedOwcProviderProfile } from './profiles.ts'
 import { reasoningLevelOf, replaysReasoning } from './models.ts'
 import { classifyFailure } from './errors.ts'
@@ -127,9 +129,14 @@ function toolPairings(messages: readonly RequestMessage[]): {
  *
  * @param options - the assembled request.
  * @param model - the route's declared facts for this model.
+ * @param versions - prepared request images, keyed by durable attachment id.
  * @returns protocol messages in conversation order.
  */
-export function toWireMessages(options: GenerateOptions, model: ResolvedOwcModel): WireMessage[] {
+export function toWireMessages(
+  options: GenerateOptions,
+  model: ResolvedOwcModel,
+  versions: ReadonlyMap<string, RequestImageAttachment>,
+): WireMessage[] {
   const messages = options.messages
   const { results } = toolPairings(messages)
   const emittedCalls = new Set<string>()
@@ -146,8 +153,19 @@ export function toWireMessages(options: GenerateOptions, model: ResolvedOwcModel
         break
       }
       case 'user': {
-        const parts: WireContentPart[] = message.content.flatMap((block): WireContentPart[] =>
-          block.type === 'text' && block.text.length > 0 ? [{ type: 'text', text: block.text }] : [])
+        const parts: WireContentPart[] = message.content.flatMap((block): WireContentPart[] => {
+          if (block.type === 'text') return block.text.length > 0 ? [{ type: 'text', text: block.text }] : []
+          if (block.type !== 'image') return []
+          if (block.offloaded === true) return [{ type: 'text', text: offloadedImageText(block) }]
+          const version = versions.get(block.attachment.attachmentId)
+          if (version === undefined) {
+            throw new LlmError(
+              'llm-service-lite: a retained image occurrence reached the wire without a prepared request version',
+              'INVALID_CONFIG',
+            )
+          }
+          return [{ type: 'image_url', image_url: { url: imageDataUrl(version) } }]
+        })
         if (parts.length === 0) break
         // A text-only turn stays a plain string: some gateways reject the
         // parts array outright, and nothing is gained by sending one part.
@@ -207,6 +225,7 @@ export function toWireMessages(options: GenerateOptions, model: ResolvedOwcModel
  * @param model - the route's declared facts for this model.
  * @param options - the assembled request.
  * @param apiKey - resolved credential, when the route authenticates.
+ * @param versions - prepared request images, keyed by durable attachment id.
  * @returns endpoint, headers, and serialized body.
  */
 export function chatRequest(
@@ -214,9 +233,10 @@ export function chatRequest(
   model: ResolvedOwcModel,
   options: GenerateOptions,
   apiKey: string | undefined,
+  versions: ReadonlyMap<string, RequestImageAttachment> = new Map(),
 ): ChatHttpRequest {
   const level = reasoningLevelOf(model, options.reasoningEffort)
-  const messages = toWireMessages(options, model)
+  const messages = toWireMessages(options, model, versions)
   const body: Record<string, unknown> = {
     ...profile.extraBody,
     model: options.model,

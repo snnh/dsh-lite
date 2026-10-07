@@ -159,7 +159,14 @@ export function apply(ctx: Context, config: Config): void {
     return limiter
   }
 
-  const adapter = new OwcProfilesAdapter({ profiles, limiter: limiterFor, resolveApiKey })
+  const adapter = new OwcProfilesAdapter({
+    profiles,
+    limiter: limiterFor,
+    resolveApiKey,
+    // The attachment provider arrives with the profile that needs it; a
+    // deployment serving text-only routes never mounts one.
+    resolveAttachments: () => ctx.get('attachments'),
+  })
   let directory: DirectoryRegistrationHandle | undefined
   let registeredDirectory: unknown
   const ensureDirectory = (): void => {

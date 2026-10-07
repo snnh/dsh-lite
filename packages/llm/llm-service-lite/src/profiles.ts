@@ -15,8 +15,14 @@
 import { credentialRef, type CredentialRef } from '@deepseek-ai/dsh-credentials'
 import { resolveRetryPolicy, type ResolvedRetryPolicy } from '@deepseek-ai/dsh-llm'
 import { deepEqualJson, isJsonValue } from '@deepseek-ai/dsh-util-values'
+import type { ImageRequestBudget } from './images.ts'
+import { LOW_DETAIL_IMAGE_PIXEL_BUDGET } from './images.ts'
 import {
   DEFAULT_CONTEXT_WINDOW,
+  DEFAULT_IMAGE_OFFLOAD_BYTE_QUANTUM,
+  DEFAULT_IMAGE_OFFLOAD_COUNT_QUANTUM,
+  DEFAULT_IMAGE_REQUEST_MAX_BYTES,
+  DEFAULT_IMAGE_REQUEST_MAX_IMAGES,
   DEFAULT_MAX_CONCURRENT,
   DEFAULT_MAX_TOKENS,
   DEFAULT_STREAM_IDLE_TIMEOUT_MS,
@@ -70,6 +76,10 @@ export interface ResolvedOwcModel {
   readonly reasoningContent: boolean
   /** Whether tool declarations may be sent to this model. */
   readonly tools: boolean
+  /** Pixel budget request images of this model are projected into; absent keeps source dimensions. */
+  readonly imagePixelBudget: number | undefined
+  /** Encoded-byte target for one request image of this model; absent uses the adapter default. */
+  readonly imageMaxBytes: number | undefined
 }
 
 /** One provider profile with every route-level default materialized. */
@@ -108,6 +118,8 @@ export interface ResolvedOwcProviderProfile {
   readonly defaultContextWindow: number
   /** Output capability for a model this route does not describe. */
   readonly defaultMaxTokens: number
+  /** Image request budgets this route applies to every request it serves. */
+  readonly imageRequestBudget: ImageRequestBudget
   /** Why this route cannot serve, when it cannot; a store keeps such a route editable rather than dropping it. */
   readonly diagnostic: string | undefined
 }
@@ -218,12 +230,25 @@ function resolveModel(
     if (!MODALITIES.includes(modality)) {
       throw new Error(`llm-service-lite: provider "${provider}" model "${model.id}" declares unknown modality "${modality}"`)
     }
-    if (modality !== 'text') {
+    if (modality !== 'text' && modality !== 'image') {
       throw new Error(
         `llm-service-lite: provider "${provider}" model "${model.id}" declares ${modality} input,`
-        + ' which this adapter does not carry yet; declare text until request images land',
+        + ' which this adapter does not carry; the wire has an image part and no video part',
       )
     }
+  }
+  const carriesImages = modalities.includes('image')
+  if (model.imagePixelBudget !== undefined && !carriesImages) {
+    throw new Error(
+      `llm-service-lite: provider "${provider}" model "${model.id}" sets imagePixelBudget`
+      + ' without declaring image input',
+    )
+  }
+  if (model.imageMaxBytes !== undefined && !carriesImages) {
+    throw new Error(
+      `llm-service-lite: provider "${provider}" model "${model.id}" sets imageMaxBytes`
+      + ' without declaring image input',
+    )
   }
   // A declaration the request path cannot act on is refused where it is made,
   // in the same place the unimplemented protocols are: accepting it would put a
@@ -251,6 +276,10 @@ function resolveModel(
     thinkingStyle: capabilities.thinkingStyle,
     reasoningContent: capabilities.reasoningContent ?? false,
     tools: capabilities.tools ?? true,
+    imagePixelBudget: model.imagePixelBudget === 'low'
+      ? LOW_DETAIL_IMAGE_PIXEL_BUDGET
+      : model.imagePixelBudget,
+    imageMaxBytes: model.imageMaxBytes,
   }
 }
 
@@ -321,6 +350,13 @@ export function resolveProfiles(
       models,
       defaultContextWindow,
       defaultMaxTokens,
+      imageRequestBudget: {
+        representation: 'base64',
+        maxBytes: source.imageRequestMaxBytes ?? DEFAULT_IMAGE_REQUEST_MAX_BYTES,
+        maxImages: source.imageRequestMaxImages ?? DEFAULT_IMAGE_REQUEST_MAX_IMAGES,
+        byteQuantum: source.imageOffloadByteQuantum ?? DEFAULT_IMAGE_OFFLOAD_BYTE_QUANTUM,
+        countQuantum: source.imageOffloadCountQuantum ?? DEFAULT_IMAGE_OFFLOAD_COUNT_QUANTUM,
+      },
       diagnostic: undefined,
     })
   }
@@ -356,6 +392,13 @@ function unserviceable(provider: string, source: OwcProviderProfile, error: unkn
     models: [],
     defaultContextWindow: DEFAULT_CONTEXT_WINDOW,
     defaultMaxTokens: DEFAULT_MAX_TOKENS,
+    imageRequestBudget: {
+      representation: 'base64',
+      maxBytes: DEFAULT_IMAGE_REQUEST_MAX_BYTES,
+      maxImages: DEFAULT_IMAGE_REQUEST_MAX_IMAGES,
+      byteQuantum: DEFAULT_IMAGE_OFFLOAD_BYTE_QUANTUM,
+      countQuantum: DEFAULT_IMAGE_OFFLOAD_COUNT_QUANTUM,
+    },
     diagnostic: message,
   }
 }
@@ -405,6 +448,8 @@ export function modelOf(profile: ResolvedOwcProviderProfile, model: string): Res
     contextWindow: profile.defaultContextWindow,
     maxTokens: profile.defaultMaxTokens,
     modalities: ['text'],
+    imagePixelBudget: undefined,
+    imageMaxBytes: undefined,
     effort: [],
     thinking: [],
     thinkingStyle: undefined,

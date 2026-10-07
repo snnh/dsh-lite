@@ -3,7 +3,7 @@ import type { StreamChunk } from '@deepseek-ai/dsh-llm'
 import { chatRequest, toWireMessages, translateChatStream } from '../src/chat-completions.ts'
 import type { ResolvedOwcModel, ResolvedOwcProviderProfile } from '../src/profiles.ts'
 import { resolveProfiles } from '../src/profiles.ts'
-import { assistant, request, system, text, toolCall, toolResult, toolSchema, user } from './messages.ts'
+import { assistant, image, request, requestImage, system, text, toolCall, toolResult, toolSchema, user } from './messages.ts'
 
 /** One resolved route from the real schema. */
 const route = (overrides: Record<string, unknown> = {}): ResolvedOwcProviderProfile => {
@@ -140,7 +140,7 @@ describe('chat-completions message translation', () => {
   it('keeps text-only turns as plain strings and splits multimodal turns into parts', () => {
     const messages = toWireMessages(request({
       messages: [system('prompt'), user([text('one'), text('two')], 'u1')],
-    }), modelOf(route()))
+    }), modelOf(route()), new Map())
     expect(messages).toEqual([
       { role: 'system', content: 'prompt' },
       { role: 'user', content: 'onetwo' },
@@ -153,7 +153,7 @@ describe('chat-completions message translation', () => {
         { id: 'd1', role: 'developer', source: { kind: 'user' }, content: [text('tools changed')] } as never,
         { id: 'd2', role: 'developer', source: { kind: 'user' }, content: [] } as never,
       ],
-    }), modelOf(route()))
+    }), modelOf(route()), new Map())
     expect(messages).toEqual([{ role: 'system', content: 'tools changed' }])
   })
 
@@ -166,7 +166,7 @@ describe('chat-completions message translation', () => {
         ]),
         toolResult('call-1', 'file.txt'),
       ],
-    }), modelOf(route()))
+    }), modelOf(route()), new Map())
     expect(messages).toEqual([
       {
         role: 'assistant',
@@ -189,9 +189,57 @@ describe('chat-completions message translation', () => {
         assistant([call], {}, 'a1'),
         assistant([call], {}, 'a2'),
       ],
-    }), modelOf(route()))
+    }), modelOf(route()), new Map())
     expect(messages.map(message => message.role)).toEqual(['assistant', 'tool'])
     expect(messages[0]?.tool_calls).toHaveLength(1)
+  })
+
+  it('carries a retained image as a base64 image_url part beside its text', () => {
+    const version = requestImage('abc')
+    const messages = toWireMessages(
+      request({ messages: [user([text('look at '), image('sha256:a'), text('this')], 'u1')] }),
+      modelOf(route({ models: [{ id: 'm', capabilities: { modalities: ['text', 'image'] } }] })),
+      new Map([['sha256:a', version]]),
+    )
+    expect(messages).toEqual([{
+      role: 'user',
+      content: [
+        { type: 'text', text: 'look at ' },
+        { type: 'image_url', image_url: { url: 'data:image/png;base64,YWJj' } },
+        { type: 'text', text: 'this' },
+      ],
+    }])
+  })
+
+  it('answers an offloaded occurrence with its placeholder instead of bytes', () => {
+    const messages = toWireMessages(
+      request({ messages: [user([image('sha256:b', { name: 'shot.png' }, true)], 'u1')] }),
+      modelOf(route({ models: [{ id: 'm', capabilities: { modalities: ['image'] } }] })),
+      new Map(),
+    )
+    // One placeholder is text, so the turn stays the plain-string form an
+    // endpoint with no part array accepts.
+    const content = messages[0]?.content
+    expect(typeof content).toBe('string')
+    expect(content).toContain('image omitted to fit request image limits')
+    expect(content).toContain('shot.png')
+  })
+
+  it('drops a user-turn block that is neither text nor image', () => {
+    const messages = toWireMessages(
+      request({ messages: [user([text('kept'), toolCall('call-1', 'shell', '{}')], 'u1')] }),
+      modelOf(route()),
+      new Map(),
+    )
+    expect(messages).toEqual([{ role: 'user', content: 'kept' }])
+  })
+
+  it('refuses a retained occurrence that reached the wire without a request version', () => {
+    expect(() => toWireMessages(
+      request({ messages: [user([image('sha256:c')], 'u1')] }),
+      modelOf(route({ models: [{ id: 'm', capabilities: { modalities: ['image'] } }] })),
+      new Map(),
+    )).toThrow(/without a prepared request version/)
   })
 
   it('replays reasoning only for a route that declares it and only from the same provider', () => {
@@ -200,17 +248,17 @@ describe('chat-completions message translation', () => {
     const sameProvider = toWireMessages(request({
       provider: 'gateway',
       messages: [assistant([reasoning, text('answer')], { provider: 'gateway' })],
-    }), modelOf(profile))
+    }), modelOf(profile), new Map())
     expect(sameProvider[0]).toMatchObject({ reasoning_content: 'thinking', content: 'answer' })
     const otherProvider = toWireMessages(request({
       provider: 'gateway',
       messages: [assistant([reasoning, text('answer')], { provider: 'elsewhere' })],
-    }), modelOf(profile))
+    }), modelOf(profile), new Map())
     expect(otherProvider[0]).not.toHaveProperty('reasoning_content')
     const undeclared = toWireMessages(request({
       provider: 'gateway',
       messages: [assistant([reasoning, text('answer')], { provider: 'gateway' })],
-    }), modelOf(route()))
+    }), modelOf(route()), new Map())
     expect(undeclared[0]).not.toHaveProperty('reasoning_content')
   })
 })

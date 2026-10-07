@@ -83,8 +83,9 @@ declare module '@deepseek-ai/dsh-llm' {
 
 /**
  * Input modalities a model accepts; text is the assumption when none is
- * declared. The vocabulary mirrors OWC's, and the two beyond text are refused
- * by name at resolution until the transport carries them.
+ * declared. The vocabulary mirrors OWC's; `image` is carried as an inline
+ * base64 `image_url` part, and `video` is refused by name until the wire
+ * carries one.
  */
 export const MODALITIES = ['text', 'image', 'video'] as const
 
@@ -115,6 +116,23 @@ export const DEFAULT_CONTEXT_WINDOW = 256_000
 
 /** Output capability assumed for a model the profile does not size. */
 export const DEFAULT_MAX_TOKENS = 8_192
+
+/**
+ * Accumulated base64 image payload one request may carry. The default matches
+ * the official adapter's inline ceiling: beyond it a gateway that accepts the
+ * request at all tends to answer slowly or truncate, and the caller can do
+ * better by offloading the oldest occurrence.
+ */
+export const DEFAULT_IMAGE_REQUEST_MAX_BYTES = 20 * 1024 * 1024
+
+/** Image occurrences one request may carry. */
+export const DEFAULT_IMAGE_REQUEST_MAX_IMAGES = 600
+
+/** Payload removed as one deterministic offload step. */
+export const DEFAULT_IMAGE_OFFLOAD_BYTE_QUANTUM = 10 * 1024 * 1024
+
+/** Occurrences removed as one deterministic offload step. */
+export const DEFAULT_IMAGE_OFFLOAD_COUNT_QUANTUM = 20
 
 /**
  * What one model on a route can do. Every field is a declaration about the
@@ -168,6 +186,17 @@ export interface OwcModelProfile {
   maxTokens?: number
   /** Declared endpoint capabilities. */
   capabilities?: OwcModelCapabilities
+  /**
+   * Pixel budget every request image of this model is projected into, capping
+   * `width * height`; `low` selects the published low-detail grid. Omission
+   * keeps the source dimensions, still capped on the long edge.
+   */
+  imagePixelBudget?: number | 'low'
+  /**
+   * Encoded-byte target for one request image of this model. The encoder keeps
+   * the smallest output of its quality ladder when no step fits.
+   */
+  imageMaxBytes?: number
 }
 
 /**
@@ -208,6 +237,17 @@ export interface OwcProviderProfile {
   defaultContextWindow?: number
   /** Output capability for a route model that declares none. */
   defaultMaxTokens?: number
+  /**
+   * Accumulated base64 image payload one request on this route carries before
+   * the oldest occurrences must be offloaded. Default 20 MiB.
+   */
+  imageRequestMaxBytes?: number
+  /** Image occurrences one request on this route carries. Default 600. */
+  imageRequestMaxImages?: number
+  /** Payload removed as one deterministic offload step. Default 10 MiB. */
+  imageOffloadByteQuantum?: number
+  /** Occurrences removed as one deterministic offload step. Default 20. */
+  imageOffloadCountQuantum?: number
 }
 
 /**
@@ -257,6 +297,10 @@ const modelProfile: z<OwcModelProfile> = z.object({
   maxTokens: z.number().step(1).min(1),
   /** Declared endpoint capabilities. */
   capabilities,
+  /** Pixel budget request images are projected into; `low` selects the low-detail grid. */
+  imagePixelBudget: z.union([z.number().step(1).min(1), z.const('low')]),
+  /** Encoded-byte target for one request image. */
+  imageMaxBytes: z.number().step(1).min(1),
 })
 
 const providerProfile: z<OwcProviderProfile> = z.object({

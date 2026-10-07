@@ -21,7 +21,9 @@ import type {
   StreamChunk,
 } from '@deepseek-ai/dsh-llm'
 import { idleWatchdog, timeoutOf } from '@deepseek-ai/dsh-timeout'
+import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
 import { chatRequest, translateChatStream } from './chat-completions.ts'
+import { prepareRequestImages } from './images.ts'
 import { classifyFailure, classifyTransport } from './errors.ts'
 import { ConcurrencyLimiter } from './limiter.ts'
 import { catalogModels, resolvedModelInfo } from './models.ts'
@@ -39,6 +41,8 @@ export interface OwcProfilesAdapterOptions {
   readonly limiter: (provider: string) => ConcurrencyLimiter
   /** Resolve one route's credential, or nothing for an unauthenticated route. */
   readonly resolveApiKey: (profile: ResolvedOwcProviderProfile) => Promise<string | undefined>
+  /** The mounted attachment provider, read per request; absent refuses image input. */
+  readonly resolveAttachments?: () => AttachmentStore | undefined
 }
 
 /** One route's facts, or a refusal naming the route a configuration no longer declares. */
@@ -156,8 +160,13 @@ export class OwcProfilesAdapter extends LlmAdapter {
     signal.throwIfAborted()
     const model = modelOf(profile, options.model)
     const apiKey = await this.dependencies.resolveApiKey(profile)
+    // Images are read and sized before the credential is used: an unserviceable
+    // image request must fail without the endpoint seeing a partial call.
+    const versions = await prepareRequestImages(
+      model, options.messages, this.dependencies.resolveAttachments?.(), profile.imageRequestBudget, signal,
+    )
     signal.throwIfAborted()
-    const request = chatRequest(profile, model, options, apiKey)
+    const request = chatRequest(profile, model, options, apiKey, versions)
     const response = await fetch(request.url, {
       method: 'POST',
       headers: request.headers,

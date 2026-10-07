@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`@deepseek-ai/dsh-llm-service-lite` adapts third-party model endpoints: it registers one route per configured provider profile, and answers every one of them over its own chat-completions transport, so no provider SDK and no installed catalog sits in the request path. A profile is self-contained — wire protocol, endpoint, credential reference, request-body extras, concurrency, and the models that endpoint serves — so a gateway, a national API, and a proxy on the corporate network all reach one code path, and nothing has to have heard of the provider first. The shape is a port of OpenWebCode's model-provider layer onto the harness seam: one document describes every provider, the route set follows that document live, and a request carries exactly the fields the profile declares.
+`@deepseek-ai/dsh-llm-service-lite` adapts third-party model endpoints: it registers one route per configured provider profile and answers all of them over its own chat-completions transport, so no provider SDK and no installed catalog sits in the request path. A profile is self-contained — wire protocol, endpoint, credential reference, request-body extras, concurrency, image input, and the models served — so a gateway, a national API, and a corporate proxy reach one code path. The shape ports OpenWebCode's model-provider layer onto the harness seam: one document describes every provider, the route set follows it live, and a request carries exactly the declared fields.
 
 ## Table of Contents
 
@@ -96,10 +96,16 @@ This plugin adapts third-party endpoints and nothing else: every route it regist
 | `models` | `[]` | The models this route advertises, with their capacities and capabilities |
 | `defaultContextWindow` | `262144` | Context capacity for a model that declares none |
 | `defaultMaxTokens` | `8192` | Output capability for a model that declares none |
+| `imageRequestMaxBytes` | `20971520` | Accumulated base64 image payload one request carries |
+| `imageRequestMaxImages` | `600` | Image occurrences one request carries |
+| `imageOffloadByteQuantum` | `10485760` | Payload removed as one deterministic offload step |
+| `imageOffloadCountQuantum` | `20` | Occurrences removed as one deterministic offload step |
 
 ### Declare what a model can do
 
-A model entry's `capabilities` are declarations about the endpoint, never guesses: a capability left out is one this adapter does not claim, and one it declares is honoured or refused by name — never accepted with nothing behind it. `effort` lists the selectable reasoning levels and its values are the wire spellings, so a gateway with its own vocabulary declares that vocabulary. `thinking` lists the accepted thinking modes (`enabled`, `disabled`, `adaptive`). `thinkingStyle` says how the endpoint spells the switch: `thinking: { type: … }`, a top-level `enable_thinking` boolean, `fixed` for a model that always thinks, or `effort_only` — the explicit spelling of an endpoint that takes an effort level and has no switch, which is the same request an omitted style sends. `reasoningContent` declares that the endpoint returns reasoning in `reasoning_content`, which is what lets a later request replay prior thinking. `tools` declares whether tool declarations may be sent at all: a model that turns them off receives none rather than a list its endpoint would reject. `modalities` names what the endpoint accepts — `text`, `image`, `video` — and the input types beyond text, like `imageOutput` and `responsesEncryptedReplay`, are refused where they are declared until a transport carries them, because a declaration nothing acts on would read as a capability the route does not have.
+A model entry's `capabilities` are declarations about the endpoint, never guesses: a capability left out is one this adapter does not claim, and one it declares is honoured or refused by name — never accepted with nothing behind it. `effort` lists the selectable reasoning levels and its values are the wire spellings, so a gateway with its own vocabulary declares that vocabulary. `thinking` lists the accepted thinking modes (`enabled`, `disabled`, `adaptive`). `thinkingStyle` says how the endpoint spells the switch: `thinking: { type: … }`, a top-level `enable_thinking` boolean, `fixed` for a model that always thinks, or `effort_only` — the explicit spelling of an endpoint that takes an effort level and has no switch, which is the same request an omitted style sends. `reasoningContent` declares that the endpoint returns reasoning in `reasoning_content`, which is what lets a later request replay prior thinking. `tools` declares whether tool declarations may be sent at all: a model that turns them off receives none rather than a list its endpoint would reject. `modalities` names what the endpoint accepts — `text`, `image`, `video`. `image` is carried: a retained occurrence is read from the attachment provider at the model's pixel budget (or its source dimensions), re-encoded to the model's byte target, and sent as an inline base64 `image_url` part, while an occurrence the session already offloaded contributes its placeholder text instead. A route's accumulated request is bounded by `imageRequestMaxBytes`, `imageRequestMaxImages`, `imageOffloadByteQuantum`, and `imageOffloadCountQuantum`; a request over budget fails with `IMAGE_OFFLOAD_REQUIRED` naming how many oldest occurrences to offload rather than dropping an image silently. `video` input, `imageOutput`, and `responsesEncryptedReplay` are still refused where they are declared until a transport carries them, because a declaration nothing acts on would read as a capability the route does not have.
+
+An image request needs the attachment provider mounted (`attachments`); a deployment serving text-only routes never mounts one, and a route that declares `image` without it fails the request before the endpoint sees a partial call.
 
 ### Change configuration at runtime
 
@@ -146,8 +152,8 @@ The chat-completions translation owns three things the provider does not: block 
 <a id="further-exploration"></a>
 ## Further Exploration
 
-- [LLM streaming subsystem](../../docs/subsystems/llm-streaming.md) — the message and block types, the assembled request, and the adapter contract this package implements.
-- [Providers guide](../../docs/user/guide/providers.md) — how a deployment configures providers on the shipped profiles.
+- [LLM streaming subsystem](../../../docs/subsystems/llm-streaming.md) — the message and block types, the assembled request, and the adapter contract this package implements.
+- [Providers guide](../../../docs/user/guide/providers.md) — how a deployment configures providers on the shipped profiles.
 - [OpenWebCode](https://github.com/snnh/openwebcode) — the provider-profile model this adapter follows.
 
 <a id="model-experience"></a>
@@ -186,7 +192,7 @@ Replayed reasoning is byte-identical to what the provider returned, so a route t
 <a id="known-limitations-and-deferred-work"></a>
 
 - **One protocol implemented.** `openai-chat-completions` is fully served; `anthropic-messages` and `openai-responses` are part of the vocabulary and are refused by name at resolution, because serving a declared protocol with different wire behaviour would be worse than saying so. They are the next milestone.
-- **No request images, video, or image output.** A profile that declares `image` or `video` input, or `imageOutput`, is refused rather than served with the difference dropped; image projection and offload belong with the transports that will carry them.
+- **No video input or image output.** A profile declaring `video` input or `imageOutput` is refused rather than served with the difference dropped. `image` input is carried, but without per-image token accounting: `imageRequestPricing` is not implemented, so a surface pricing a request prices its images as it prices the text that replaces them, and prompt-cache accounting sees the encoded payload rather than the model's visual-token count.
 - **No adapter-side retries.** One call is one provider attempt, so the provider's retry policy is executed by `dsh-llm-retry` at the durable step boundary, and a retry re-derives the whole request.
 - **No replay envelope.** A successful response carries no adapter-private replay state, so history is re-sent as durable messages, and a profile declaring `responsesEncryptedReplay` is refused by name until the responses transport lands.
 - **No streaming usage in the absence of a report.** An endpoint that never sends a usage chunk leaves token accounting to the harness's estimator.

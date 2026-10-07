@@ -4,7 +4,8 @@ import type { StreamChunk } from '@deepseek-ai/dsh-llm'
 import { OwcProfilesAdapter } from '../src/adapter.ts'
 import { ConcurrencyLimiter } from '../src/limiter.ts'
 import { resolveProfiles, type ResolvedOwcProviderProfile } from '../src/profiles.ts'
-import { request, system, user, text } from './messages.ts'
+import type { AttachmentStore, ImageAttachmentRef, ImageRequestTarget } from '@deepseek-ai/dsh-attachment'
+import { image, request, requestImage, system, user, text } from './messages.ts'
 
 /** One running mock provider. */
 interface Provider {
@@ -66,6 +67,7 @@ const routeFor = (url: string, overrides: Record<string, unknown> = {}): Resolve
 const adapterFor = (
   profile: ResolvedOwcProviderProfile | (() => ResolvedOwcProviderProfile),
   resolveApiKey: () => Promise<string | undefined> = () => Promise.resolve('sk-test'),
+  resolveAttachments?: () => AttachmentStore | undefined,
 ): OwcProfilesAdapter => {
   const profiles = (): ReadonlyMap<string, ResolvedOwcProviderProfile> => {
     const current = typeof profile === 'function' ? profile() : profile
@@ -75,8 +77,20 @@ const adapterFor = (
     profiles,
     limiter: () => new ConcurrencyLimiter(3),
     resolveApiKey: () => resolveApiKey(),
+    ...resolveAttachments === undefined ? {} : { resolveAttachments },
   })
 }
+
+/** An attachment provider answering with one PNG request version over the given bytes. */
+const attachmentStore = (bytes = 4): AttachmentStore => ({
+  readImageRequest: (ref: ImageAttachmentRef, target: ImageRequestTarget) => Promise.resolve({
+    ...requestImage(Buffer.alloc(bytes).toString('latin1')),
+    attachment: ref,
+    bytes,
+    width: target.width,
+    height: target.height,
+  }),
+} as never)
 
 /** Collect one stream. */
 async function collect(stream: AsyncIterable<StreamChunk>): Promise<StreamChunk[]> {
@@ -91,6 +105,34 @@ afterEach(async () => {
 })
 
 describe('owc profiles adapter', () => {
+  it('carries a declared image to the endpoint as a base64 data URL', async () => {
+    const upstream = await provider((response) => { textTurn(response) })
+    running.push(upstream)
+    const adapter = adapterFor(
+      routeFor(upstream.url, { models: [{ id: 'm', capabilities: { modalities: ['text', 'image'] } }] }),
+      () => Promise.resolve('sk-test'),
+      () => attachmentStore(),
+    )
+    await collect(adapter.stream(request({ messages: [user([text('what is this?'), image('sha256:a')], 'u1')] })))
+    expect(upstream.bodies[0]?.messages).toEqual([{
+      role: 'user',
+      content: [
+        { type: 'text', text: 'what is this?' },
+        { type: 'image_url', image_url: { url: `data:image/png;base64,${Buffer.alloc(4).toString('base64')}` } },
+      ],
+    }])
+  })
+
+  it('fails an image request without a mounted attachment provider, before the endpoint sees it', async () => {
+    const upstream = await provider((response) => { textTurn(response) })
+    running.push(upstream)
+    const adapter = adapterFor(routeFor(upstream.url, { models: [{ id: 'm', capabilities: { modalities: ['image'] } }] }))
+    const failure = await collect(adapter.stream(request({ messages: [user([image('sha256:a')], 'u1')] })))
+      .catch((error: unknown) => error)
+    expect(String(failure)).toContain('no attachment provider is mounted')
+    expect(upstream.bodies).toHaveLength(0)
+  })
+
   it('streams a text turn through the configured endpoint', async () => {
     const upstream = await provider((response) => { textTurn(response) })
     running.push(upstream)

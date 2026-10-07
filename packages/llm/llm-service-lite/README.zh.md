@@ -7,18 +7,18 @@ kind: "package-reference"
 
 [English](README.md) | 中文
 
-## Summary
+## 概述
 
 `@deepseek-ai/dsh-llm-service-lite` 负责适配第三方模型端点：它为每一条已配置的服务商档案注册一条路由，并统一走自己的 chat-completions 传输，因此请求路径里既没有服务商 SDK，也没有已安装目录。一条档案是自包含的——线协议、端点、凭据引用、请求体附加字段、并发度，以及该端点所服务的模型——因此自建网关、国产模型 API 与公司网络里的代理走同一条代码路径，也不必有人事先认识这个服务商。
 
-## Table of Contents
+## 目录
 
 - [使用本包](#use-this-package)
 - [理解实现](#understand-the-implementation)
 - [延伸阅读](#further-exploration)
 - [模型体验](#model-experience)
 - [已知限制与后续工作](#known-limitations-and-deferred-work)
-- [开发注记](#dev-note)
+- [开发备注](#dev-note)
 
 -----
 
@@ -96,10 +96,16 @@ kind: "package-reference"
 | `models` | `[]` | 该路由对外声明的模型及其容量与能力 |
 | `defaultContextWindow` | `262144` | 未声明上下文的模型所用的上下文容量 |
 | `defaultMaxTokens` | `8192` | 未声明输出上限的模型所用的输出能力 |
+| `imageRequestMaxBytes` | `20971520` | 单个请求承载的 base64 图片累计字节 |
+| `imageRequestMaxImages` | `600` | 单个请求承载的图片出现次数 |
+| `imageOffloadByteQuantum` | `10485760` | 一次确定性卸载步骤移除的字节 |
+| `imageOffloadCountQuantum` | `20` | 一次确定性卸载步骤移除的出现次数 |
 
 ### 声明模型能做什么
 
-模型条目的 `capabilities` 是对端点的声明，不是猜测：没写的就不声明，写下的要么被履行、要么在声明处被按名拒绝——绝不"接受却无人在用"。`effort` 列出可选的推理档位，其值即线上拼写，因此自有词汇表的网关直接声明自己的词汇。`thinking` 列出可接受的思考模式（`enabled`、`disabled`、`adaptive`）。`thinkingStyle` 说明端点如何表达这个开关：`thinking: { type: … }`、顶层 `enable_thinking` 布尔值、始终思考的 `fixed`，或 `effort_only`——"只收档位、没有开关"的显式写法，与省略样式发出的是同一个请求。`reasoningContent` 声明端点会以 `reasoning_content` 返回思考，这正是后续请求得以回带既有思考的依据。`tools` 声明是否允许发送工具声明：关闭的模型收到的请求里没有工具列表，而不是一份会被端点拒绝的清单。`modalities` 声明端点接受的输入——`text`、`image`、`video`；文本以外的输入类型，以及 `imageOutput`、`responsesEncryptedReplay`，在声明处就被拒绝，直到有传输承载它们为止，因为一个无人在用的声明会被读成这条路由并不具备的能力。
+模型条目的 `capabilities` 是对端点的声明，不是猜测：没写的就不声明，写下的要么被履行、要么在声明处被按名拒绝——绝不"接受却无人在用"。`effort` 列出可选的推理档位，其值即线上拼写，因此自有词汇表的网关直接声明自己的词汇。`thinking` 列出可接受的思考模式（`enabled`、`disabled`、`adaptive`）。`thinkingStyle` 说明端点如何表达这个开关：`thinking: { type: … }`、顶层 `enable_thinking` 布尔值、始终思考的 `fixed`，或 `effort_only`——"只收档位、没有开关"的显式写法，与省略样式发出的是同一个请求。`reasoningContent` 声明端点会以 `reasoning_content` 返回思考，这正是后续请求得以回带既有思考的依据。`tools` 声明是否允许发送工具声明：关闭的模型收到的请求里没有工具列表，而不是一份会被端点拒绝的清单。`modalities` 声明端点接受哪些输入——`text`、`image`、`video`。其中 `image` 已被承载：保留的图片按模型声明的像素预算（或源尺寸）从附件提供方读取，按模型的字节目标重新编码，并以 base64 `image_url` 内联部分发出；已被会话卸载的图片则贡献它的占位文本。整条路由累计的请求由 `imageRequestMaxBytes`、`imageRequestMaxImages`、`imageOffloadByteQuantum` 与 `imageOffloadCountQuantum` 约束；超预算的请求以 `IMAGE_OFFLOAD_REQUIRED` 失败并给出必须卸载的最旧图片数量，而不是静默丢弃图片。`video` 输入、`imageOutput` 与 `responsesEncryptedReplay` 仍在声明处被拒绝，直到有传输承载它们——一个无人执行的声明会被读成路由并不具备的能力。
+
+图片请求需要挂载附件提供方（`attachments`）；只服务纯文本路由的部署从不挂载它，而声明了 `image` 却没有附件提供方的路由，会在端点看到任何部分调用之前就让请求失败。
 
 ### 运行期改配置
 
@@ -146,8 +152,8 @@ chat-completions 的翻译承担了三件服务商不做的事：块的身份与
 <a id="further-exploration"></a>
 ## 延伸阅读
 
-- [LLM 流式子系统](../../docs/subsystems/llm-streaming.md) —— 本包实现的消息与块类型、组装后的请求，以及适配器契约。
-- [服务商指南](../../docs/user/guide/providers.md) —— 部署如何在发行组合上配置服务商。
+- [LLM 流式子系统](../../../docs/subsystems/llm-streaming.zh.md) —— 本包实现的消息与块类型、组装后的请求，以及适配器契约。
+- [服务商指南](../../../docs/user/guide/providers.zh.md) —— 部署如何在发行组合上配置服务商。
 - [OpenWebCode](https://github.com/snnh/openwebcode) —— 本适配器遵循的服务商档案模型。
 
 <a id="model-experience"></a>
@@ -186,12 +192,12 @@ harness 组装出的对话原样：系统提示词作为开头的 system 消息�
 <a id="known-limitations-and-deferred-work"></a>
 
 - **只实现了一种协议。** `openai-chat-completions` 已完整服务；`anthropic-messages` 与 `openai-responses` 属于词汇表但在解析时被按名拒绝，因为用不同的线上行为去服务一个已声明的协议，比直说"还没做"更糟。它们是下一个里程碑。
-- **不支持请求图片/视频与图片输出。** 声明 `image`、`video` 输入或 `imageOutput` 的档案会被拒绝，而不是把差异丢掉后照常服务；图片的投影与卸载要和承载它们的传输一起做。
+- **不支持视频输入与图片输出。** 声明 `video` 输入或 `imageOutput` 的档案会被拒绝，而不是把差异丢掉后照常服务。`image` 输入已被承载，但没有逐图 token 计价：本适配器未实现 `imageRequestPricing`，因此计价界面会把图片当作它所替换的文本来计价。
 - **适配器侧不重试。** 一次调用就是一次服务商尝试，重试策略由 `dsh-llm-retry` 在持久步骤边界执行，重试会重新推导整个请求。
 - **没有回放信封。** 成功响应不携带适配器私有回放状态，历史以持久消息重发；声明 `responsesEncryptedReplay` 的档案在 responses 传输落地前按名拒绝。
 - **没有用量报告就没有流式用量。** 从不发送用量块的服务商，其 token 记账交给 harness 的估算器。
 
 <a id="dev-note"></a>
-### 开发注记
+### 开发备注
 
 两者是刻意共存的：目录路由是通往已知服务商的最短路径，这条路由则是通往任何"非已知"端点的诚实路径。
