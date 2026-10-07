@@ -150,7 +150,7 @@ describe('web composition over the lan-access row', () => {
     // The operator states a posture; a later start must obey the patch rather
     // than this release's default, and must not rewrite the line.
     writeFileSync(profile.patchPath, [
-      `- id: lan-access`,
+      '- id: lan-access',
       `  name: ${lanRow}`,
       '  config:',
       '    host: 10.1.2.3',
