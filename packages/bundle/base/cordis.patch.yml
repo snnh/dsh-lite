@@ -117,15 +117,32 @@
     - id: credentials
       name: '@deepseek-ai/dsh-credentials-local'
 
-    # The pi-ai multi-provider twin, mounted dormant: zero routes (and no extra
-    # models in the picker) until a `llm-pi-ai:` settings section supplies provider
-    # profiles — then those routes register live, keys resolving per request
-    # through their apiKeyEnv references, and drop again when the section empties.
-    # Supplying those profiles is exactly what the web Models page does. Which
+    # The pi-ai multi-provider twin. It imports a third-party provider catalog,
+    # so the row is not even imported until this deployment's own layer
+    # addresses it: a profile that manages its providers with the lighter
+    # service never pays for that module graph. Once a `llm-pi-ai:` section
+    # exists — written by the web Models page or by hand — the row mounts, those
+    # routes register live with keys resolving per request through their
+    # apiKeyEnv references, and they drop again when the section empties. Which
     # adapters exist is composition; which providers run is the user's settings
-    # document.
+    # document. A host that answers no such question (a packaged runtime, a test
+    # fixture) mounts it as written, because the expression can only be trusted
+    # where the launcher provided it.
     - id: llm-pi-ai
       name: '@deepseek-ai/dsh-llm-pi-ai'
+      disabled: !!js "typeof dshProfileDeclares === 'function' && !dshProfileDeclares('llm-pi-ai')"
+
+    # The lighter LLM service, mounted dormant: its settings section carries
+    # whole-provider profiles — protocol, endpoint, request body, declared
+    # models and their capabilities, a shape ported from OpenWebCode's
+    # model-provider layer. Zero routes until a `llm-service-lite:` section
+    # supplies a profile, then those routes register live and drop again when
+    # the section empties. The web Models page writes those profiles; which
+    # providers run is still the user's settings document. This package has no
+    # third-party provider SDK in its request path, which is why it can be the
+    # default while pi-ai above waits to be asked for.
+    - id: llm-service-lite
+      name: '@deepseek-ai/dsh-llm-service-lite'
 
     - id: session-persistence-jsonl
       name: '@deepseek-ai/dsh-session-persistence-jsonl'
@@ -521,7 +538,9 @@
     # The native DeepSeek adapter. No key or endpoint is inlined: both resolve per
     # request from the `llm-deepseek:` settings section over this entry, with the
     # key coming from the credential store below. Thinking defaults are a deployment
-    # choice.
+    # choice. The first-party channel stays first-party: `llm-service-lite` below
+    # adapts third-party endpoints, and an endpoint a deployment reaches with a
+    # profile of its own is a third-party endpoint like any other.
     - id: llm-deepseek
       name: '@deepseek-ai/dsh-llm-deepseek-api-key'
 

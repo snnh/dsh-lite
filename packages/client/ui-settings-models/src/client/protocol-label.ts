@@ -1,7 +1,9 @@
 /**
- * Product names for the wire protocols a pi-ai route may speak. The pickers
- * show these instead of the schema identifiers (`openai-completions`), which
- * are what `settings.yaml` carries and what the option values stay.
+ * Product names for the wire protocols a provider route may speak — pi-ai's
+ * route protocols and OWC's interface types, which are the same vocabulary
+ * spelled the same way. The pickers show these instead of the schema
+ * identifiers (`openai-completions`), which are what `settings.yaml` carries
+ * and what the option values stay.
  */
 
 import type { ModelsKey } from './locales.ts'
@@ -9,6 +11,7 @@ import type { ModelsKey } from './locales.ts'
 /** The protocols this page names, keyed by their schema identifier. */
 const PROTOCOL_LABEL_KEYS: Readonly<Record<string, ModelsKey>> = {
   'openai-completions': 'protocolOpenAiCompletions',
+  'openai-chat-completions': 'protocolOpenAiChatCompletions',
   'openai-responses': 'protocolOpenAiResponses',
   'anthropic-messages': 'protocolAnthropicMessages',
 }

@@ -543,6 +543,71 @@
   line-height: 18px;
 }
 
+/* Adapter-owned per-model capability bits, in the row's own advanced fold:
+   the fold is a two-column grid, so this block spans it. */
+.modelExtras {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 8px;
+}
+
+.modelCapabilities {
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  border: none;
+}
+
+/* The OWC profile's numeric limits sit two to a row, like the model fold. */
+.owcNumbers {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+/* The extra-body textarea: code-shaped, because what it holds is JSON that a
+   user reads and edits as such. */
+.extraBodyInput {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 96px;
+  padding: 8px 10px;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font-family: var(--ds-font-family-code);
+  font-size: 13px;
+  line-height: 20px;
+  resize: vertical;
+}
+
+.extraBodyInput:focus {
+  outline: none;
+  border-color: var(--dsw-alias-state-business-primary);
+}
+
+.extraBodyInput:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.probeRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* The connection answer, tinted like the section's saved notice rather than
+   the error tone: an endpoint that answered is not a fault. */
+.probeNotice {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-state-success-primary);
+}
+
 .modelEmpty {
   padding: 12px;
   border: 1px dashed var(--dsw-alias-border-l3);

@@ -2013,6 +2013,141 @@ export type Config = Readonly<Record<string, never>>
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-llm-retry -->
 
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-llm-service-lite -->
+<a id="deepseek-aidsh-llm-service-lite"></a>
+
+## `@deepseek-ai/dsh-llm-service-lite`
+
+- `inject`: `llm`
+- `refs`: [`RetryPolicyConfig`](../packages/llm/llm/src/index.ts) · `Volatile` (`@deepseek-ai/cordis`)
+- `source`: [`packages/llm/llm-service-lite/src/config.ts:218`](../packages/llm/llm-service-lite/src/config.ts)
+
+```ts config-catalog
+/**
+ * Plugin configuration: the provider routes this instance owns. One document
+ * describes every third-party endpoint this deployment reaches — which is the
+ * whole of what the plugin does.
+ */
+export interface Config {
+  /**
+   * Provider profiles keyed by the route name a request selects. An empty or
+   * omitted dict is the dormant posture: the adapter mounts with no routes and
+   * registers them the moment a profile appears.
+   */
+  providers: Volatile<Record<string, OwcProviderProfile>>
+}
+
+/**
+ * One provider endpoint. The `providers` dict key is the route name a request
+ * selects with `GenerateOptions.provider`, and it is also what every
+ * configuration surface shows unless `displayName` overrides the label.
+ */
+export interface OwcProviderProfile {
+  /** Label shown by selection surfaces; defaults to the route key. */
+  displayName?: string
+  /** Whether the route registers at all; a disabled profile keeps its configuration but serves nothing. */
+  enabled?: boolean
+  /** Wire protocol every model on this route speaks. */
+  interfaceType: InterfaceType
+  /** Endpoint of every model on the route; the protocol's usual host applies when omitted. */
+  baseURL?: string
+  /** Credential reference resolved per request through the harness credential seam. */
+  apiKeyEnv?: string
+  /** Inline credential, for a profile imported verbatim from OWC; prefer `apiKeyEnv` on a managed deployment. */
+  apiKey?: string
+  /** Static request headers, for a gateway that routes by header. */
+  headers?: Record<string, string>
+  /** Whether the route may use prompt caching, where the protocol supports it. */
+  promptCaching?: boolean
+  /** Whether a chat-completions request asks the endpoint to report usage in the stream. */
+  includeUsage?: boolean
+  /** Extra top-level request-body fields, for endpoint-specific knobs. */
+  extraBody?: Record<string, unknown>
+  /** Concurrent requests this route serves before calls queue. */
+  maxConcurrent?: number
+  /** Maximum idle interval between two stream events for this route, in milliseconds. */
+  streamIdleTimeoutMs?: number
+  /** Provider-owned retry policy executed by an agent-recovery plugin such as `dsh-llm-retry`. */
+  retryPolicy?: RetryPolicyConfig
+  /** Models this route serves; an empty list advertises nothing and serves only explicitly named ids. */
+  models?: OwcModelProfile[]
+  /** Context capacity for a route model that declares none. */
+  defaultContextWindow?: number
+  /** Output capability for a route model that declares none. */
+  defaultMaxTokens?: number
+}
+
+/** One wire protocol name from {@link INTERFACE_TYPES}. */
+export type InterfaceType = (typeof INTERFACE_TYPES)[number]
+
+/** One model a route serves, with the endpoint facts a request needs. */
+export interface OwcModelProfile {
+  /** Exact model id sent on the wire and named by `GenerateOptions.model`. */
+  id: string
+  /** Display name for selection surfaces; defaults to the id. */
+  name?: string
+  /** Context capacity in tokens; defaults to the route's `defaultContextWindow`. */
+  contextWindow?: number
+  /** Per-request output cap in tokens; defaults to the route's `defaultMaxTokens`. */
+  maxTokens?: number
+  /** Declared endpoint capabilities. */
+  capabilities?: OwcModelCapabilities
+}
+
+/**
+ * What one model on a route can do. Every field is a declaration about the
+ * endpoint, not a guess: a capability left out is one this adapter does not
+ * claim, and the request path omits rather than invents.
+ */
+export interface OwcModelCapabilities {
+  /** Accepted input modalities; omission means text only. */
+  modalities?: Modality[]
+  /** Accepted reasoning-effort levels; empty or absent publishes no effort selector. */
+  effort?: EffortLevel[]
+  /** Accepted thinking modes; `disabled` alone means the switch exists but thinking is off. */
+  thinking?: ThinkingMode[]
+  /** How this model's endpoint spells the thinking switch; omission sends only the effort level. */
+  thinkingStyle?: ThinkingStyle
+  /**
+   * Whether the endpoint returns its reasoning in `reasoning_content`, so a
+   * later request may replay prior thinking the way DeepSeek's own API does.
+   */
+  reasoningContent?: boolean
+  /**
+   * Whether tool declarations may be sent to this model; omission means they
+   * may. A model declaring `false` is one whose endpoint rejects or mishandles
+   * a `tools` array, so the request carries none and the model answers as plain
+   * chat — the same declaration OWC's catalog makes.
+   */
+  tools?: boolean
+  /**
+   * Whether the model returns images. Declaring it is refused at resolution:
+   * this adapter carries text and tool output, and an accepted declaration
+   * nothing acts on would read as a capability the route does not have.
+   */
+  imageOutput?: boolean
+  /**
+   * Whether the endpoint replays signed reasoning items. Advertised by OWC's
+   * catalog for the official OpenAI Responses API, which this adapter does not
+   * serve yet; declaring it is refused by name at resolution.
+   */
+  responsesEncryptedReplay?: boolean
+}
+
+/** One input modality from {@link MODALITIES}. */
+export type Modality = (typeof MODALITIES)[number]
+
+/** One selectable reasoning-effort level from {@link EFFORT_LEVELS}. */
+export type EffortLevel = (typeof EFFORT_LEVELS)[number]
+
+/** One thinking mode from {@link THINKING_MODES}. */
+export type ThinkingMode = (typeof THINKING_MODES)[number]
+
+/** One thinking wire style from {@link THINKING_STYLES}. */
+export type ThinkingStyle = (typeof THINKING_STYLES)[number]
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-llm-service-lite -->
+
 <!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-lsp-stdio -->
 <a id="deepseek-aidsh-lsp-stdio"></a>
 
@@ -2678,7 +2813,7 @@ export type JsonlCompression = 'zstd' | 'none'
 ## `@deepseek-ai/dsh-session-projection-cache`
 
 - `inject`: `storageDomain` · `sessionProjections` · `sessions`
-- `source`: [`packages/session/session-projection-cache/src/index.ts:119`](../packages/session/session-projection-cache/src/index.ts)
+- `source`: [`packages/session/session-projection-cache/src/index.ts:120`](../packages/session/session-projection-cache/src/index.ts)
 
 ```ts config-catalog
 /**

@@ -3,22 +3,26 @@
  * field is a single write-only **API key** input (the page never asks for an
  * environment-variable name — a typed key stores through `credentials/set`
  * under the profile's reference, deriving `<ROUTE>_API_KEY` when the profile
- * has none. The pi-ai profile records that derivation as `apiKeyEnv` only when
- * a key is entered; a blank key materializes a reference-free profile for
- * provider-native authentication);
+ * has none. The pi-ai and OWC profiles record that derivation as `apiKeyEnv`
+ * only when a key is entered; a blank key materializes a reference-free
+ * profile for provider-native authentication);
  * the collapsed 自定义设置 area carries the per-family extras (`baseURL` for
- * both families, DeepSeek's id/name/context-window model catalog, and the
- * display name and wire protocol of a pi-ai route the adapter does not ship —
- * the two fields the create card asked that route for, editable here for the
- * same reason).
- * Reasoning effort is deliberately absent: it is a per-MODEL capability, and
- * the models under one provider disagree about it, so a provider-scoped
- * control can only be set to a value some of them reject. The composer's
- * model picker offers each model its own levels; `cordis.patch.yml` keeps the
- * profile field for a deployment that knows its route. Everything else stays
- * owned by `cordis.patch.yml`. Profile edits land as minimal `settings.mutate`
- * path ops against the stored section — the card names only the fields it can
- * see instead of rebuilding the whole subtree from a partial descriptor.
+ * every family, DeepSeek's id/name/context-window model catalog, the display
+ * name and wire protocol of a pi-ai route the adapter does not ship — the two
+ * fields the create card asked that route for, editable here for the same
+ * reason — and OWC's whole provider profile, from its interface type to the
+ * capability bits of each model it serves).
+ * The family is recognized by probing the namespace's own schema rather than
+ * by naming the namespace: the OWC namespace is an entry id a deployment
+ * chooses, and only the adapter's `Config` knows the shape it registered.
+ * Reasoning effort is deliberately absent from the provider scope: it is a
+ * per-MODEL capability, and the models under one provider disagree about it,
+ * so a provider-scoped control can only be set to a value some of them reject.
+ * The composer's model picker offers each model its own levels, and the OWC
+ * cards edit one model's levels beside that model. Everything else stays owned
+ * by `cordis.patch.yml`. Profile edits land as minimal `settings.mutate` path
+ * ops against the stored section — the card names only the fields it can see
+ * instead of rebuilding the whole subtree from a partial descriptor.
  */
 
 import { useEffect, useMemo, useState } from 'react'
@@ -33,7 +37,13 @@ import {
 import { apiKeyFailure } from './apiKey.ts'
 import { EditorFooter } from './EditorFooter.tsx'
 import { ModelListEditor } from './ModelListEditor.tsx'
-import { deriveKeyRef, protocolChoices } from './store.ts'
+import { OWC_INPUT_MODALITIES, OwcModelCapabilities } from './OwcModelCapabilities.tsx'
+import { OwcProfileFields } from './OwcProfileFields.tsx'
+import type { OwcConnectionReport } from './OwcProfileFields.tsx'
+import { extraBodyFailure, parseExtraBody, spellExtraBody } from './owcExtraBody.ts'
+import { invalidOwcNumbers, parseOwcNumber } from './owcNumbers.ts'
+import type { OwcNumberField } from './owcNumbers.ts'
+import { declaresInterfaceType, deriveKeyRef, interfaceChoices, protocolChoices } from './store.ts'
 import { protocolLabel } from './protocol-label.ts'
 import type { ModelsOperations } from './operations.ts'
 import type { SettingsSchemaOperations } from './schema-operations.ts'
@@ -41,10 +51,7 @@ import type { en } from './locales.ts'
 import styles from './ModelsSection.module.css'
 
 /** Per-adapter-family curated field sets (unknown namespaces get the hint alone). */
-type EditorLayout = 'deepseek' | 'pi-ai' | 'unknown'
-
-
-
+type EditorLayout = 'deepseek' | 'pi-ai' | 'owc' | 'unknown'
 /** Props of {@link ProviderEditor}. */
 export interface ProviderEditorProps {
   /** Provider route id. */
@@ -137,11 +144,16 @@ export function pathOps(
   return ops
 }
 
-/** The editor layout the owning namespace selects. */
-function layoutOf(ns: string): EditorLayout {
-  if (ns === 'llm-deepseek') return 'deepseek'
-  if (ns === 'llm-pi-ai') return 'pi-ai'
-  return 'unknown'
+/**
+ * The editor layout the owning namespace selects. The two shipped adapters are
+ * named by the namespace they register; everything else is recognized by its
+ * own schema, which is what keeps a renamed or deployment-chosen OWC entry id
+ * working while an unrelated namespace still falls back to the hint.
+ */
+function layoutOf(namespace: SettingsNamespaceView, schema: SettingsSchemaOperations): EditorLayout {
+  if (namespace.ns === 'llm-deepseek') return 'deepseek'
+  if (namespace.ns === 'llm-pi-ai') return 'pi-ai'
+  return declaresInterfaceType(namespace, schema) ? 'owc' : 'unknown'
 }
 
 /** The credential reference this profile resolves keys through. */
@@ -170,9 +182,18 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
   const [keyState, setKeyState] = useState<CredentialInfo | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   const [listBusy, setListBusy] = useState(false)
+  // The connection test is an interrogation of the draft, not a write, so its
+  // report lives here rather than in the profile it asks about.
+  const [connection, setConnection] = useState<OwcConnectionReport>({ kind: 'idle' })
   const { onBusyChange } = props
-  useEffect(() => { onBusyChange?.(busy || listBusy) }, [busy, listBusy, onBusyChange])
+  useEffect(() => {
+    onBusyChange?.(busy || listBusy || connection.kind === 'busy')
+  }, [busy, listBusy, connection, onBusyChange])
   const [failure, setFailure] = useState<string | undefined>(undefined)
+  // The extra-body textarea is text and the profile is JSON. The text is held
+  // here so an unreadable entry stays on screen while the submit is refused,
+  // and the draft carries the object so an apply writes exactly what it shows.
+  const [extraBodyDraft, setExtraBodyDraft] = useState(() => spellExtraBody(draft['extraBody']))
   // A settings success advances both retry baselines immediately. Keeping the
   // derived fields in the draft prevents a pushed namespace refresh from
   // turning them into deletions when the following credential write is retried.
@@ -186,16 +207,26 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
   const disabled = props.readOnly || busy
   const accountProvider = props.provider === 'deepseek-account'
   // Account settings use a configurable Cordis entry id.
-  const layout = accountProvider ? 'deepseek' : layoutOf(namespace.ns)
+  const layout = accountProvider ? 'deepseek' : layoutOf(namespace, schema)
   const keyRef = refFor(schema, namespace, settingsPath, props.provider)
-  // The same schema read the create card makes, so the choices offered here
+  // The same schema reads the create card makes, so the choices offered here
   // and there cannot drift apart: both come from the adapter's own `Config`.
-  // Only the pi-ai layout has a per-route protocol for the read to find, and
-  // it rehydrates the whole section schema, so the other layouts skip it.
+  // Only the pi-ai layout has a per-route protocol and only the OWC layout an
+  // interface type for the read to find, and each rehydrates the whole section
+  // schema, so the other layouts skip theirs.
   const protocols = useMemo(
     () => layout === 'pi-ai' ? protocolChoices(namespace, schema) : [],
     [layout, namespace, schema],
   )
+  const interfaces = useMemo(
+    () => layout === 'owc' ? interfaceChoices(namespace, schema) : [],
+    [layout, namespace, schema],
+  )
+  const extraBodyParse = parseExtraBody(extraBodyDraft)
+  const extraBodyFailureKey = extraBodyFailure(extraBodyParse)
+  // Only OWC declares the route's numeric limits, so the read answers nothing
+  // for the other families and their submit gate is unchanged.
+  const numberFailures = invalidOwcNumbers(draft)
 
   useEffect(() => {
     if (accountProvider) return
@@ -253,6 +284,65 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
     ...keyValue.length === 0 ? {} : { apiKey: keyValue },
   }
   /**
+   * Replace one OWC profile field with a value of any type; `undefined` unsets
+   * it. A string of nothing but whitespace is cleared rather than stored, for
+   * the same reason the key field clears one: the field would render empty
+   * while the profile carried the spaces.
+   */
+  const setProfileValue = (key: string, value: unknown): void => {
+    const next = typeof value === 'string' && value.trim().length === 0 ? undefined : value
+    setDraft(current => next === undefined
+      ? schema.deletePath(current, [key])
+      : schema.setPath(current, [key], next))
+  }
+
+  /**
+   * Accept one keystroke in an OWC numeric field. Readable text stores the
+   * count it means; unreadable text is kept as text so the field still shows
+   * it, with the submit refused until it is corrected.
+   */
+  const setProfileNumber = (field: OwcNumberField, text: string): void => {
+    if (text.trim().length === 0) {
+      setProfileValue(field, undefined)
+      return
+    }
+    const parsed = parseOwcNumber(text)
+    setProfileValue(field, Number.isNaN(parsed) ? text : parsed)
+  }
+
+  /**
+   * Accept one keystroke in the extra-body textarea. The draft gains the
+   * parsed object the moment the text parses — so an apply writes what the
+   * field shows — and keeps its last good value while the text does not, with
+   * the submit refused for as long as that lasts.
+   */
+  const editExtraBody = (text: string): void => {
+    setExtraBodyDraft(text)
+    const parsed = parseExtraBody(text)
+    if (parsed.kind === 'object') setProfileValue('extraBody', parsed.value)
+    else if (parsed.kind === 'empty') setProfileValue('extraBody', undefined)
+  }
+
+  /**
+   * Ask the route's endpoint what it serves, exactly as OWC's own
+   * configuration surface does over `GET /models`: the route names itself and
+   * the form's current endpoint, and the answer is a report rather than a
+   * write — nothing here changes the profile.
+   */
+  const testConnection = async (): Promise<void> => {
+    setConnection({ kind: 'busy' })
+    const started = Date.now()
+    const answer = await operations.discoverModels(namespace.ns, {
+      provider: props.provider,
+      ...probeBaseURL === undefined ? {} : { baseURL: probeBaseURL },
+    })
+    const latencyMs = Date.now() - started
+    setConnection(answer.kind === 'found'
+      ? { kind: 'connected', count: answer.models.length, latencyMs }
+      : { kind: 'failed', message: answer.message })
+  }
+
+  /**
    * The write for this card, or a failure message. Every edit travels as
    * path ops against the STORED section: the draft comes from the redacted
    * descriptor, so a wholesale replace rebuilt from it could delete fields
@@ -260,9 +350,11 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
    */
   const applyOnce = async (): Promise<string | undefined> => {
     const ns = namespace.ns
-    // A pi-ai profile names the conventional reference only when this page is
-    // about to store a key. Otherwise the provider keeps its native auth path.
-    const next = layout === 'pi-ai' && stringAt(draft, 'apiKeyEnv') === undefined
+    // A pi-ai or OWC profile names the conventional reference only when this
+    // page is about to store a key. Otherwise the provider keeps its native
+    // auth path — an ambient credential chain, or nothing at all.
+    const namesKeyRef = layout === 'pi-ai' || layout === 'owc'
+    const next = namesKeyRef && stringAt(draft, 'apiKeyEnv') === undefined
       && stringAt(fallback, 'apiKeyEnv') === undefined && keyValue.length > 0
       ? schema.setPath(draft, ['apiKeyEnv'], keyRef)
       : draft
@@ -346,7 +438,7 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
    * narrowed so the per-family branches below are total: an unknown namespace
    * renders the hint instead and never reaches this body.
    */
-  const curatedFields = (family: 'deepseek' | 'pi-ai'): ReactNode => {
+  const curatedFields = (family: 'deepseek' | 'pi-ai' | 'owc'): ReactNode => {
     // What a hand-declared route names for itself and nothing else can supply.
     // A whole-section `llm-deepseek` profile is a composition fact with no
     // per-route identity for its schema to carry, hence the family test.
@@ -361,7 +453,7 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
       ? t('keyEnvLocked')
       : keyState?.configured === true && props.credentialRequired !== true
         ? t('keyStored')
-        : family === 'pi-ai' ? t('keyPlaceholderNative') : t('keyPlaceholder')
+        : family === 'deepseek' ? t('keyPlaceholder') : t('keyPlaceholderNative')
     /** What both family editors take: the rows, whose layer owns them, and the two writes. */
     const catalogProps = {
       models,
@@ -376,6 +468,136 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
     if (accountProvider) return <DeepSeekModelsEditor {...catalogProps}
       defaultContextWindow={typeof defaultContextWindow === 'number' ? defaultContextWindow : undefined}
       defaultMaxTokens={typeof defaultMaxTokens === 'number' ? defaultMaxTokens : undefined} />
+
+    /** What an empty OWC numeric field inherits: the composition's pin, else the schema default. */
+    const inheritedNumber = (key: string): number | undefined => {
+      const pinned = schema.getPath(namespace.base, [...settingsPath, key])
+      const value: unknown = pinned ?? schema.nodeAtPath(root, [...settingsPath, key])?.meta.default
+      return typeof value === 'number' ? value : undefined
+    }
+    const numberDefaults = (): Readonly<Record<OwcNumberField, number | undefined>> => ({
+      maxConcurrent: inheritedNumber('maxConcurrent'),
+      streamIdleTimeoutMs: inheritedNumber('streamIdleTimeoutMs'),
+      defaultContextWindow: inheritedNumber('defaultContextWindow'),
+      defaultMaxTokens: inheritedNumber('defaultMaxTokens'),
+    })
+
+    /** The family's model list: one contract, family-owned extras. */
+    const modelList = (): ReactNode => {
+      if (family === 'deepseek') {
+        return (
+          <DeepSeekModelsEditor
+            {...catalogProps}
+            defaultContextWindow={typeof defaultContextWindow === 'number' ? defaultContextWindow : undefined}
+            defaultMaxTokens={typeof defaultMaxTokens === 'number' ? defaultMaxTokens : undefined}
+          />
+        )
+      }
+      // OWC keeps a row's input types under `capabilities`, beside the other
+      // capability bits, and edits the bits themselves in the row's fold.
+      if (family === 'owc') {
+        return (
+          <ModelListEditor
+            {...catalogProps}
+            inputField={['capabilities', 'modalities']}
+            inputModalities={OWC_INPUT_MODALITIES}
+            probe={probe}
+            probeBlocked={keyFailure}
+            operations={operations}
+            onBusyChange={setListBusy}
+            rowExtras={extras => <OwcModelCapabilities {...extras} />}
+          />
+        )
+      }
+      return (
+        <ModelListEditor
+          {...catalogProps}
+          catalogProvider={props.declared === true ? undefined : props.provider}
+          defaultInput={Array.isArray(defaultInput) ? defaultInput : undefined}
+          probe={probe}
+          probeBlocked={keyFailure}
+          operations={operations}
+          onBusyChange={setListBusy}
+        />
+      )
+    }
+
+    /** The name, endpoint, and wire protocol the pi-ai and DeepSeek families share. */
+    const sharedFields = (): ReactNode => (
+      <>
+        {/* The name and the protocol are the create card's two remaining
+            profile fields; a route the adapter ships defaults both from
+            its catalog entry and neither belongs on its card. */}
+        {ownsIdentity
+          ? (
+            <div className={styles['field']}>
+              <span className={styles['fieldLabel']}>{t('customDisplayName')}</span>
+              <input
+                className={styles['input']}
+                type="text"
+                value={stringAt(draft, 'displayName') ?? ''}
+                // What this route is called the moment the field is
+                // cleared, which is the layer beneath the one this field
+                // edits: a `cordis.yml` may pin a name for a route the
+                // catalog does not ship, and only when nothing does is
+                // the answer the route id. Reading the effective value
+                // instead would echo the stored override back as the
+                // thing clearing restores.
+                placeholder={stringAt(schema.getPath(namespace.base, settingsPath), 'displayName')
+                  ?? props.provider}
+                aria-label={t('customDisplayName')}
+                disabled={disabled}
+                onChange={(event) => { setField('displayName', event.target.value) }}
+              />
+            </div>
+          )
+          : null}
+        <div className={styles['field']}>
+          <span className={styles['fieldLabel']}>{t('baseUrl')}</span>
+          <input
+            className={styles['input']}
+            type="text"
+            value={stringAt(draft, 'baseURL') ?? ''}
+            placeholder={family === 'deepseek'
+              ? t('deepSeekBaseUrl')
+              : stringAt(fallback, 'baseURL') ?? t('baseUrlDefault')}
+            aria-describedby={family === 'deepseek' ? `${props.provider}-endpoint-hint` : undefined}
+            aria-label={t('baseUrl')}
+            disabled={disabled}
+            onChange={(event) => {
+              setField('baseURL', event.target.value === '' ? undefined : event.target.value)
+            }}
+          />
+          {family === 'deepseek' ? <span id={`${props.provider}-endpoint-hint`} className={styles['advancedHint']}>{t('deepSeekEndpointHint')}</span> : null}
+        </div>
+        {/* The protocol sits beside the endpoint it describes, as it does
+            on the create card. */}
+        {ownsIdentity
+          ? (
+            <div className={styles['field']}>
+              <span className={styles['fieldLabel']}>{t('customApi')}</span>
+              <select
+                className={`${styles['input']} ${styles['selectInput']}`}
+                value={probeApi ?? ''}
+                aria-label={t('customApi')}
+                disabled={disabled}
+                onChange={(event) => { setField('api', event.target.value) }}
+              >
+                {/* A profile naming no protocol — hand-written into
+                    cordis.patch.yml with no model to need one — selects
+                    nothing rather than reading as if it had picked the
+                    first choice. The option is named because a screen
+                    reader announces it either way, and an empty one is
+                    announced as a choice with no identity. */}
+                {probeApi === undefined ? <option value="">{t('customApiUnset')}</option> : null}
+                {protocols.map(choice => <option key={choice} value={choice}>{protocolLabel(t, choice)}</option>)}
+              </select>
+            </div>
+          )
+          : null}
+      </>
+    )
+
     return (
       <>
         <div className={styles['field']}>
@@ -398,100 +620,39 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
         {props.credentialOnly === true ? null : <details className={styles['customized']}>
           <summary className={styles['customizedSummary']}>{t('customized')}</summary>
           <div className={styles['customizedBody']}>
-            {/* The name and the protocol are the create card's two remaining
-                profile fields; a route the adapter ships defaults both from
-                its catalog entry and neither belongs on its card. */}
-            {ownsIdentity
+            {/* An OWC profile is a whole endpoint declaration, so its card
+                owns every field of it; the shared fields below are what the
+                other two families have in common. */}
+            {family === 'owc'
               ? (
-                <div className={styles['field']}>
-                  <span className={styles['fieldLabel']}>{t('customDisplayName')}</span>
-                  <input
-                    className={styles['input']}
-                    type="text"
-                    value={stringAt(draft, 'displayName') ?? ''}
-                    // What this route is called the moment the field is
-                    // cleared, which is the layer beneath the one this field
-                    // edits: a `cordis.yml` may pin a name for a route the
-                    // catalog does not ship, and only when nothing does is
-                    // the answer the route id. Reading the effective value
-                    // instead would echo the stored override back as the
-                    // thing clearing restores.
-                    placeholder={stringAt(schema.getPath(namespace.base, settingsPath), 'displayName')
-                      ?? props.provider}
-                    aria-label={t('customDisplayName')}
-                    disabled={disabled}
-                    onChange={(event) => { setField('displayName', event.target.value) }}
-                  />
-                </div>
-              )
-              : null}
-            <div className={styles['field']}>
-              <span className={styles['fieldLabel']}>{t('baseUrl')}</span>
-              <input
-                className={styles['input']}
-                type="text"
-                value={stringAt(draft, 'baseURL') ?? ''}
-                placeholder={family === 'deepseek'
-                  ? t('deepSeekBaseUrl')
-                  : stringAt(fallback, 'baseURL') ?? t('baseUrlDefault')}
-                aria-describedby={family === 'deepseek' ? `${props.provider}-endpoint-hint` : undefined}
-                aria-label={t('baseUrl')}
-                disabled={disabled}
-                onChange={(event) => {
-                  setField('baseURL', event.target.value === '' ? undefined : event.target.value)
-                }}
-              />
-              {family === 'deepseek' ? <span id={`${props.provider}-endpoint-hint`} className={styles['advancedHint']}>{t('deepSeekEndpointHint')}</span> : null}
-            </div>
-            {/* The protocol sits beside the endpoint it describes, as it does
-                on the create card. */}
-            {ownsIdentity
-              ? (
-                <div className={styles['field']}>
-                  <span className={styles['fieldLabel']}>{t('customApi')}</span>
-                  <select
-                    className={`${styles['input']} ${styles['selectInput']}`}
-                    value={probeApi ?? ''}
-                    aria-label={t('customApi')}
-                    disabled={disabled}
-                    onChange={(event) => { setField('api', event.target.value) }}
-                  >
-                    {/* A profile naming no protocol — hand-written into
-                        cordis.patch.yml with no model to need one — selects
-                        nothing rather than reading as if it had picked the
-                        first choice. The option is named because a screen
-                        reader announces it either way, and an empty one is
-                        announced as a choice with no identity. */}
-                    {probeApi === undefined ? <option value="">{t('customApiUnset')}</option> : null}
-                    {protocols.map(choice => <option key={choice} value={choice}>{protocolLabel(t, choice)}</option>)}
-                  </select>
-                </div>
-              )
-              : null}
-            {/* Both families edit the same rows through the same contract; only
-                the extras differ — DeepSeek's inherited capacities, pi-ai's
-                endpoint interrogation. */}
-            {family === 'deepseek'
-              ? (
-                <DeepSeekModelsEditor
-                  {...catalogProps}
-                  defaultContextWindow={typeof defaultContextWindow === 'number'
-                    ? defaultContextWindow
-                    : undefined}
-                  defaultMaxTokens={typeof defaultMaxTokens === 'number' ? defaultMaxTokens : undefined}
+                <OwcProfileFields
+                  route={props.provider}
+                  draft={draft}
+                  fallback={fallback}
+                  interfaces={interfaces}
+                  inherited={{
+                    // What this route is called the moment the name is
+                    // cleared: the layer beneath this field, and the route id
+                    // only when nothing pins a name at all.
+                    displayName: stringAt(schema.getPath(namespace.base, settingsPath), 'displayName')
+                      ?? props.provider,
+                    baseURL: stringAt(fallback, 'baseURL'),
+                  }}
+                  defaults={numberDefaults()}
+                  extraBody={{ text: extraBodyDraft, failure: extraBodyFailureKey, onChange: editExtraBody }}
+                  connection={connection}
+                  t={t}
+                  disabled={disabled}
+                  onField={setProfileValue}
+                  onNumber={setProfileNumber}
+                  onTest={() => { void testConnection() }}
                 />
               )
-              : (
-                <ModelListEditor
-                  {...catalogProps}
-                  catalogProvider={props.declared === true ? undefined : props.provider}
-                  defaultInput={Array.isArray(defaultInput) ? defaultInput : undefined}
-                  probe={probe}
-                  probeBlocked={keyFailure}
-                  operations={operations}
-                  onBusyChange={setListBusy}
-                />
-              )}
+              : sharedFields()}
+            {/* Every family edits the same rows through the same contract;
+                only the extras differ — DeepSeek's inherited capacities,
+                pi-ai's endpoint interrogation, OWC's per-model bits. */}
+            {modelList()}
           </div>
         </details>}
       </>
@@ -525,7 +686,8 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
         t={t}
         busy={busy}
         submitDisabled={disabled || layout === 'unknown'
-          || (props.credentialOnly !== true && modelFailure !== undefined)
+          || (props.credentialOnly !== true && (modelFailure !== undefined || numberFailures.length > 0))
+          || extraBodyFailureKey !== undefined
           || shownKeyFailure !== undefined
           || (props.credentialRequired === true && keyValue.length === 0)}
         submitLabelKey={props.submitLabelKey ?? 'apply'}

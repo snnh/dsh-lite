@@ -8,8 +8,12 @@
  * the first-run posture — no provider on the page can serve requests yet — and
  * only until the user closes that card. The add flow is one card behind one
  * button: a mode switch chooses between adopting a dormant directory provider
- * (the catalog select over the provider editor) and declaring a custom model
- * API (the create form). A panel mounts the first time its mode is shown and
+ * (the catalog select over the provider editor), declaring a custom model API
+ * (the pi-ai create form), and declaring a provider an OWC namespace serves
+ * (the OWC create form, over whichever mounted namespace's own schema declares
+ * an `interfaceType` — a mode the card never offers when no such namespace is
+ * mounted, since the namespace is an entry id the deployment chooses). A panel
+ * mounts the first time its mode is shown and
  * stays mounted, hidden, while the card is open and its mode stays offered,
  * so switching modes discards neither draft and an unvisited mode costs
  * nothing; the switch holds still while either panel has a write or an
@@ -29,12 +33,13 @@ import type { SettingsNamespaceView } from '@deepseek-ai/dsh-api-remotes/client'
 // Type-only: pulls this package's SlotMap merge (the two Models child slots).
 import type {} from './slot-contract.ts'
 import { CustomProviderCard } from './CustomProviderCard.tsx'
-import { deriveKeyRef, protocolChoices, providerUsable } from './store.ts'
+import { OwcProviderCard } from './OwcProviderCard.tsx'
+import { declaresInterfaceType, deriveKeyRef, interfaceChoices, protocolChoices, providerRoutes, providerUsable } from './store.ts'
 import type { ModelsSettingsStore, ProviderRow } from './store.ts'
 import type { ModelsOperations } from './operations.ts'
 import type { SettingsSchemaOperations } from './schema-operations.ts'
 import { ProviderEditor, type ProviderEditorProps } from './ProviderEditor.tsx'
-import type { en } from './locales.ts'
+import type { ModelsKey, en } from './locales.ts'
 import styles from './ModelsSection.module.css'
 
 /** Injected dependencies of {@link ModelsSection} (slot `inject`). */
@@ -54,10 +59,34 @@ export interface ModelsSectionInjected {
 }
 
 /**
- * The two ways the add card gains a provider: adopt a directory row the
- * adapter already knows, or declare a route it does not.
+ * The three ways the add card gains a provider: adopt a directory row the
+ * adapter already knows, declare a pi-ai route it does not, or declare a
+ * provider a mounted OWC namespace serves. Order is the switch's order and the
+ * order the card opens on when several are offered.
  */
-type AddMode = 'catalog' | 'custom'
+type AddMode = 'catalog' | 'custom' | 'owc'
+
+/**
+ * The add modes in switch order: the harness's own provider management first,
+ * because that is the way in for a deployment that has none yet, then the
+ * pi-ai ways, which a deployment that already declared third-party providers
+ * keeps as they were.
+ */
+const ADD_MODES: readonly AddMode[] = ['owc', 'catalog', 'custom']
+
+/**
+ * The copy each add mode owns: its segment (or single-mode) label, the
+ * guidance line under the switch, and why a segment that is offered with
+ * nothing to declare is locked. OWC's mode is offered only once a namespace's
+ * schema declares interface types, so its locked line is what an OWC namespace
+ * declaring none would need — the three entries stay symmetric so a fourth
+ * mode cannot be added without naming all three kinds of copy.
+ */
+const MODE_COPY: Readonly<Record<AddMode, { labelKey: ModelsKey; hintKey: ModelsKey; lockedKey: ModelsKey }>> = {
+  catalog: { labelKey: 'addCatalog', hintKey: 'addCatalogHint', lockedKey: 'addCatalogExhausted' },
+  custom: { labelKey: 'addCustom', hintKey: 'addCustomHint', lockedKey: 'addCustomUnavailable' },
+  owc: { labelKey: 'addOwc', hintKey: 'addOwcHint', lockedKey: 'addOwcUnavailable' },
+}
 
 /** The child slots this section declares and dispatches (see ./slot-contract.ts). */
 type ModelsChildSlots = 'settings.models.provider-card' | 'settings.models.footer'
@@ -242,6 +271,7 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
   /** Whether each add panel has a write or an interrogation in flight. */
   const [catalogBusy, setCatalogBusy] = useState(false)
   const [customBusy, setCustomBusy] = useState(false)
+  const [owcBusy, setOwcBusy] = useState(false)
   /** Base of the add card's tab and panel ids. */
   const addId = useId()
   const [deleteTarget, setDeleteTarget] = useState<EditorTarget | undefined>(undefined)
@@ -269,6 +299,7 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
     setAddOpen(false)
     setCatalogBusy(false)
     setCustomBusy(false)
+    setOwcBusy(false)
   }
 
   const closeEditor = (changed: boolean, target: ProviderIdentity): void => {
@@ -344,25 +375,68 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
     const namespace = state.namespaces.get(row.entry.settingsNs)
     return namespace === undefined || row.configured ? [] : [{ row, namespace }]
   })
-  // Hand-declared routes live in the pi-ai namespace, which is also the only
-  // one whose schema names the protocols one may speak; without it mounted
+  // Hand-declared pi-ai routes live in the pi-ai namespace, which is also the
+  // only one whose schema names the protocols one may speak; without it mounted
   // there is nothing to declare and the mode is not offered.
   const piAi = state.namespaces.get('llm-pi-ai')
   const protocols = protocolChoices(piAi, schema)
+  // The OWC family is recognized by its schema rather than by its entry id, the
+  // same probe the editor cards make: a namespace declaring an `interfaceType`
+  // under `providers` is one this card can create a profile in. Where several
+  // are mounted, the mirror's own order picks the one the card writes to.
+  const owc = [...state.namespaces.values()].find(namespace => declaresInterfaceType(namespace, schema))
   // Each mode is offered while its namespace is mounted and enabled while it
-  // has something to offer; the card shows the chosen mode where both are
+  // has something to offer; the card shows the chosen mode where several are
   // offered, else the only one there is. A mode's panel is mounted while it is
   // the shown mode or has been shown since the card opened — derived, so a
   // refresh that changes which modes are offered can never leave the card
   // without a panel.
-  const catalogOffered = configurable.length > 0
+  /**
+   * Whether third-party profiles already exist. The pi-ai ways are for keeping
+   * a deployment's existing providers going, so they are offered only where a
+   * pi-ai route is already declared — from this page, from another settings
+   * layer, or from a composition file. A fresh deployment is offered the
+   * harness's own management alone.
+   */
+  const piAiConfigured = providerRoutes(piAi, schema).length > 0
+  const catalogOffered = piAiConfigured && configurable.length > 0
   const catalogEnabled = addable.length > 0
-  const customOffered = piAi !== undefined
+  const customOffered = piAiConfigured && piAi !== undefined
   const customEnabled = protocols.length > 0
-  const bothOffered = catalogOffered && customOffered
-  const mode: AddMode = bothOffered ? addMode : customOffered ? 'custom' : 'catalog'
+  const owcOffered = owc !== undefined
+  const modeOffered: Readonly<Record<AddMode, boolean>> = {
+    catalog: catalogOffered,
+    custom: customOffered,
+    owc: owcOffered,
+  }
+  const modeEnabled: Readonly<Record<AddMode, boolean>> = {
+    catalog: catalogEnabled,
+    custom: customEnabled,
+    // The mode is only offered once the probe read a non-empty union, so an
+    // offered OWC namespace always has an interface type to declare.
+    owc: owcOffered,
+  }
+  const offered = ADD_MODES.filter(candidate => modeOffered[candidate])
+  const usable = ADD_MODES.filter(candidate => modeEnabled[candidate])
+  const mode: AddMode = offered.includes(addMode) ? addMode : offered[0] ?? 'catalog'
+  /**
+   * The mode a freshly opened card starts on: the first one the user can
+   * actually enter. The fallback is what an already-open card reads when a
+   * refresh has taken every mode away — the button that sets this is disabled
+   * by then, so nothing new opens on it.
+   */
+  const openMode: AddMode = usable[0] ?? mode
   const mounted = (candidate: AddMode): boolean => mode === candidate || visited.has(candidate)
-  const switchLocked = catalogBusy || customBusy
+  /**
+   * The tabpanel attributes one add panel carries. A card showing a single
+   * mode has no tablist to name its panel, so there the panel is an ordinary
+   * region rather than a tabpanel pointing at a tab that does not exist.
+   */
+  const panelAttrs = (
+    candidate: AddMode,
+  ): { role: 'tabpanel'; 'aria-labelledby': string } | Record<string, never> =>
+    offered.length > 1 ? { role: 'tabpanel', 'aria-labelledby': `${addId}-${candidate}` } : {}
+  const switchLocked = catalogBusy || customBusy || owcBusy
   // The catalog draft: the row the user chose, kept through a refresh that
   // adopts or withdraws it elsewhere so a typed key is never discarded, for as
   // long as its namespace can still take the write; else the first row still
@@ -523,27 +597,19 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
           ? (
             <div className={styles['addCard']}>
               <div className={styles['addModes']}>
-                {bothOffered
+                {offered.length > 1
                   ? (
                     <SegmentedControl
                       id={addId}
                       label={t('addMode')}
                       value={mode}
                       disabled={switchLocked}
-                      options={[
-                        {
-                          value: 'catalog',
-                          label: t('addCatalog'),
-                          disabled: !catalogEnabled,
-                          ...catalogEnabled ? {} : { title: t('addCatalogExhausted') },
-                        },
-                        {
-                          value: 'custom',
-                          label: t('addCustom'),
-                          disabled: !customEnabled,
-                          ...customEnabled ? {} : { title: t('addCustomUnavailable') },
-                        },
-                      ]}
+                      options={offered.map(candidate => ({
+                        value: candidate,
+                        label: t(MODE_COPY[candidate].labelKey),
+                        disabled: !modeEnabled[candidate],
+                        ...modeEnabled[candidate] ? {} : { title: t(MODE_COPY[candidate].lockedKey) },
+                      }))}
                       onChange={(next) => {
                         setAddMode(next)
                         setVisited(previous => new Set([...previous, next]))
@@ -554,18 +620,18 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
                     // One mode alone has no switch to name it, so the card
                     // carries the mode as its title instead.
                     <div className={styles['editorHeader']}>
-                      <span className={styles['editorTitle']}>{t(mode === 'catalog' ? 'addCatalog' : 'addCustom')}</span>
+                      <span className={styles['editorTitle']}>{t(MODE_COPY[mode].labelKey)}</span>
                     </div>
                   )}
                 <p className={styles['advancedHint']}>
-                  {t(mode === 'catalog' ? 'addCatalogHint' : 'addCustomHint')}
+                  {t(MODE_COPY[mode].hintKey)}
                 </p>
               </div>
               {mounted('catalog') && draft !== undefined
                 ? (
                   <div
                     id={`${addId}-catalog-panel`}
-                    {...bothOffered ? { role: 'tabpanel', 'aria-labelledby': `${addId}-catalog` } : {}}
+                    {...panelAttrs('catalog')}
                     hidden={mode !== 'catalog'}
                     className={styles['addPanel']}
                   >
@@ -616,7 +682,7 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
                 ? (
                   <div
                     id={`${addId}-custom-panel`}
-                    {...bothOffered ? { role: 'tabpanel', 'aria-labelledby': `${addId}-custom` } : {}}
+                    {...panelAttrs('custom')}
                     hidden={mode !== 'custom'}
                     className={styles['addPanel']}
                   >
@@ -636,24 +702,48 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
                   </div>
                 )
                 : null}
+              {mounted('owc') && owc !== undefined
+                ? (
+                  <div
+                    id={`${addId}-owc-panel`}
+                    {...panelAttrs('owc')}
+                    hidden={mode !== 'owc'}
+                    className={styles['addPanel']}
+                  >
+                    <OwcProviderCard
+                      namespace={owc}
+                      taken={providerRoutes(owc, schema)}
+                      interfaces={interfaceChoices(owc, schema)}
+                      operations={operations}
+                      t={t}
+                      readOnly={!state.writable}
+                      onClose={(changed) => {
+                        closeAdd()
+                        if (changed) void controller.load()
+                      }}
+                      onBusyChange={setOwcBusy}
+                    />
+                  </div>
+                )
+                : null}
             </div>
           )
-          : catalogOffered || customOffered
+          : offered.length > 0
             ? (
-              // One entry for both ways to gain a provider; the card behind it
-              // splits them. Full width, so it lines up with the rows above.
+              // One entry for the ways this page can gain a provider; the card
+              // behind it splits them. Full width, so it lines up with the rows
+              // above.
               <div className={styles['addActions']}>
                 <button
                   type="button"
                   className={styles['addButton']}
-                  disabled={!state.writable || (!catalogEnabled && !customEnabled)}
+                  disabled={!state.writable || usable.length === 0}
                   onClick={() => {
                     const first = addable[0]
-                    const initial: AddMode = catalogEnabled ? 'catalog' : 'custom'
                     setSavedTarget(undefined)
                     setEditing(first === undefined ? undefined : targetOf(first.row))
-                    setAddMode(initial)
-                    setVisited(new Set([initial]))
+                    setAddMode(openMode)
+                    setVisited(new Set([openMode]))
                     setAddOpen(true)
                   }}
                 >

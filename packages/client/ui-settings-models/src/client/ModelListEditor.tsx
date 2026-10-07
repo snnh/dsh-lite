@@ -21,15 +21,34 @@ import { Button, IconPlusOutlineRegular, Modal } from '@deepseek-ai/dsh-client-u
 import { formatCapacity, parseCapacity } from './DeepSeekModelsEditor.tsx'
 import type { ModelsOperations } from './operations.ts'
 import type { DeepSeekModelDraft } from './DeepSeekModelsEditor.tsx'
+import type { ModelFieldPath } from './model-path.ts'
 import type { en } from './locales.ts'
 import { ModelRow } from './ModelRow.tsx'
 import styles from './ModelsSection.module.css'
 
-/**
- * One configured model row. Fields this card does not edit must survive an
+/** One configured model row. Fields this card does not edit must survive an
  * edit rather than being dropped by a rebuild.
  */
 export type ModelDraft = DeepSeekModelDraft
+
+/**
+ * One drafted row as an adapter-owned extra field editor receives it. The
+ * extras belong to the family that owns them — pi-ai and DeepSeek declare
+ * none — so the list editor hands over exactly what such an editor needs and
+ * knows nothing about what it draws.
+ */
+export interface ModelRowExtras {
+  /** The drafted row, including capabilities this page does not edit. */
+  readonly model: ModelDraft
+  /** One-based row position, for the accessible labels of a group. */
+  readonly position: number
+  /** Whether every control is refused (read-only deployment or a pending write). */
+  readonly disabled: boolean
+  /** Section copy. */
+  readonly t: (key: keyof typeof en) => string
+  /** Replace this row, preserving the fields the extras do not own. */
+  readonly onChange: (model: ModelDraft) => void
+}
 
 /** A row's text field, or the empty string when unset or not a string. */
 function textOf(model: ModelDraft, key: string): string {
@@ -69,6 +88,15 @@ export interface ModelListEditorProps {
   catalogProvider?: string | undefined
   /** Route input types for models absent from the installed catalog. */
   defaultInput?: readonly string[] | undefined
+  /** Where this family keeps a row's input types; `input` unless it nests them. */
+  inputField?: ModelFieldPath | undefined
+  /** Input-type vocabulary this family declares; the shared default is text and image. */
+  inputModalities?: readonly string[] | undefined
+  /**
+   * Adapter-owned extra advanced fields for one row, or `undefined` for a
+   * family whose curated fields are the whole story.
+   */
+  rowExtras?: ((row: ModelRowExtras) => ReactNode) | undefined
   /** Whether the user layer currently owns the whole array; absent on a create. */
   overridden?: boolean
   /** Replace the drafted rows. */
@@ -190,6 +218,11 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
   /** What a capacity field shows: the buffer while typing, else the stored count. */
   const capacityText = (model: ModelDraft, index: number, field: CapacityField): string =>
     editing.get(bufferKey(index, field)) ?? capacitySpelling(numberOf(model, field))
+
+  /** Replace one drafted row, leaving every other row untouched. */
+  const replaceRow = (index: number, next: ModelDraft): void => {
+    onChange(models.map((row, at) => at === index ? next : row))
+  }
 
   /** Drop one row's entries and shift the rows after it down, in one pass. */
   const reindexOnRemove = (
@@ -359,12 +392,20 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
             key={index}
             model={model}
             position={index + 1}
-            inputField="input"
+            inputField={props.inputField ?? 'input'}
+            inputModalities={props.inputModalities}
             inputFallback={inputDefaults.get(textOf(model, 'id')) ?? props.defaultInput}
             inputLoading={catalogProvider !== undefined && catalog === undefined}
             expanded={expanded.has(index)}
             disabled={disabled}
             t={t}
+            extras={props.rowExtras?.({
+              model,
+              position: index + 1,
+              disabled,
+              t,
+              onChange: (next) => { replaceRow(index, next) },
+            })}
             contextWindow={{
               value: capacityText(model, index, 'contextWindow'),
               placeholder: CAPACITY_HINT.contextWindow,
@@ -376,7 +417,7 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
               onChange: (text) => { editCapacity(index, 'maxTokens', text) },
             }}
             onFieldChange={(field, value) => { patch(index, { [field]: value }) }}
-            onChange={(next) => { onChange(models.map((row, at) => at === index ? next : row)) }}
+            onChange={(next) => { replaceRow(index, next) }}
             onToggle={() => { toggleExpanded(index) }}
             onRemove={() => {
               onChange(models.filter((_model, at) => at !== index))

@@ -96,13 +96,13 @@ This matrix shows which packages dispatch each harness-owned event and which pac
 <!-- BEGIN GENERATED event-producer-consumer:undeclared -->
 | Event string | Dispatchers | Listeners |
 | --- | --- | --- |
-| `internal/config` | [`config-editor`](../packages/boot/config-editor) (`waterfall`) | [`llm-pi-ai`](../packages/llm/llm-pi-ai) |
+| `internal/config` | [`config-editor`](../packages/boot/config-editor) (`waterfall`) | [`llm-pi-ai`](../packages/llm/llm-pi-ai), [`llm-service-lite`](../packages/llm/llm-service-lite) |
 | `internal/dispatch` | - | [`terminal-bash`](../packages/terminal/terminal-bash) |
 | `internal/plugin` | - | `computer-use-cua-driver-native`, `inspector`, `loader`, [`lsp-stdio`](../packages/lsp/lsp-stdio), [`mcp-client`](../packages/mcp/mcp-client), `modules` |
 | `internal/service` | - | `gateway` |
 | `internal/status` | - | [`agent`](../packages/core/agent), `inspector`, [`web`](../packages/web/web) |
 | `internal/update` | - | [`app-boot`](../packages/boot/app-boot) |
-| `loader/volatile-update` | - | [`llm-deepseek`](../packages/llm/llm-deepseek), [`llm-pi-ai`](../packages/llm/llm-pi-ai), `product-analytics`, `speech-to-text` |
+| `loader/volatile-update` | - | [`llm-deepseek`](../packages/llm/llm-deepseek), [`llm-pi-ai`](../packages/llm/llm-pi-ai), [`llm-service-lite`](../packages/llm/llm-service-lite), `product-analytics`, `speech-to-text` |
 | `slots/changed` | `ui-renderer` (`emit`) | - |
 <!-- END GENERATED event-producer-consumer:undeclared -->
 

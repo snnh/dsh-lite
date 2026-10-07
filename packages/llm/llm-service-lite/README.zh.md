@@ -1,0 +1,197 @@
+---
+description: "更轻量的 LLM 服务：自包含的服务商档案、显式声明的模型目录，以及接入 harness LLM 缝的原生 chat-completions 传输，实现参考 OpenWebCode。"
+kind: "package-reference"
+---
+
+# @deepseek-ai/dsh-llm-service-lite
+
+[English](README.md) | 中文
+
+## Summary
+
+`@deepseek-ai/dsh-llm-service-lite` 负责适配第三方模型端点：它为每一条已配置的服务商档案注册一条路由，并统一走自己的 chat-completions 传输，因此请求路径里既没有服务商 SDK，也没有已安装目录。一条档案是自包含的——线协议、端点、凭据引用、请求体附加字段、并发度，以及该端点所服务的模型——因此自建网关、国产模型 API 与公司网络里的代理走同一条代码路径，也不必有人事先认识这个服务商。
+
+## Table of Contents
+
+- [使用本包](#use-this-package)
+- [理解实现](#understand-the-implementation)
+- [延伸阅读](#further-exploration)
+- [模型体验](#model-experience)
+- [已知限制与后续工作](#known-limitations-and-deferred-work)
+- [开发注记](#dev-note)
+
+-----
+
+<a id="use-this-package"></a>
+## 使用本包
+
+当一个部署想自己描述模型服务商，而不是只能点名某个内置目录已经认识的厂商时，就挂载本插件。`providers` 字典就是全部配置面：每个键是一条路由，请求用 `GenerateOptions.provider` 选中它；值是这条端点所需的一切。
+
+### 何时选它
+
+本插件只做第三方端点的适配：它注册的每条路由都来自部署自己写的档案，第一方 DeepSeek 渠道保留自己的适配器。同一个组合要服务多个端点时选它——国产模型 API、自建的 vLLM 或 SGLang 网关、公司网络里的代理——每一条都需要被完整描述，而不是从目录里推导。当 pi-ai 目录里已经有对应条目、能提供协议与模型能力时，选 `dsh-llm-pi-ai`。两者可以同时挂载，因为路由名不会冲突；注册一条已被别的适配器占用的路由会让插件加载失败。
+
+### 配置服务商档案
+
+```yaml
+- id: llm-service-lite
+  name: '@deepseek-ai/dsh-llm-service-lite'
+  config:
+    providers:
+      # A provider reached at its published API, with the key from the seam.
+      deepseek:
+        displayName: DeepSeek
+        interfaceType: openai-chat-completions
+        baseURL: https://api.deepseek.com/v1
+        apiKeyEnv: DEEPSEEK_API_KEY
+        includeUsage: true
+        models:
+          - id: deepseek-chat
+            contextWindow: 131072
+            maxTokens: 8192
+          - id: deepseek-reasoner
+            contextWindow: 131072
+            maxTokens: 65536
+            capabilities:
+              effort: [low, medium, high]
+              thinking: [enabled, disabled]
+              reasoningContent: true
+      # A self-hosted gateway: body fields only this server understands.
+      vllm:
+        interfaceType: openai-chat-completions
+        baseURL: http://127.0.0.1:8000/v1
+        extraBody:
+          top_k: 40
+        maxConcurrent: 1
+        models:
+          - id: Qwen3-32B
+            contextWindow: 32768
+            maxTokens: 8192
+            capabilities:
+              effort: [low, high]
+              thinkingStyle: enable_thinking
+      # A gateway that routes by header and needs no credential of its own.
+      proxy:
+        interfaceType: openai-chat-completions
+        baseURL: https://proxy.example.com/v1
+        headers:
+          x-tenant: acme
+        streamIdleTimeoutMs: 60000
+```
+
+| 字段 | 默认值 | 含义 |
+|---|---|---|
+| `enabled` | `true` | 该路由是否注册 |
+| `interfaceType` | 必填 | `openai-chat-completions`、`anthropic-messages` 或 `openai-responses` |
+| `baseURL` | 协议默认端点 | 该路由所有模型的端点 |
+| `apiKeyEnv` | 无 | 凭据引用，按请求经凭据缝解析 |
+| `apiKey` | 无 | 内联凭据，供从别的工具导入的档案使用 |
+| `headers` | 无 | 静态请求头；若同时点名凭据，凭据仍然覆盖 `authorization` |
+| `promptCaching` | `false` | 该路由是否可标记缓存断点（仅 anthropic-messages） |
+| `includeUsage` | `false` | 是否要求流式返回用量报告（仅 chat-completions） |
+| `extraBody` | 无 | 该端点认识的其他顶层请求体字段 |
+| `maxConcurrent` | `3` | 超过该并发后请求排队 |
+| `streamIdleTimeoutMs` | `300000` | 两次流事件之间的最大空闲时长 |
+| `retryPolicy` | normal，5 次 | 由 `dsh-llm-retry` 执行的服务商重试策略 |
+| `models` | `[]` | 该路由对外声明的模型及其容量与能力 |
+| `defaultContextWindow` | `262144` | 未声明上下文的模型所用的上下文容量 |
+| `defaultMaxTokens` | `8192` | 未声明输出上限的模型所用的输出能力 |
+
+### 声明模型能做什么
+
+模型条目的 `capabilities` 是对端点的声明，不是猜测：没写的就不声明，写下的要么被履行、要么在声明处被按名拒绝——绝不"接受却无人在用"。`effort` 列出可选的推理档位，其值即线上拼写，因此自有词汇表的网关直接声明自己的词汇。`thinking` 列出可接受的思考模式（`enabled`、`disabled`、`adaptive`）。`thinkingStyle` 说明端点如何表达这个开关：`thinking: { type: … }`、顶层 `enable_thinking` 布尔值、始终思考的 `fixed`，或 `effort_only`——"只收档位、没有开关"的显式写法，与省略样式发出的是同一个请求。`reasoningContent` 声明端点会以 `reasoning_content` 返回思考，这正是后续请求得以回带既有思考的依据。`tools` 声明是否允许发送工具声明：关闭的模型收到的请求里没有工具列表，而不是一份会被端点拒绝的清单。`modalities` 声明端点接受的输入——`text`、`image`、`video`；文本以外的输入类型，以及 `imageOutput`、`responsesEncryptedReplay`，在声明处就被拒绝，直到有传输承载它们为止，因为一个无人在用的声明会被读成这条路由并不具备的能力。
+
+### 运行期改配置
+
+每次操作都会捕获当前的服务商集合。路由集合变化——或某条路由的显示名、并发度、重试策略变化（注册表在注册时捕获这些）——会就地把同一适配器实例重新注册，因此进行中的请求保持它启动时的端点，下一次请求才看到新配置。无法服务的档案在写入处就被拒绝；已经存下来的则保留其诊断、仍可被按名寻址，而不是把其他路由一起拖垮。
+
+### 从端点发现模型
+
+配置面在编辑或起草一条路由时，本插件回答"这个端点能提供哪些模型"。已配置的路由在 Host 内部提供已存的端点与凭据；草稿提供自己的。列表读自 `GET {baseURL}/models`，走 bearer 认证，两种公开形态都接受：标准的 `data` 数组与增强的 `models` 映射。回复只是候选元数据，供配置面采用——不落盘任何内容，路由服务什么由用户保存的档案决定。
+
+### 失败与恢复
+
+失败携带稳定错误码：点名的凭据解析不到时是 `MISSING_CREDENTIAL`，请求被拒是 `INVALID_REQUEST`，配额耗尽归为 `QUOTA` 而不是限流，超出模型上下文是 `CONTEXT_WINDOW_EXCEEDED`——正是它让 agent 去压缩而不是重试。没有终止事件就结束的流报 `TRANSPORT`，而不会看起来像一次完成的回合；没有任何内容的补全报 `EMPTY_RESPONSE`。服务商要求的等待时长从 `Retry-After` 读出并交给重试层。
+
+<a id="understand-the-implementation"></a>
+## 理解实现
+
+### 设计信条
+
+三条规则塑造了这个包。档案即全部事实：不从内置目录推导任何东西，因此不是 OpenAI、Anthropic、DeepSeek 的端点是被"配置"出来的，而不是被特判的。声明即承诺：请求路径只发送档案声明过的东西，绝不自行发明开关。失败在发生处归类：传输层把每个 HTTP 状态与错误体收敛成一个稳定错误码，因为只有它看到了服务商的完整回答。
+
+### 源码地图
+
+| 文件 | 职责 |
+|---|---|
+| `src/index.ts` | 插件：档案解析、路由注册、配置目录、模型发现 |
+| `src/config.ts` | 配置 schema 与档案词汇表 |
+| `src/profiles.ts` | 校验档案并物化为路由事实 |
+| `src/models.ts` | 把模型事实投影到服务缝的模型词汇 |
+| `src/adapter.ts` | 适配器：按路由快照、准入、空闲看门狗、派发 |
+| `src/chat-completions.ts` | chat-completions 的请求组装与流翻译 |
+| `src/sse.ts` | 只在数据帧上打点的 SSE 分帧 |
+| `src/errors.ts` | 服务商失败分类 |
+| `src/limiter.ts` | 按路由的 FIFO 准入控制 |
+| `src/discovery.ts` | 供配置面使用的端点问询 |
+
+### 注册与配置目录
+
+没有档案的挂载不注册任何路由：在其设置段提供档案之前，插件不持有路由——这正是基础组合可以把它挂成休眠态的原因。每条已配置的路由都会出现在可配置服务商目录里，包括已停用或当前无法服务的那些，配置面因此能按名寻址并修复它们。
+
+### 线上翻译
+
+chat-completions 的翻译承担了三件服务商不做的事：块的身份与顺序、跨流式分片拼装工具调用，以及区分"流结束了"与"流被截断了"。工具结果按协议要求与其调用成对出现，没有结果的调用补占位而不是拼出一个被端点拒绝的请求，游离的结果被丢弃。思考只在声明了 `reasoningContent` 且历史确实来自同一服务商时，才经 `reasoning_content` 回带。
+
+<a id="further-exploration"></a>
+## 延伸阅读
+
+- [LLM 流式子系统](../../docs/subsystems/llm-streaming.md) —— 本包实现的消息与块类型、组装后的请求，以及适配器契约。
+- [服务商指南](../../docs/user/guide/providers.md) —— 部署如何在发行组合上配置服务商。
+- [OpenWebCode](https://github.com/snnh/openwebcode) —— 本适配器遵循的服务商档案模型。
+
+<a id="model-experience"></a>
+## 模型体验
+
+### 经适配器发出的请求
+
+#### 模型看到什么
+
+harness 组装出的对话原样：系统提示词作为开头的 system 消息，用户与助手回合按序排列，工具声明为函数 schema，每个工具结果紧邻它所回答的调用。请求会附加该端点自己的 `extraBody` 字段，以及——当模型声明了如何拼写时——调用方选中的档位与思考开关。
+
+#### token 影响
+
+请求不携带适配器撰写的提示词文本。`max_tokens` 仅在调用方配置过时才出现，因此自己设有默认上限的端点会保留它；未声明上限的路由干脆不发这个字段。
+
+#### KV 缓存影响
+
+翻译里没有任何逐请求随机量：同一段历史产生同一份请求字节，服务商侧的前缀缓存因此跨回合持续有效。标记了 `promptCaching` 的路由使用协议自身的缓存标记；本适配器不添加自己的缓存断点。
+
+### 服务商的响应
+
+#### 模型看到什么
+
+内容增量成为文本块，`reasoning_content` 成为思考块，流式工具调用分片拼成一个个调用。服务商自己的停止原因被映射到 harness 词汇；没有停止原因就结束的流是传输失败，而不是完成的回合。
+
+#### token 影响
+
+端点发送用量时才上报用量，缓存命中的提示词 token 按 harness 契约从输入计数中分离：`inputTokens` 不含服务商从缓存提供的那部分，后者计入 `cacheReadTokens`。
+
+#### KV 缓存影响
+
+回带的思考与服务商返回的字节一致，因此会回显思考的路由保持其缓存前缀稳定；未声明 `reasoningContent` 的路由完全不发思考，而不是发一段转述。
+
+## 已知限制与后续工作
+
+<a id="known-limitations-and-deferred-work"></a>
+
+- **只实现了一种协议。** `openai-chat-completions` 已完整服务；`anthropic-messages` 与 `openai-responses` 属于词汇表但在解析时被按名拒绝，因为用不同的线上行为去服务一个已声明的协议，比直说"还没做"更糟。它们是下一个里程碑。
+- **不支持请求图片/视频与图片输出。** 声明 `image`、`video` 输入或 `imageOutput` 的档案会被拒绝，而不是把差异丢掉后照常服务；图片的投影与卸载要和承载它们的传输一起做。
+- **适配器侧不重试。** 一次调用就是一次服务商尝试，重试策略由 `dsh-llm-retry` 在持久步骤边界执行，重试会重新推导整个请求。
+- **没有回放信封。** 成功响应不携带适配器私有回放状态，历史以持久消息重发；声明 `responsesEncryptedReplay` 的档案在 responses 传输落地前按名拒绝。
+- **没有用量报告就没有流式用量。** 从不发送用量块的服务商，其 token 记账交给 harness 的估算器。
+
+<a id="dev-note"></a>
+### 开发注记
+
+两者是刻意共存的：目录路由是通往已知服务商的最短路径，这条路由则是通往任何"非已知"端点的诚实路径。

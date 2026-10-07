@@ -342,16 +342,14 @@ describe('ModelsSection', () => {
     const scripted = scriptedFace()
     scripted.face.settings.describe.mockResolvedValue(remoteOk({
       writable: true, hasDocument: false,
-      namespaces: wireNamespaces().filter(view => view.ns !== 'llm-pi-ai'),
+      namespaces: wireNamespaces().filter(view => view.ns !== 'llm-plain'),
     }))
     await mountFace(scripted)
     fireEvent.click(screen.getByRole('button', { name: en.add }))
-    // Without the pi-ai namespace nothing can be hand-declared, so the card
-    // is the catalog form alone: no mode switch, no custom panel.
-    expect(screen.queryByRole('tablist')).toBeNull()
-    expect(screen.queryByRole('textbox', { name: en.customRoute })).toBeNull()
-    expect(screen.queryByRole('option', { name: 'anthropic' })).toBeNull()
-    expect(screen.getByRole('option', { name: 'plain' })).toBeTruthy()
+    // pi-ai is mounted and already carries routes, so its ways are offered; a
+    // catalog entry whose own namespace is gone has no editor to open.
+    expect(screen.getByRole('option', { name: 'anthropic' })).toBeTruthy()
+    expect(screen.queryByRole('option', { name: 'plain' })).toBeNull()
   })
 
   it('shows a catalog diagnostic while keeping the provider editable', async () => {
@@ -1595,10 +1593,11 @@ describe('ModelsSection', () => {
       await controller.load()
     })
     // Nothing can be declared any more, so the form is gone rather than left
-    // to create a route the Host would refuse; the catalog form stands alone.
+    // to create a route the Host would refuse. This fixture mounts no
+    // harness-managed namespace, so the card falls back to its own copy.
     expect(screen.queryByRole('textbox', { name: en.customRoute })).toBeNull()
     expect(screen.queryByRole('tablist')).toBeNull()
-    expect(screen.getByRole('combobox', { name: en.provider })).toBeTruthy()
+    expect(screen.getByText(en.addCatalogHint)).toBeTruthy()
   })
 
   it('forgets the catalog target when the custom form closes, so a later refresh opens no row editor', async () => {

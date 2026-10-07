@@ -1,10 +1,11 @@
-/** Shared model fields and actions for both adapter catalog editors. */
+/** Shared model fields and actions for every adapter family's catalog editor. */
 
 import type { ReactNode } from 'react'
 import {
   IconChevronDownOutlineRegular, IconChevronRightOutlineRegular, IconTrashOutlineRegular,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { DeepSeekModelDraft } from './DeepSeekModelsEditor.tsx'
+import type { ModelFieldPath } from './model-path.ts'
 import type { ModelsKey } from './locales.ts'
 import { ModelInputTypes } from './ModelInputTypes.tsx'
 import styles from './ModelsSection.module.css'
@@ -21,14 +22,19 @@ interface CapacityInput {
 interface ModelRowProps {
   model: DeepSeekModelDraft
   position: number
-  inputField: 'inputModalities' | 'input'
+  /** Where this family keeps the row's input types. */
+  inputField: ModelFieldPath
   inputFallback?: readonly string[] | undefined
+  /** Input types this family declares; the shared editor's default is text and image. */
+  inputModalities?: readonly string[] | undefined
   inputLoading?: boolean
   expanded: boolean
   disabled: boolean
   t: (key: ModelsKey) => string
   contextWindow: CapacityInput
   maxTokens: CapacityInput
+  /** Adapter-owned fields this row shows inside its own advanced fold. */
+  extras?: ReactNode | undefined
   onFieldChange: (field: 'id' | 'name', value: string | undefined) => void
   onIdBlur?: (value: string) => void
   onChange: (model: DeepSeekModelDraft) => void
@@ -104,8 +110,12 @@ export function ModelRow(props: ModelRowProps): ReactNode {
             ))}
             <ModelInputTypes
               model={model} field={props.inputField} position={position}
-              fallback={props.inputFallback} disabled={disabled || props.inputLoading === true} t={t} onChange={props.onChange}
+              fallback={props.inputFallback} modalities={props.inputModalities}
+              disabled={disabled || props.inputLoading === true} t={t} onChange={props.onChange}
             />
+            {props.extras === undefined
+              ? null
+              : <div className={styles['modelExtras']}>{props.extras}</div>}
           </div>
         )
         : null}

@@ -1,0 +1,88 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/llm/llm-service-lite/README.md
+/:
+  en: cbcfb82c0a459892
+  zh: 66aff606dde94528
+/deepseek-ai-dsh-llm-service-lite:
+  en: fcdbc92a4ba82dc8
+  zh: 8b75d80663889e73
+/deepseek-ai-dsh-llm-service-lite/summary:
+  en: fb9caa267a83e8d0
+  zh: 9b0f6bdc6d060cc8
+/deepseek-ai-dsh-llm-service-lite/table-of-contents:
+  en: d152484eb41ac6b4
+  zh: 0dec6d0d54164605
+/deepseek-ai-dsh-llm-service-lite/use-this-package:
+  en: 0fa3055ecd869535
+  zh: 6515a7cf3c979aa6
+/deepseek-ai-dsh-llm-service-lite/use-this-package/when-to-choose-it:
+  en: 1e6ab13fa7957ece
+  zh: 50f0af8feaa4536b
+/deepseek-ai-dsh-llm-service-lite/use-this-package/configure-provider-profiles:
+  en: 5301b17cd55368f8
+  zh: b72845e8008d0c11
+/deepseek-ai-dsh-llm-service-lite/use-this-package/declare-what-a-model-can-do:
+  en: 44bca90b03b5f3e2
+  zh: 4d9df497627b6b30
+/deepseek-ai-dsh-llm-service-lite/use-this-package/change-configuration-at-runtime:
+  en: d0c770533a5037a8
+  zh: 56f691cf59f6d61d
+/deepseek-ai-dsh-llm-service-lite/use-this-package/discover-models-from-endpoints:
+  en: b512acb846bd5f0c
+  zh: 68feec54f4b6f8c7
+/deepseek-ai-dsh-llm-service-lite/use-this-package/failures-and-recovery:
+  en: 020f0c3be19e42bf
+  zh: 0045784e24d7bde2
+/deepseek-ai-dsh-llm-service-lite/understand-the-implementation:
+  en: ee4615a04fa6503d
+  zh: ee2c5fb2204a43cf
+/deepseek-ai-dsh-llm-service-lite/understand-the-implementation/design-philosophy:
+  en: 88c8e03ddcabede6
+  zh: e075fa0e17e1eabd
+/deepseek-ai-dsh-llm-service-lite/understand-the-implementation/source-map:
+  en: 2942b402d2be1eec
+  zh: 64759a93291d2148
+/deepseek-ai-dsh-llm-service-lite/understand-the-implementation/registration-and-directory:
+  en: 20c4bd7d60ec2b93
+  zh: ebcd06ccd6140175
+/deepseek-ai-dsh-llm-service-lite/understand-the-implementation/wire-translation:
+  en: ea6c23ea9eceed0e
+  zh: f3547b55bbf02cf0
+/deepseek-ai-dsh-llm-service-lite/further-exploration:
+  en: 4b1e77244f82491b
+  zh: d0cd0e5a3fd87467
+/deepseek-ai-dsh-llm-service-lite/model-experience:
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/deepseek-ai-dsh-llm-service-lite/model-experience/provider-request-through-the-adapter:
+  en: 7832e4f0b332a474
+  zh: 0042877672eec37c
+/deepseek-ai-dsh-llm-service-lite/model-experience/provider-request-through-the-adapter/what-the-model-sees:
+  en: d4351b73ec249754
+  zh: 3fc0fc435934aca4
+/deepseek-ai-dsh-llm-service-lite/model-experience/provider-request-through-the-adapter/token-effect:
+  en: a2c29115cc3556e9
+  zh: 478036c231d52191
+/deepseek-ai-dsh-llm-service-lite/model-experience/provider-request-through-the-adapter/kv-cache-effect:
+  en: 5cd8967334091e1c
+  zh: 98e9517411ba9041
+/deepseek-ai-dsh-llm-service-lite/model-experience/provider-response:
+  en: 802d7ff60a1d03ff
+  zh: 7b2e1c3cdf6077cb
+/deepseek-ai-dsh-llm-service-lite/model-experience/provider-response/what-the-model-sees:
+  en: 6fe903d5fc90fa3e
+  zh: 39ab53466b433a17
+/deepseek-ai-dsh-llm-service-lite/model-experience/provider-response/token-effect:
+  en: 0f6d8d52c8fc9e07
+  zh: ce33711f37cdd539
+/deepseek-ai-dsh-llm-service-lite/model-experience/provider-response/kv-cache-effect:
+  en: a9a89439f9e5760e
+  zh: d328cf3a4fecc212
+/deepseek-ai-dsh-llm-service-lite/known-limitations-and-deferred-work:
+  en: 12b294beefadb0cc
+  zh: b126aa1a26311a66
+/deepseek-ai-dsh-llm-service-lite/known-limitations-and-deferred-work/dev-note:
+  en: 9d74633e23e0b757
+  zh: 6f4f49b48ed0b967

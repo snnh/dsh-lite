@@ -119,10 +119,29 @@ export function deriveKeyRef(provider: string): string {
 }
 
 /**
- * The wire protocols a hand-declared route may name, read out of the owning
+ * The string members one union field of `providers.*` declares in the
  * namespace's own schema. This stays a schema read rather than a wire field so
  * the choices the page offers cannot drift from the ones the adapter accepts:
  * both come from the same `Config`.
+ * @param namespace - the namespace view whose schema declares the profile shape.
+ * @param path - position of the union inside the section.
+ * @returns the members, or an empty list when the schema declares none.
+ */
+function unionChoices(
+  namespace: SettingsNamespaceView | undefined,
+  schema: SettingsSchemaOperations,
+  path: readonly string[],
+): string[] {
+  if (namespace === undefined) return []
+  const node = schema.nodeAtPath(schema.rehydrate(namespace.schema), path)
+  const list = (node as { type?: string; list?: readonly { value?: unknown }[] } | undefined)
+  if (list?.type !== 'union' || list.list === undefined) return []
+  return list.list.map(entry => entry.value).filter((value): value is string => typeof value === 'string')
+}
+
+/**
+ * The wire protocols a hand-declared pi-ai route may name, read out of the
+ * owning namespace's own schema.
  * @param namespace - the namespace view whose schema declares the profile shape.
  * @param schema - settings schema operations.
  * @returns the protocol identifiers, or an empty list when the schema has none.
@@ -131,11 +150,59 @@ export function protocolChoices(
   namespace: SettingsNamespaceView | undefined,
   schema: SettingsSchemaOperations,
 ): string[] {
+  return unionChoices(namespace, schema, ['providers', PROBE_ROUTE, 'api'])
+}
+
+/**
+ * The interface types an OWC provider profile may name, read the same way from
+ * the same schema: the adapter's `Config` is the only fact source for them.
+ * @param namespace - the namespace view whose schema declares the profile shape.
+ * @param schema - settings schema operations.
+ * @returns the interface type identifiers, or an empty list when the schema has none.
+ */
+export function interfaceChoices(
+  namespace: SettingsNamespaceView | undefined,
+  schema: SettingsSchemaOperations,
+): string[] {
+  return unionChoices(namespace, schema, ['providers', PROBE_ROUTE, 'interfaceType'])
+}
+
+/**
+ * Whether one namespace's schema declares OWC's provider profile — an
+ * `interfaceType` under a `providers` dict. This is how the page recognizes
+ * the family, rather than by naming the namespace: the namespace is an entry
+ * id the user chooses, so only the adapter's own `Config` knows which shape it
+ * registered.
+ * @param namespace - the namespace view whose schema is probed.
+ * @param schema - settings schema operations.
+ * @returns whether the schema offers an OWC profile for the page to edit.
+ */
+export function declaresInterfaceType(
+  namespace: SettingsNamespaceView | undefined,
+  schema: SettingsSchemaOperations,
+): boolean {
+  return interfaceChoices(namespace, schema).length > 0
+}
+
+/**
+ * The route keys one namespace's effective section already declares. A create
+ * card checks its new route id against these rather than against the provider
+ * directory: the directory lists the routes the adapter registered, while a
+ * profile the host refuses to serve — a disabled one, a broken one — is still
+ * a key the write would shadow.
+ * @param namespace - the namespace view whose section is read.
+ * @param schema - settings schema operations.
+ * @returns the route keys, or an empty list when the section carries no `providers` dict.
+ */
+export function providerRoutes(
+  namespace: SettingsNamespaceView | undefined,
+  schema: SettingsSchemaOperations,
+): string[] {
   if (namespace === undefined) return []
-  const node = schema.nodeAtPath(schema.rehydrate(namespace.schema), ['providers', PROBE_ROUTE, 'api'])
-  const list = (node as { type?: string; list?: readonly { value?: unknown }[] } | undefined)
-  if (list?.type !== 'union' || list.list === undefined) return []
-  return list.list.map(entry => entry.value).filter((value): value is string => typeof value === 'string')
+  const providers = schema.getPath(namespace.value, ['providers'])
+  return typeof providers === 'object' && providers !== null && !Array.isArray(providers)
+    ? Object.keys(providers)
+    : []
 }
 
 /** The credential reference a resolved profile names (its `apiKeyEnv` field). */

@@ -23,6 +23,7 @@ import {
   installFailLoud,
   loadOverlayPatches,
   loadProfile,
+  loadProfileDirectory,
   reportSkippedBundles,
   PluginPackages,
   PROFILE_PATCH_FILENAME,
@@ -296,6 +297,18 @@ export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Con
     const ctx = await boot(NAME, rootConfig, readProfilePatches(NAME, profileContext, composed.profile), async (hostCtx) => {
       app.current = hostCtx
       hostCtx.provide('profileContext', profileContext)
+      // Whether the deployment's own layer addresses an entry, which is what a
+      // shipped provider row asks before it lets itself be imported: a profile
+      // that never configured pi-ai or the built-in DeepSeek adapters should
+      // not pay for their module graphs. The answer is read again on every
+      // question instead of cached, because a settings write lands in exactly
+      // this layer — a stale answer would keep a just-configured provider out
+      // of the process until the next restart.
+      hostCtx.provide('dshProfileDeclares', (id: string): boolean => {
+        const loaded = loadProfileDirectory(NAME, profileContext.dir, profileContext.installAnchor)
+        return loaded.patches.some(row => row.id === id)
+          || composed.overlays.some(row => row.id === id)
+      })
       // Before any config-tree entry mounts, so plugins resolve all launch-time
       // environment values from the same immutable launch snapshot.
       hostCtx.provide(DSH_LAUNCH_ENVIRONMENT_KEY, options.environment)

@@ -397,6 +397,7 @@
       "@deepseek-ai/dsh-llm-deepseek-api-key": ["./packages/llm/llm-deepseek-api-key/src"],
       "@deepseek-ai/dsh-llm-mock-server": ["./packages/test-support/llm-mock-server/src"],
       "@deepseek-ai/dsh-llm-pi-ai": ["./packages/llm/llm-pi-ai/src"],
+      "@deepseek-ai/dsh-llm-service-lite": ["./packages/llm/llm-service-lite/src"],
       "@deepseek-ai/dsh-llm-replay": ["./packages/test-support/llm-replay/src"],
       "@deepseek-ai/dsh-llm-retry": ["./packages/llm/llm-retry/src"],
       "@deepseek-ai/dsh-loader-smoke": ["./packages/test-support/loader-smoke/src"],

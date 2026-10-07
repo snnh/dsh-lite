@@ -1,0 +1,217 @@
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import { afterEach, describe, expect, it } from 'vitest'
+import type { StreamChunk } from '@deepseek-ai/dsh-llm'
+import { OwcProfilesAdapter } from '../src/adapter.ts'
+import { ConcurrencyLimiter } from '../src/limiter.ts'
+import { resolveProfiles, type ResolvedOwcProviderProfile } from '../src/profiles.ts'
+import { request, system, user, text } from './messages.ts'
+
+/** One running mock provider. */
+interface Provider {
+  url: string
+  close: () => Promise<void>
+  /** Bodies the provider received, in arrival order. */
+  readonly bodies: Record<string, unknown>[]
+}
+
+/** Start a chat-completions mock that answers every request with the handler's frames. */
+async function provider(
+  handler: (response: ServerResponse, body: Record<string, unknown>) => void,
+): Promise<Provider> {
+  const bodies: Record<string, unknown>[] = []
+  const server: Server = createServer((incoming: IncomingMessage, outgoing: ServerResponse) => {
+    const chunks: Buffer[] = []
+    incoming.on('data', (chunk: Buffer) => chunks.push(chunk))
+    incoming.on('end', () => {
+      bodies.push(JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>)
+      handler(outgoing, bodies[bodies.length - 1] ?? {})
+    })
+  })
+  await new Promise<void>((resolve) => { server.listen(0, '127.0.0.1', resolve) })
+  const address = server.address()
+  if (address === null || typeof address === 'string') throw new Error('the mock provider did not bind a port')
+  return {
+    url: `http://127.0.0.1:${address.port}/v1`,
+    bodies,
+    close: () => new Promise<void>((resolve, reject) => {
+      server.close((error) => { if (error === undefined) resolve(); else reject(error) })
+    }),
+  }
+}
+
+/** Write one SSE frame. */
+function frame(response: ServerResponse, payload: unknown): void {
+  response.write(`data: ${typeof payload === 'string' ? payload : JSON.stringify(payload)}\n\n`)
+}
+
+/** Answer with a complete text turn. */
+function textTurn(response: ServerResponse, content = 'hello'): void {
+  response.writeHead(200, { 'content-type': 'text/event-stream' })
+  frame(response, { choices: [{ finish_reason: null, delta: { content } }] })
+  frame(response, { choices: [{ finish_reason: 'stop', delta: {} }], usage: { prompt_tokens: 3, completion_tokens: 1 } })
+  frame(response, '[DONE]')
+  response.end()
+}
+
+/** One resolved route pointing at the mock provider. */
+const routeFor = (url: string, overrides: Record<string, unknown> = {}): ResolvedOwcProviderProfile => {
+  const profile = resolveProfiles({
+    gateway: { interfaceType: 'openai-chat-completions', baseURL: url, models: [{ id: 'm' }], ...overrides },
+  }).get('gateway')
+  if (profile === undefined) throw new Error('the route did not resolve')
+  return profile
+}
+
+/** An adapter over one fixed route, with credential resolution the caller controls. */
+const adapterFor = (
+  profile: ResolvedOwcProviderProfile | (() => ResolvedOwcProviderProfile),
+  resolveApiKey: () => Promise<string | undefined> = () => Promise.resolve('sk-test'),
+): OwcProfilesAdapter => {
+  const profiles = (): ReadonlyMap<string, ResolvedOwcProviderProfile> => {
+    const current = typeof profile === 'function' ? profile() : profile
+    return new Map([[current.provider, current]])
+  }
+  return new OwcProfilesAdapter({
+    profiles,
+    limiter: () => new ConcurrencyLimiter(3),
+    resolveApiKey: () => resolveApiKey(),
+  })
+}
+
+/** Collect one stream. */
+async function collect(stream: AsyncIterable<StreamChunk>): Promise<StreamChunk[]> {
+  const chunks: StreamChunk[] = []
+  for await (const chunk of stream) chunks.push(chunk)
+  return chunks
+}
+
+const running: Provider[] = []
+afterEach(async () => {
+  await Promise.all(running.splice(0).map(entry => entry.close()))
+})
+
+describe('owc profiles adapter', () => {
+  it('streams a text turn through the configured endpoint', async () => {
+    const upstream = await provider((response) => { textTurn(response) })
+    running.push(upstream)
+    const adapter = adapterFor(routeFor(upstream.url))
+    const chunks = await collect(adapter.stream(request({ messages: [system('be brief'), user([text('hi')])] })))
+    expect(chunks).toEqual([
+      { type: 'block-start', index: 0, blockType: 'text' },
+      { type: 'text-delta', index: 0, text: 'hello' },
+      { type: 'block-end', index: 0, block: { type: 'text', text: 'hello' } },
+      { type: 'usage', usage: { inputTokens: 3, outputTokens: 1, totalTokens: 4, cacheReadTokens: 0, cacheWriteTokens: 0 } },
+      { type: 'finish', reason: { kind: 'stop' } },
+    ])
+    expect(upstream.bodies[0]).toMatchObject({
+      model: 'm',
+      stream: true,
+      messages: [{ role: 'system', content: 'be brief' }, { role: 'user', content: 'hi' }],
+    })
+  })
+
+  it('describes routes and models from the profile alone', async () => {
+    const upstream = await provider((response) => { textTurn(response) })
+    running.push(upstream)
+    const adapter = adapterFor(routeFor(upstream.url, {
+      displayName: 'Acme Gateway',
+      models: [{ id: 'm', name: 'Acme One', contextWindow: 4096, maxTokens: 512, capabilities: { effort: ['low', 'high'] } }],
+    }))
+    expect(adapter.providerInfo('gateway')).toEqual({ id: 'gateway', name: 'Acme Gateway' })
+    expect(await adapter.listModels('gateway')).toEqual([
+      { provider: 'gateway', id: 'm', name: 'Acme One', inputModalities: ['text'] },
+    ])
+    expect(await adapter.resolveModel('gateway', 'm')).toMatchObject({
+      provider: 'gateway',
+      id: 'm',
+      context: { contextWindow: 4096 },
+      defaultMaxTokens: 512,
+      reasoning: { efforts: [{ id: 'low', name: 'Low' }, { id: 'high', name: 'High' }] },
+    })
+    expect(await adapter.resolveModel('gateway', 'unlisted')).toMatchObject({ id: 'unlisted', context: { contextWindow: 256_000 } })
+    expect(adapter.providerInfo('elsewhere')).toEqual({ id: 'elsewhere', name: 'elsewhere' })
+    expect(await adapter.listModels('elsewhere')).toEqual([])
+    expect(adapter.providerRetryPolicy('gateway')).toMatchObject({ mode: 'normal' })
+    expect(adapter.providerRetryPolicy('elsewhere')).toBeUndefined()
+  })
+
+  it('serves a route that stops being configured with a named refusal', async () => {
+    const adapter = adapterFor(routeFor('http://127.0.0.1:1/v1'))
+    await expect(collect(adapter.stream(request({ provider: 'gone' })))).rejects.toMatchObject({ code: 'INVALID_CONFIG' })
+    await expect(adapter.resolveModel('gone', 'm')).rejects.toMatchObject({ code: 'INVALID_CONFIG' })
+    await expect(adapter.prepareCall('gone', 'm')).rejects.toMatchObject({ code: 'INVALID_CONFIG' })
+  })
+
+  it('dispatches a prepared call against the endpoint its preparation captured', async () => {
+    const first = await provider((response) => { textTurn(response, 'first') })
+    const second = await provider((response) => { textTurn(response, 'second') })
+    running.push(first, second)
+    let current = routeFor(first.url)
+    const adapter = adapterFor(() => current)
+    const prepared = await adapter.prepareCall('gateway', 'm')
+    current = routeFor(second.url)
+    const chunks = []
+    for await (const chunk of prepared.stream(request({ messages: [user([text('hi')])] }))) chunks.push(chunk)
+    expect(chunks).toContainEqual({ type: 'text-delta', index: 0, text: 'first' })
+    expect(first.bodies).toHaveLength(1)
+    expect(second.bodies).toHaveLength(0)
+  })
+
+  it('classifies a provider HTTP failure and keeps its retry hint', async () => {
+    const upstream = await provider((response) => {
+      response.writeHead(429, { 'content-type': 'application/json', 'retry-after': '3' })
+      response.end(JSON.stringify({ error: { message: 'slow down', type: 'rate_limit_error' } }))
+    })
+    running.push(upstream)
+    const adapter = adapterFor(routeFor(upstream.url))
+    await expect(collect(adapter.stream(request()))).rejects.toMatchObject({
+      code: 'RATE_LIMIT',
+      failure: { status: 429, providerRetryAfterMs: 3000 },
+    })
+  })
+
+  it('reports a non-JSON gateway failure with the status and the body text', async () => {
+    const upstream = await provider((response) => {
+      response.writeHead(502, { 'content-type': 'text/plain' })
+      response.end('bad gateway')
+    })
+    running.push(upstream)
+    const adapter = adapterFor(routeFor(upstream.url))
+    await expect(collect(adapter.stream(request()))).rejects.toMatchObject({ code: 'TRANSPORT' })
+  })
+
+  it('ends a stalled stream with a timeout instead of holding the turn open', async () => {
+    const upstream = await provider((response) => {
+      response.writeHead(200, { 'content-type': 'text/event-stream' })
+      frame(response, { choices: [{ finish_reason: null, delta: { content: 'partial' } }] })
+      // Heartbeat comments keep the socket alive without carrying progress.
+      const beat = setInterval(() => { response.write(': ping\n\n') }, 5)
+      response.on('close', () => { clearInterval(beat) })
+    })
+    running.push(upstream)
+    const adapter = adapterFor(routeFor(upstream.url, { streamIdleTimeoutMs: 60 }))
+    await expect(collect(adapter.stream(request()))).rejects.toMatchObject({ code: 'TIMEOUT' })
+  })
+
+  it('reports caller cancellation as an aborted request', async () => {
+    const upstream = await provider((response) => {
+      response.writeHead(200, { 'content-type': 'text/event-stream' })
+      frame(response, { choices: [{ finish_reason: null, delta: { content: 'partial' } }] })
+    })
+    running.push(upstream)
+    const adapter = adapterFor(routeFor(upstream.url))
+    const controller = new AbortController()
+    const stream = adapter.stream(request({ signal: controller.signal }))
+    const pending = collect(stream)
+    controller.abort()
+    await expect(pending).rejects.toMatchObject({ code: 'ABORTED' })
+  })
+
+  it('serves a route whose profile names no credential', async () => {
+    const upstream = await provider((response, body) => { void body; textTurn(response, 'anonymous') })
+    running.push(upstream)
+    const adapter = adapterFor(routeFor(upstream.url), () => Promise.resolve(undefined))
+    const chunks = await collect(adapter.stream(request()))
+    expect(chunks).toContainEqual({ type: 'text-delta', index: 0, text: 'anonymous' })
+  })
+})
