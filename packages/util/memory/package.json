@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-memory",
   "description": "Resident-set policy and collector access for long-running DeepSeek Harness hosts",
-  "version": "0.2.0-rc.2",
+  "version": "0.2.1-alpha.1-lite.1",
   "publishConfig": {
     "access": "public"
   },

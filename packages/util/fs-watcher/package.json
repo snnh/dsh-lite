@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-fs-watcher",
   "description": "Chokidar-backed watcher lifecycle: one place creates, gates readiness for, and closes every host filesystem watcher",
-  "version": "0.2.0-rc.2",
+  "version": "0.2.1-alpha.1-lite.1",
   "publishConfig": {
     "access": "public"
   },
