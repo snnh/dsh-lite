@@ -174,8 +174,18 @@ export function toWireMessages(
         break
       }
       case 'assistant': {
-        const calls = message.content.flatMap(block => block.type === 'tool-call' ? [block] : [])
-          .filter(block => !emittedCalls.has(String(block.id)))
+        // One declaration per call id, counting the ids already answered in
+        // this request: the protocol pairs a single tool message with each
+        // call, so a history that repeats an id collapses to its first
+        // occurrence instead of a request the endpoint rejects.
+        const declared = new Set<string>()
+        const calls = message.content.flatMap((block) => {
+          if (block.type !== 'tool-call') return []
+          const id = String(block.id)
+          if (emittedCalls.has(id) || declared.has(id)) return []
+          declared.add(id)
+          return [block]
+        })
         const replay = replaysReasoning(model) && message.source.provider === options.provider
         const reasoning = message.content.flatMap(block => block.type === 'reasoning' ? [block.text] : []).join('\n')
         const text = textOf(message)

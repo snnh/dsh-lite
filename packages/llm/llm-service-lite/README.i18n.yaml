@@ -3,14 +3,14 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/llm/llm-service-lite/README.md
 /:
-  en: cbcfb82c0a459892
-  zh: 66aff606dde94528
+  en: 03a76a4534f870d1
+  zh: 0895c8572db61890
 /deepseek-ai-dsh-llm-service-lite:
   en: fcdbc92a4ba82dc8
   zh: 8b75d80663889e73
 /deepseek-ai-dsh-llm-service-lite/summary:
-  en: cf38c806bd58089c
-  zh: 6dea77d74b2d87e0
+  en: f9acd799be21e33c
+  zh: 2eded4cda991179f
 /deepseek-ai-dsh-llm-service-lite/table-of-contents:
   en: d152484eb41ac6b4
   zh: 405b30feaf48c087
@@ -21,8 +21,8 @@
   en: 1e6ab13fa7957ece
   zh: 50f0af8feaa4536b
 /deepseek-ai-dsh-llm-service-lite/use-this-package/configure-provider-profiles:
-  en: 35b16baaf9425a8a
-  zh: 059e7b318f3fd1de
+  en: 04a6b961a0de8bc7
+  zh: d5336675cc19a814
 /deepseek-ai-dsh-llm-service-lite/use-this-package/declare-what-a-model-can-do:
   en: 6a83df267fdb665e
   zh: 5c381fa9c533942a
@@ -42,14 +42,14 @@
   en: 88c8e03ddcabede6
   zh: e075fa0e17e1eabd
 /deepseek-ai-dsh-llm-service-lite/understand-the-implementation/source-map:
-  en: 2942b402d2be1eec
-  zh: 64759a93291d2148
+  en: 0b684310c3cd09d7
+  zh: 413441b82e7ecd02
 /deepseek-ai-dsh-llm-service-lite/understand-the-implementation/registration-and-directory:
   en: 20c4bd7d60ec2b93
   zh: ebcd06ccd6140175
 /deepseek-ai-dsh-llm-service-lite/understand-the-implementation/wire-translation:
-  en: ea6c23ea9eceed0e
-  zh: f3547b55bbf02cf0
+  en: 27afb37a416dc298
+  zh: 86a50d4803f3dd2c
 /deepseek-ai-dsh-llm-service-lite/further-exploration:
   en: c2aad7bfde0abd8f
   zh: 39261b52303f903e
@@ -63,17 +63,17 @@
   en: d4351b73ec249754
   zh: 3fc0fc435934aca4
 /deepseek-ai-dsh-llm-service-lite/model-experience/provider-request-through-the-adapter/token-effect:
-  en: a2c29115cc3556e9
-  zh: 478036c231d52191
+  en: 78599bef7cc769ca
+  zh: 85575abb80d8d86c
 /deepseek-ai-dsh-llm-service-lite/model-experience/provider-request-through-the-adapter/kv-cache-effect:
-  en: 5cd8967334091e1c
-  zh: 98e9517411ba9041
+  en: 924f40fb206674f7
+  zh: f4c5b5a88ee5fe46
 /deepseek-ai-dsh-llm-service-lite/model-experience/provider-response:
   en: 802d7ff60a1d03ff
   zh: 7b2e1c3cdf6077cb
 /deepseek-ai-dsh-llm-service-lite/model-experience/provider-response/what-the-model-sees:
-  en: 6fe903d5fc90fa3e
-  zh: 39ab53466b433a17
+  en: 285a0c4acc2182a6
+  zh: 75c2d9f289df44b3
 /deepseek-ai-dsh-llm-service-lite/model-experience/provider-response/token-effect:
   en: 0f6d8d52c8fc9e07
   zh: ce33711f37cdd539
@@ -81,8 +81,8 @@
   en: a9a89439f9e5760e
   zh: d328cf3a4fecc212
 /deepseek-ai-dsh-llm-service-lite/known-limitations-and-deferred-work:
-  en: 353a4b1939882f41
-  zh: ede1e34077725c8f
+  en: 6607727aa19814a0
+  zh: 145f7f38f44bd560
 /deepseek-ai-dsh-llm-service-lite/known-limitations-and-deferred-work/dev-note:
   en: 9d74633e23e0b757
   zh: d3e3019b543253a8

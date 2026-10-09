@@ -194,6 +194,23 @@ describe('chat-completions message translation', () => {
     expect(messages[0]?.tool_calls).toHaveLength(1)
   })
 
+  it('collapses a call id one assistant turn declares twice into one call and one result', () => {
+    const messages = toWireMessages(request({
+      messages: [
+        assistant([toolCall('call-1', 'shell', '{}'), toolCall('call-1', 'shell', '{}')]),
+        toolResult('call-1', 'file.txt'),
+      ],
+    }), modelOf(route()), new Map())
+    expect(messages).toEqual([
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [{ id: 'call-1', type: 'function', function: { name: 'shell', arguments: '{}' } }],
+      },
+      { role: 'tool', tool_call_id: 'call-1', content: 'file.txt' },
+    ])
+  })
+
   it('carries a retained image as a base64 image_url part beside its text', () => {
     const version = requestImage('abc')
     const messages = toWireMessages(

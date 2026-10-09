@@ -5,7 +5,7 @@ import { OwcProfilesAdapter } from '../src/adapter.ts'
 import { ConcurrencyLimiter } from '../src/limiter.ts'
 import { resolveProfiles, type ResolvedOwcProviderProfile } from '../src/profiles.ts'
 import type { AttachmentStore, ImageAttachmentRef, ImageRequestTarget } from '@deepseek-ai/dsh-attachment'
-import { image, request, requestImage, system, user, text } from './messages.ts'
+import { assistant, image, request, requestImage, system, text, toolCall, toolResult, user } from './messages.ts'
 
 /** One running mock provider. */
 interface Provider {
@@ -13,6 +13,8 @@ interface Provider {
   close: () => Promise<void>
   /** Bodies the provider received, in arrival order. */
   readonly bodies: Record<string, unknown>[]
+  /** Request paths the provider received, in arrival order. */
+  readonly paths: string[]
 }
 
 /** Start a chat-completions mock that answers every request with the handler's frames. */
@@ -20,10 +22,12 @@ async function provider(
   handler: (response: ServerResponse, body: Record<string, unknown>) => void,
 ): Promise<Provider> {
   const bodies: Record<string, unknown>[] = []
+  const paths: string[] = []
   const server: Server = createServer((incoming: IncomingMessage, outgoing: ServerResponse) => {
     const chunks: Buffer[] = []
     incoming.on('data', (chunk: Buffer) => chunks.push(chunk))
     incoming.on('end', () => {
+      paths.push(incoming.url ?? '')
       bodies.push(JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>)
       handler(outgoing, bodies[bodies.length - 1] ?? {})
     })
@@ -34,6 +38,7 @@ async function provider(
   return {
     url: `http://127.0.0.1:${address.port}/v1`,
     bodies,
+    paths,
     close: () => new Promise<void>((resolve, reject) => {
       server.close((error) => { if (error === undefined) resolve(); else reject(error) })
     }),
@@ -51,6 +56,18 @@ function textTurn(response: ServerResponse, content = 'hello'): void {
   frame(response, { choices: [{ finish_reason: null, delta: { content } }] })
   frame(response, { choices: [{ finish_reason: 'stop', delta: {} }], usage: { prompt_tokens: 3, completion_tokens: 1 } })
   frame(response, '[DONE]')
+  response.end()
+}
+
+/** Answer a model call with one complete Messages text turn. */
+function messagesTurn(response: ServerResponse, content = 'hello'): void {
+  response.writeHead(200, { 'content-type': 'text/event-stream' })
+  frame(response, { type: 'message_start', message: { id: 'msg_1', usage: { input_tokens: 3, output_tokens: 1 } } })
+  frame(response, { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } })
+  frame(response, { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: content } })
+  frame(response, { type: 'content_block_stop', index: 0 })
+  frame(response, { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 2 } })
+  frame(response, { type: 'message_stop' })
   response.end()
 }
 
@@ -150,6 +167,61 @@ describe('owc profiles adapter', () => {
       stream: true,
       messages: [{ role: 'system', content: 'be brief' }, { role: 'user', content: 'hi' }],
     })
+  })
+
+  it('streams a text turn through an anthropic-messages route', async () => {
+    const upstream = await provider((response) => { messagesTurn(response) })
+    running.push(upstream)
+    const adapter = adapterFor(routeFor(upstream.url, {
+      interfaceType: 'anthropic-messages',
+      models: [{ id: 'm', maxTokens: 512 }],
+    }))
+    const chunks = await collect(adapter.stream(request({
+      messages: [system('be brief'), user([text('hi')])],
+    })))
+    expect(chunks).toEqual([
+      { type: 'block-start', index: 0, blockType: 'text' },
+      { type: 'text-delta', index: 0, text: 'hello' },
+      { type: 'block-end', index: 0, block: { type: 'text', text: 'hello' } },
+      { type: 'usage', usage: { inputTokens: 3, outputTokens: 2, totalTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0 } },
+      {
+        type: 'finish',
+        reason: { kind: 'stop' },
+        replayState: {
+          response: { kind: 'llm-service-lite-anthropic', version: 1, stopReason: 'end_turn', responseId: 'msg_1' },
+          blocks: [{ type: 'text' }],
+        },
+      },
+    ])
+    // This protocol has its own path, its own required cap, and its own headers.
+    expect(upstream.paths[0]).toBe('/v1/messages')
+    expect(upstream.bodies[0]).toEqual({
+      model: 'm',
+      max_tokens: 512,
+      stream: true,
+      system: 'be brief',
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+    })
+  })
+
+  it('answers a Messages call whose result never landed, so the endpoint accepts it', async () => {
+    const upstream = await provider((response) => { messagesTurn(response) })
+    running.push(upstream)
+    const adapter = adapterFor(routeFor(upstream.url, { interfaceType: 'anthropic-messages' }))
+    await collect(adapter.stream(request({
+      messages: [assistant([toolCall('toolu_a', 'shell', '{}')]), toolResult('toolu_b', 'stray')],
+    })))
+    expect(upstream.bodies[0]?.messages).toEqual([
+      { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_a', name: 'shell', input: {} }] },
+      {
+        role: 'user',
+        content: [{
+          type: 'tool_result',
+          tool_use_id: 'toolu_a',
+          content: 'Tool result missing: this call did not complete.',
+        }],
+      },
+    ])
   })
 
   it('describes routes and models from the profile alone', async () => {

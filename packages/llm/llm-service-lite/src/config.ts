@@ -35,6 +35,27 @@ export const INTERFACE_TYPES = ['openai-chat-completions', 'anthropic-messages',
 export type InterfaceType = (typeof INTERFACE_TYPES)[number]
 
 /**
+ * The protocols this adapter's transports implement. The rest stay in
+ * {@link INTERFACE_TYPES} because the vocabulary is the port's — a settings
+ * surface must be able to name what a deployment asked for — while resolution
+ * refuses them by name instead of serving a declared protocol over another
+ * protocol's wire.
+ */
+export const SERVED_INTERFACE_TYPES = ['openai-chat-completions', 'anthropic-messages'] as const
+
+/** One protocol this adapter serves. */
+export type ServedInterfaceType = (typeof SERVED_INTERFACE_TYPES)[number]
+
+/**
+ * Whether a declared protocol is one this adapter serves.
+ * @param value - protocol name from a profile.
+ * @returns whether a transport implements it.
+ */
+export function isServedInterfaceType(value: InterfaceType): value is ServedInterfaceType {
+  return (SERVED_INTERFACE_TYPES as readonly InterfaceType[]).includes(value)
+}
+
+/**
  * Reasoning-effort levels a model may offer, ordered least to most expensive.
  * The level id is also its wire spelling for `openai-chat-completions`: OWC
  * sends exactly the level the user picked, so a gateway with its own
@@ -209,9 +230,9 @@ export interface OwcProviderProfile {
   displayName?: string
   /** Whether the route registers at all; a disabled profile keeps its configuration but serves nothing. */
   enabled?: boolean
-  /** Wire protocol every model on this route speaks. */
+  /** Wire protocol every model on this route speaks; only a {@link SERVED_INTERFACE_TYPES} entry resolves. */
   interfaceType: InterfaceType
-  /** Endpoint of every model on the route; the protocol's usual host applies when omitted. */
+  /** Endpoint of every model on the route; the protocol's usual host and version apply when omitted. */
   baseURL?: string
   /** Credential reference resolved per request through the harness credential seam. */
   apiKeyEnv?: string

@@ -22,16 +22,31 @@ import type {
 } from '@deepseek-ai/dsh-llm'
 import { idleWatchdog, timeoutOf } from '@deepseek-ai/dsh-timeout'
 import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
+import { anthropicRequest } from './anthropic-messages.ts'
+import { translateAnthropicStream } from './anthropic-stream.ts'
 import { chatRequest, translateChatStream } from './chat-completions.ts'
 import { prepareRequestImages } from './images.ts'
 import { classifyFailure, classifyTransport } from './errors.ts'
 import { ConcurrencyLimiter } from './limiter.ts'
 import { catalogModels, resolvedModelInfo } from './models.ts'
 import { modelOf, type ResolvedOwcProviderProfile } from './profiles.ts'
-import { ChatSseReader } from './sse.ts'
+import { SseReader } from './sse.ts'
+import type { ServedInterfaceType } from './config.ts'
 
 /** Timeout code stamped on this adapter's idle watchdog. */
 const IDLE_CODE = 'OWC_STREAM_IDLE'
+
+/** One protocol's transport: the request it assembles and the stream it translates. */
+interface Transport {
+  readonly request: typeof chatRequest
+  readonly translate: typeof translateChatStream
+}
+
+/** Every protocol this adapter serves, by the name a profile declares. */
+const TRANSPORTS: Readonly<Record<ServedInterfaceType, Transport>> = {
+  'openai-chat-completions': { request: chatRequest, translate: translateChatStream },
+  'anthropic-messages': { request: anthropicRequest, translate: translateAnthropicStream },
+}
 
 /** What the adapter needs from its plugin, all read per operation. */
 export interface OwcProfilesAdapterOptions {
@@ -166,7 +181,8 @@ export class OwcProfilesAdapter extends LlmAdapter {
       model, options.messages, this.dependencies.resolveAttachments?.(), profile.imageRequestBudget, signal,
     )
     signal.throwIfAborted()
-    const request = chatRequest(profile, model, options, apiKey, versions)
+    const transport = TRANSPORTS[profile.interfaceType]
+    const request = transport.request(profile, model, options, apiKey, versions)
     const response = await fetch(request.url, {
       method: 'POST',
       headers: request.headers,
@@ -187,7 +203,7 @@ export class OwcProfilesAdapter extends LlmAdapter {
     if (response.body === null) {
       throw new LlmError(`llm-service-lite: provider "${profile.provider}" returned no response body`, 'EMPTY_RESPONSE')
     }
-    const reader = new ChatSseReader(response.body, activity)
-    yield* translateChatStream(reader.events(), () => reader.sawDone)
+    const reader = new SseReader(response.body, activity)
+    yield* transport.translate(reader.events(), () => reader.sawDone)
   }
 }

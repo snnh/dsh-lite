@@ -1,7 +1,7 @@
 /** Message and request builders shared by the adapter's specs. */
 
 import { MessageId, ToolCallId } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock, GenerateOptions, Message, ModelMessageSource, ToolSchema } from '@deepseek-ai/dsh-llm'
+import type { AssistantMessage, ContentBlock, GenerateOptions, Message, ModelMessageSource, ToolSchema } from '@deepseek-ai/dsh-llm'
 import type { ImageAttachmentRef, ImageMediaType, RequestImageAttachment } from '@deepseek-ai/dsh-attachment'
 
 /** One system-prompt message carrying the given text. */
@@ -19,13 +19,18 @@ export function assistant(
   content: ContentBlock[],
   source: Partial<ModelMessageSource> = {},
   id = 'assistant',
-): Message {
+): AssistantMessage {
   return {
     id: MessageId(id),
     role: 'assistant',
     source: { kind: 'model', provider: 'gateway', model: 'm', ...source },
     content,
   }
+}
+
+/** One developer message, as the tool-update producers publish them. */
+export function developer(text: string, id = 'developer'): Message {
+  return { id: MessageId(id), role: 'developer', source: { kind: 'system-prompt' }, content: [{ type: 'text', text }] }
 }
 
 /** One tool-result message answering the given call. */
@@ -36,6 +41,22 @@ export function toolResult(callId: string, text: string, id = `result-${callId}`
     source: { kind: 'tool', callId: ToolCallId(callId) },
     toolCallId: ToolCallId(callId),
     content: [{ type: 'text', text }],
+  }
+}
+
+/** One tool-result message with the caller's own content blocks and outcome. */
+export function toolResultWith(
+  callId: string,
+  content: ContentBlock[],
+  { isError = false, id = `result-${callId}` }: { isError?: boolean; id?: string } = {},
+): Message {
+  return {
+    id: MessageId(id),
+    role: 'tool',
+    source: { kind: 'tool', callId: ToolCallId(callId) },
+    toolCallId: ToolCallId(callId),
+    content,
+    isError,
   }
 }
 

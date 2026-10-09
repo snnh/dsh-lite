@@ -27,7 +27,9 @@ import {
   DEFAULT_MAX_TOKENS,
   DEFAULT_STREAM_IDLE_TIMEOUT_MS,
   INTERFACE_TYPES,
+  isServedInterfaceType,
   MODALITIES,
+  SERVED_INTERFACE_TYPES,
   type EffortLevel,
   type InterfaceType,
   type Modality,
@@ -35,6 +37,7 @@ import {
   type OwcModelCapabilities,
   type OwcModelProfile,
   type OwcProviderProfile,
+  type ServedInterfaceType,
   type ThinkingMode,
   type ThinkingStyle,
 } from './config.ts'
@@ -42,7 +45,7 @@ import {
 /** Protocol defaults OWC applies when a profile names no endpoint. */
 const ENDPOINT_DEFAULTS: Readonly<Record<InterfaceType, string>> = {
   'openai-chat-completions': 'https://api.openai.com/v1',
-  'anthropic-messages': 'https://api.anthropic.com',
+  'anthropic-messages': 'https://api.anthropic.com/v1',
   'openai-responses': 'https://api.openai.com/v1',
 }
 
@@ -90,8 +93,8 @@ export interface ResolvedOwcProviderProfile {
   readonly displayName: string
   /** Whether the route registers. */
   readonly enabled: boolean
-  /** Wire protocol every model on the route speaks. */
-  readonly interfaceType: InterfaceType
+  /** Wire protocol every model on the route speaks, from the ones this adapter serves. */
+  readonly interfaceType: ServedInterfaceType
   /** Endpoint of every model on the route. */
   readonly baseURL: string
   /** Credential reference resolved per request, when the profile names one. */
@@ -131,9 +134,10 @@ export type ValidationMode = 'strict' | 'deferred'
  * Reject a profile that names neither a usable protocol nor a usable endpoint.
  * @param provider - route name, for the diagnostic.
  * @param source - configured profile.
+ * @returns the protocol this adapter serves for the profile.
  * @throws Error naming the route and the field that cannot be served.
  */
-function assertAddressable(provider: string, source: OwcProviderProfile): void {
+function assertAddressable(provider: string, source: OwcProviderProfile): ServedInterfaceType {
   if (!INTERFACE_TYPES.includes(source.interfaceType)) {
     throw new Error(
       `llm-service-lite: provider "${provider}" names interfaceType "${source.interfaceType}",`
@@ -162,6 +166,18 @@ function assertAddressable(provider: string, source: OwcProviderProfile): void {
     )
   }
   assertRouteCapabilities(provider, source)
+  // The vocabulary is the port's; the transports are this plugin's. A profile
+  // declaring a protocol no transport implements is refused by name rather than
+  // served over another one — the request would reach the provider with a body
+  // it cannot read. Internal contradictions above report first: they say what
+  // to change, while this says why the route cannot serve at all.
+  if (!isServedInterfaceType(source.interfaceType)) {
+    throw new Error(
+      `llm-service-lite: provider "${provider}" declares interfaceType "${source.interfaceType}",`
+      + ` which this adapter does not serve yet; it serves ${SERVED_INTERFACE_TYPES.join(' and ')}.`
+      + ' Remove the profile or set its interfaceType once that transport lands.',
+    )
+  }
   assertExtraBody(provider, source.extraBody)
   for (const [name, value] of Object.entries(source.headers ?? {})) {
     try {
@@ -173,6 +189,7 @@ function assertAddressable(provider: string, source: OwcProviderProfile): void {
       )
     }
   }
+  return source.interfaceType
 }
 
 /** Reject route-level capability switches the named protocol cannot carry. */
@@ -307,8 +324,9 @@ export function resolveProfiles(
   for (const [provider, source] of Object.entries(providers ?? {})) {
     if (provider.length === 0) throw new Error('llm-service-lite: provider route names must be non-empty')
     if (resolved.has(provider)) throw new Error(`llm-service-lite: duplicate provider route "${provider}"`)
+    let interfaceType: ServedInterfaceType
     try {
-      assertAddressable(provider, source)
+      interfaceType = assertAddressable(provider, source)
     } catch (error) {
       if (validation === 'strict') throw error
       resolved.set(provider, unserviceable(provider, source, error))
@@ -333,8 +351,8 @@ export function resolveProfiles(
       provider,
       displayName: source.displayName ?? provider,
       enabled: source.enabled ?? true,
-      interfaceType: source.interfaceType,
-      baseURL: source.baseURL ?? ENDPOINT_DEFAULTS[source.interfaceType],
+      interfaceType,
+      baseURL: source.baseURL ?? ENDPOINT_DEFAULTS[interfaceType],
       apiKeyEnv: source.apiKeyEnv === undefined ? undefined : credentialRef(source.apiKeyEnv),
       apiKey: source.apiKey,
       headers: { ...source.headers },
@@ -376,7 +394,7 @@ function unserviceable(provider: string, source: OwcProviderProfile, error: unkn
     provider,
     displayName: source.displayName ?? provider,
     enabled: source.enabled ?? true,
-    interfaceType: (INTERFACE_TYPES as readonly string[]).includes(source.interfaceType)
+    interfaceType: isServedInterfaceType(source.interfaceType)
       ? source.interfaceType
       : 'openai-chat-completions',
     baseURL: source.baseURL ?? ENDPOINT_DEFAULTS['openai-chat-completions'],

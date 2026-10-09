@@ -1,5 +1,5 @@
 /**
- * Server-sent-event framing for the chat-completions protocol.
+ * Server-sent-event framing shared by this adapter's transports.
  *
  * The idle pulse is raised on data frames only. A gateway that keeps a stalled
  * connection alive with `: ping` comments would otherwise renew the watchdog
@@ -16,12 +16,15 @@ import { LlmError } from '@deepseek-ai/dsh-llm'
 const DONE_SENTINEL = '[DONE]'
 
 /**
- * One chat-completions event stream, decoded frame by frame.
+ * One provider event stream, decoded frame by frame.
  *
  * `[DONE]` terminates the stream and is remembered rather than yielded, so a
- * caller can tell a clean shutdown from a connection that simply stopped.
+ * caller can tell a clean shutdown from a connection that simply stopped. It is
+ * the chat-completions sentinel; a protocol whose terminal event is in-band (a
+ * Messages `message_stop`) never sees it, and a gateway that appends one anyway
+ * is treated as having terminated the stream.
  */
-export class ChatSseReader {
+export class SseReader {
   private done = false
   private readonly body: ReadableStream<BufferSource>
   private readonly activity: () => void
@@ -55,7 +58,7 @@ export class ChatSseReader {
       try {
         raw = JSON.parse(frame.data)
       } catch (_invalidSseJson) {
-        throw new LlmError('llm-service-lite: chat-completions stream contains invalid JSON', 'MALFORMED_RESPONSE')
+        throw new LlmError('llm-service-lite: provider stream contains invalid JSON', 'MALFORMED_RESPONSE')
       }
       if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) continue
       yield raw as Record<string, unknown>

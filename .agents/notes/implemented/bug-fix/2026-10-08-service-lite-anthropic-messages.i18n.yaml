@@ -1,0 +1,22 @@
+# Bilingual-pair consistency record for 2026-10-08-service-lite-anthropic-messages.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-10-08-service-lite-anthropic-messages.md
+/agent-note-the-local-llm-service-speaks-the-anthropic-messages-protocol:
+  en: cc2fb0d4100da149
+  zh: 08c05c0740655d32
+/agent-note-the-local-llm-service-speaks-the-anthropic-messages-protocol/problem:
+  en: 943a64c299535b60
+  zh: 8b9348eb154ef21f
+/agent-note-the-local-llm-service-speaks-the-anthropic-messages-protocol/decision:
+  en: 8ea31f56d5e938bf
+  zh: 748a86ae1b7be6ef
+/agent-note-the-local-llm-service-speaks-the-anthropic-messages-protocol/alternatives-considered:
+  en: f45b404e04cb3961
+  zh: e4e7626e64e8b8ce
+/agent-note-the-local-llm-service-speaks-the-anthropic-messages-protocol/consequences:
+  en: f1f12076745b80c2
+  zh: 068d9d3a2258f3ac
+/agent-note-the-local-llm-service-speaks-the-anthropic-messages-protocol/testing:
+  en: a4010fa77a745892
+  zh: 28196be96e2d2b6f

@@ -1,5 +1,5 @@
 ---
-description: "A lighter LLM service: self-contained provider profiles, a declared model catalog, and a native chat-completions transport on the harness LLM seam, referencing OpenWebCode's implementation."
+description: "A lighter LLM service: self-contained provider profiles, a declared model catalog, and native chat-completions and Anthropic Messages transports on the harness LLM seam, referencing OpenWebCode's implementation."
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`@deepseek-ai/dsh-llm-service-lite` adapts third-party model endpoints: it registers one route per configured provider profile and answers all of them over its own chat-completions transport, so no provider SDK and no installed catalog sits in the request path. A profile is self-contained — wire protocol, endpoint, credential reference, request-body extras, concurrency, image input, and the models served — so a gateway, a national API, and a corporate proxy reach one code path. The shape ports OpenWebCode's model-provider layer onto the harness seam: one document describes every provider, the route set follows it live, and a request carries exactly the declared fields.
+`@deepseek-ai/dsh-llm-service-lite` adapts third-party model endpoints: one route per configured provider profile, all answered over its own transports — the OpenAI-compatible chat-completions wire and the Anthropic Messages protocol — so no provider SDK and no installed catalog sits in the request path. A profile is self-contained — wire protocol, endpoint, credential reference, request-body extras, concurrency, image input, and the models served — so a gateway, a national API, and a corporate proxy reach one code path. The shape ports OpenWebCode's model-provider layer onto the harness seam: one document describes every provider, and the route set follows it live.
 
 ## Table of Contents
 
@@ -70,6 +70,19 @@ This plugin adapts third-party endpoints and nothing else: every route it regist
             capabilities:
               effort: [low, high]
               thinkingStyle: enable_thinking
+      # An endpoint reached over the Anthropic Messages protocol, with prompt
+      # caching and its thinking modes declared.
+      claude:
+        interfaceType: anthropic-messages
+        baseURL: https://api.anthropic.com/v1
+        apiKeyEnv: ANTHROPIC_API_KEY
+        promptCaching: true
+        models:
+          - id: claude-sonnet-4-5-20250929
+            contextWindow: 200000
+            maxTokens: 64000
+            capabilities:
+              thinking: [enabled, disabled]
       # A gateway that routes by header and needs no credential of its own.
       proxy:
         interfaceType: openai-chat-completions
@@ -82,8 +95,8 @@ This plugin adapts third-party endpoints and nothing else: every route it regist
 | Field | Default | Meaning |
 |---|---|---|
 | `enabled` | `true` | Whether the route registers at all |
-| `interfaceType` | required | `openai-chat-completions`, `anthropic-messages`, or `openai-responses` |
-| `baseURL` | protocol default | Endpoint of every model on the route |
+| `interfaceType` | required | `openai-chat-completions`, `anthropic-messages`, or `openai-responses`; the first two are served, the third is refused at resolution |
+| `baseURL` | protocol default | Endpoint of every model on the route; the protocol's usual host and version segment apply when omitted |
 | `apiKeyEnv` | absent | Credential reference resolved per request through the credential seam |
 | `apiKey` | absent | Inline credential, for a profile imported from another tool |
 | `headers` | none | Static request headers; a named credential still wins over `authorization` |
@@ -136,6 +149,8 @@ Three rules shape the package. A profile is the whole truth: nothing is inferred
 | `src/models.ts` | Projection of model facts onto the seam's model vocabulary |
 | `src/adapter.ts` | The adapter: per-route snapshot, admission, idle watchdog, dispatch |
 | `src/chat-completions.ts` | Request assembly and stream translation for the chat-completions wire |
+| `src/anthropic-messages.ts` | Request assembly, pairing repair, and thinking-signature replay for the Messages wire |
+| `src/anthropic-stream.ts` | Messages event-stream translation into the harness chunk vocabulary |
 | `src/sse.ts` | Server-sent-event framing with a data-only idle pulse |
 | `src/errors.ts` | Provider-failure classification |
 | `src/limiter.ts` | Per-route FIFO admission control |
@@ -147,7 +162,13 @@ A mount with no profiles registers nothing: the plugin holds no route until its 
 
 ### Wire translation
 
-The chat-completions translation owns three things the provider does not: block identity and ordering, tool-call assembly across streamed fragments, and the difference between a stream that ended and one that was cut off. Tool results are paired with their calls as the protocol requires, an unanswered call gets a placeholder rather than a request the endpoint rejects, and an orphaned result is dropped. Reasoning is replayed through `reasoning_content` only for a route that declares it and only for history this same provider produced.
+Two transports answer one seam. `openai-chat-completions` speaks the OpenAI-compatible wire and `anthropic-messages` the Messages protocol, and both own the three things a provider stream does not: block identity and ordering, tool-call assembly across streamed fragments, and the difference between a stream that ended and one that was cut off.
+
+Both also repair their protocol's pairing rules on the way out, because a durable history can hold shapes no endpoint accepts. A result whose call is gone is dropped; a call id one assistant turn declares twice, or that a later turn declares again, collapses to its first occurrence; a repeat result for one call is dropped and its first occurrence kept; a call nothing ever answered is answered with a placeholder rather than left to a 400; and the results of one parallel batch merge into the single user turn both protocols require. The repair happens in the wire projection, so the durable log is never rewritten to make a request acceptable.
+
+Reasoning is replayed only for a route that declares it and only for history this same provider and model produced. `openai-chat-completions` replays it through `reasoning_content`. `anthropic-messages` replays signed and redacted thinking blocks through adapter-private replay metadata on the assistant message, because that protocol rejects a thinking block returned without its signature; metadata another provider, another model, or another adapter wrote degrades that one turn to plain text instead of failing the request.
+
+The Messages transport reads its prompt from `system`, else from a leading system message. A later system or developer message has no slot of its own in this protocol, so it folds into a user turn where it stands and a mid-conversation instruction keeps its position. Tool results carry their media inline as image blocks beside their text, `max_tokens` is always sent because the protocol requires the cap, and `promptCaching` marks this protocol's own breakpoints: the system prompt and the last tool declaration.
 
 <a id="further-exploration"></a>
 ## Further Exploration
@@ -167,17 +188,17 @@ The conversation exactly as the harness assembled it: the system prompt as a lea
 
 #### Token effect
 
-The request carries no adapter-authored prompt text. `max_tokens` is present only when the caller configured one, so an endpoint that defaults its own ceiling keeps it; a route that declares none sends no cap at all.
+The request carries no adapter-authored prompt text. `max_tokens` is present on a chat-completions request only when the caller configured one, so an endpoint that defaults its own ceiling keeps it; the Messages protocol requires the cap, so it is always sent there, from the request, the profile's override, or the model's declared cap.
 
 #### KV Cache effect
 
-Nothing in the translation is per-request random: the same history produces the same request bytes, so provider-side prefix caching keeps working across turns. A route marked `promptCaching` uses the protocol's own cache marking; this adapter adds no cache breakpoints of its own.
+Nothing in the translation is per-request random: the same history produces the same request bytes, so provider-side prefix caching keeps working across turns. A route marked `promptCaching` uses the protocol's own cache marking — the Messages transport marks the system prompt and the last tool declaration — and otherwise the adapter adds no cache breakpoints of its own.
 
 ### Provider response
 
 #### What the model sees
 
-Content deltas become text blocks, `reasoning_content` becomes reasoning blocks, and streamed tool-call fragments become one call each. The model's own stop reason is mapped onto the harness vocabulary, and a stream that ends without one is a transport failure rather than a completed turn.
+Content deltas become text blocks, `reasoning_content` becomes reasoning blocks, signed thinking becomes a reasoning block whose signature is kept as replay metadata, and streamed tool-call fragments become one call each. The model's own stop reason is mapped onto the harness vocabulary, and a stream that ends without one is a transport failure rather than a completed turn.
 
 #### Token effect
 
@@ -191,10 +212,10 @@ Replayed reasoning is byte-identical to what the provider returned, so a route t
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- **One protocol implemented.** `openai-chat-completions` is fully served; `anthropic-messages` and `openai-responses` are part of the vocabulary and are refused by name at resolution, because serving a declared protocol with different wire behaviour would be worse than saying so. They are the next milestone.
+- **One protocol still unimplemented.** `openai-chat-completions` and `anthropic-messages` are fully served; `openai-responses` is part of the vocabulary and is refused by name at resolution, because serving a declared protocol with different wire behaviour would be worse than saying so. It is the next milestone.
 - **No video input or image output.** A profile declaring `video` input or `imageOutput` is refused rather than served with the difference dropped. `image` input is carried, but without per-image token accounting: `imageRequestPricing` is not implemented, so a surface pricing a request prices its images as it prices the text that replaces them, and prompt-cache accounting sees the encoded payload rather than the model's visual-token count.
 - **No adapter-side retries.** One call is one provider attempt, so the provider's retry policy is executed by `dsh-llm-retry` at the durable step boundary, and a retry re-derives the whole request.
-- **No replay envelope.** A successful response carries no adapter-private replay state, so history is re-sent as durable messages, and a profile declaring `responsesEncryptedReplay` is refused by name until the responses transport lands.
+- **Replay metadata is protocol-specific.** The Messages transport writes and reads its own envelope for thinking signatures; a profile declaring `responsesEncryptedReplay` is still refused by name until the responses transport lands.
 - **No streaming usage in the absence of a report.** An endpoint that never sends a usage chunk leaves token accounting to the harness's estimator.
 
 <a id="dev-note"></a>

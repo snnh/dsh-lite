@@ -1,5 +1,5 @@
 ---
-description: "更轻量的 LLM 服务：自包含的服务商档案、显式声明的模型目录，以及接入 harness LLM 缝的原生 chat-completions 传输，实现参考 OpenWebCode。"
+description: "更轻量的 LLM 服务：自包含的服务商档案、显式声明的模型目录，以及接入 harness LLM 缝的原生 chat-completions 与 Anthropic Messages 传输，实现参考 OpenWebCode。"
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-`@deepseek-ai/dsh-llm-service-lite` 负责适配第三方模型端点：它为每一条已配置的服务商档案注册一条路由，并统一走自己的 chat-completions 传输，因此请求路径里既没有服务商 SDK，也没有已安装目录。一条档案是自包含的——线协议、端点、凭据引用、请求体附加字段、并发度，以及该端点所服务的模型——因此自建网关、国产模型 API 与公司网络里的代理走同一条代码路径，也不必有人事先认识这个服务商。
+`@deepseek-ai/dsh-llm-service-lite` 负责适配第三方模型端点：每条已配置的服务商档案一条路由，统一走自己的传输——OpenAI 兼容的 chat-completions 线协议与 Anthropic Messages 协议——因此请求路径里既没有服务商 SDK，也没有已安装目录。一条档案是自包含的——线协议、端点、凭据引用、请求体附加字段、并发度，以及该端点所服务的模型——因此自建网关、国产模型 API 与公司网络里的代理走同一条代码路径，也不必有人事先认识这个服务商。
 
 ## 目录
 
@@ -70,6 +70,19 @@ kind: "package-reference"
             capabilities:
               effort: [low, high]
               thinkingStyle: enable_thinking
+      # An endpoint reached over the Anthropic Messages protocol, with prompt
+      # caching and its thinking modes declared.
+      claude:
+        interfaceType: anthropic-messages
+        baseURL: https://api.anthropic.com/v1
+        apiKeyEnv: ANTHROPIC_API_KEY
+        promptCaching: true
+        models:
+          - id: claude-sonnet-4-5-20250929
+            contextWindow: 200000
+            maxTokens: 64000
+            capabilities:
+              thinking: [enabled, disabled]
       # A gateway that routes by header and needs no credential of its own.
       proxy:
         interfaceType: openai-chat-completions
@@ -82,8 +95,8 @@ kind: "package-reference"
 | 字段 | 默认值 | 含义 |
 |---|---|---|
 | `enabled` | `true` | 该路由是否注册 |
-| `interfaceType` | 必填 | `openai-chat-completions`、`anthropic-messages` 或 `openai-responses` |
-| `baseURL` | 协议默认端点 | 该路由所有模型的端点 |
+| `interfaceType` | 必填 | `openai-chat-completions`、`anthropic-messages` 或 `openai-responses`；前两个已被承载，第三个在解析时被拒绝 |
+| `baseURL` | 协议默认端点 | 该路由所有模型的端点；省略时采用该协议惯用的主机与版本段 |
 | `apiKeyEnv` | 无 | 凭据引用，按请求经凭据缝解析 |
 | `apiKey` | 无 | 内联凭据，供从别的工具导入的档案使用 |
 | `headers` | 无 | 静态请求头；若同时点名凭据，凭据仍然覆盖 `authorization` |
@@ -136,6 +149,8 @@ kind: "package-reference"
 | `src/models.ts` | 把模型事实投影到服务缝的模型词汇 |
 | `src/adapter.ts` | 适配器：按路由快照、准入、空闲看门狗、派发 |
 | `src/chat-completions.ts` | chat-completions 的请求组装与流翻译 |
+| `src/anthropic-messages.ts` | Messages 的请求组装、配对修复与思考签名回放 |
+| `src/anthropic-stream.ts` | 把 Messages 事件流翻译成 harness 的分块词汇 |
 | `src/sse.ts` | 只在数据帧上打点的 SSE 分帧 |
 | `src/errors.ts` | 服务商失败分类 |
 | `src/limiter.ts` | 按路由的 FIFO 准入控制 |
@@ -147,7 +162,13 @@ kind: "package-reference"
 
 ### 线上翻译
 
-chat-completions 的翻译承担了三件服务商不做的事：块的身份与顺序、跨流式分片拼装工具调用，以及区分"流结束了"与"流被截断了"。工具结果按协议要求与其调用成对出现，没有结果的调用补占位而不是拼出一个被端点拒绝的请求，游离的结果被丢弃。思考只在声明了 `reasoningContent` 且历史确实来自同一服务商时，才经 `reasoning_content` 回带。
+两条传输服务同一道缝：`openai-chat-completions` 说 OpenAI 兼容的线协议，`anthropic-messages` 说 Messages 协议；两者都承担了三件服务商不做的事：块的身份与顺序、跨流式分片拼装工具调用，以及区分"流结束了"与"流被截断了"。
+
+两者也都在出门时修复各自协议的配对规则，因为持久历史可能持有端点无法接受的形态。调用已不在的结果被丢弃；同一条助手回合内重复声明、或后续回合再次声明的调用 id，折叠为其首次出现；同一个调用的重复结果只留首条；无人回答的调用补一个占位结果，而不是留给端点回一个 400；同一并行批次的结果合并为两种协议都要求的单个 user 回合。修复发生在线上投影里，因此持久日志绝不会为了请求可被接受而被改写。
+
+思考只在声明过、且历史确实由同一 provider 与 model 产生时才回带。`openai-chat-completions` 经 `reasoning_content` 回带；`anthropic-messages` 通过助手消息上的适配器私有回放元数据回带带签名与 redacted 的思考块，因为该协议拒绝没有签名就返回的 thinking 块；由别的服务商、别的模型或别的适配器写下的元数据只把那一个回合降级为纯文本，而不是让请求失败。
+
+Messages 传输的提示词取自 `system`，否则取自首条 system 消息。其后出现的 system 或 developer 消息在该协议里没有自己的槽位，因此就地折叠为一个 user 回合，会话中途的指令得以保持位置。工具结果把随附媒体以内联图片块的形式放在文本旁边；`max_tokens` 必发，因为该协议强制要求输出上限；`promptCaching` 标记该协议自己的断点：system 提示与最后一条工具声明。
 
 <a id="further-exploration"></a>
 ## 延伸阅读
@@ -167,17 +188,17 @@ harness 组装出的对话原样：系统提示词作为开头的 system 消息�
 
 #### token 影响
 
-请求不携带适配器撰写的提示词文本。`max_tokens` 仅在调用方配置过时才出现，因此自己设有默认上限的端点会保留它；未声明上限的路由干脆不发这个字段。
+请求不携带适配器撰写的提示词文本。chat-completions 请求里的 `max_tokens` 仅在调用方配置过时才出现，因此自己设有默认上限的端点会保留它；Messages 协议强制要求这个上限，因此那里总是发送：取自请求、档案的覆盖值，或模型声明的上限。
 
 #### KV 缓存影响
 
-翻译里没有任何逐请求随机量：同一段历史产生同一份请求字节，服务商侧的前缀缓存因此跨回合持续有效。标记了 `promptCaching` 的路由使用协议自身的缓存标记；本适配器不添加自己的缓存断点。
+翻译里没有任何逐请求随机量：同一段历史产生同一份请求字节，服务商侧的前缀缓存因此跨回合持续有效。标记了 `promptCaching` 的路由使用协议自身的缓存标记——Messages 传输会标记 system 提示与最后一条工具声明——除此之外本适配器不添加自己的缓存断点。
 
 ### 服务商的响应
 
 #### 模型看到什么
 
-内容增量成为文本块，`reasoning_content` 成为思考块，流式工具调用分片拼成一个个调用。服务商自己的停止原因被映射到 harness 词汇；没有停止原因就结束的流是传输失败，而不是完成的回合。
+内容增量成为文本块，`reasoning_content` 成为思考块，带签名的思考成为思考块并把签名留存为回放元数据，流式工具调用分片拼成一个个调用。服务商自己的停止原因被映射到 harness 词汇；没有停止原因就结束的流是传输失败，而不是完成的回合。
 
 #### token 影响
 
@@ -191,10 +212,10 @@ harness 组装出的对话原样：系统提示词作为开头的 system 消息�
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- **只实现了一种协议。** `openai-chat-completions` 已完整服务；`anthropic-messages` 与 `openai-responses` 属于词汇表但在解析时被按名拒绝，因为用不同的线上行为去服务一个已声明的协议，比直说"还没做"更糟。它们是下一个里程碑。
+- **还有一种协议未实现。** `openai-chat-completions` 与 `anthropic-messages` 已完整服务；`openai-responses` 属于词汇表但在解析时被按名拒绝，因为用不同的线上行为去服务一个已声明的协议，比直说"还没做"更糟。它是下一个里程碑。
 - **不支持视频输入与图片输出。** 声明 `video` 输入或 `imageOutput` 的档案会被拒绝，而不是把差异丢掉后照常服务。`image` 输入已被承载，但没有逐图 token 计价：本适配器未实现 `imageRequestPricing`，因此计价界面会把图片当作它所替换的文本来计价。
 - **适配器侧不重试。** 一次调用就是一次服务商尝试，重试策略由 `dsh-llm-retry` 在持久步骤边界执行，重试会重新推导整个请求。
-- **没有回放信封。** 成功响应不携带适配器私有回放状态，历史以持久消息重发；声明 `responsesEncryptedReplay` 的档案在 responses 传输落地前按名拒绝。
+- **回放元数据是分协议的。** Messages 传输为自己写下的思考签名维护专属信封；声明 `responsesEncryptedReplay` 的档案在 responses 传输落地前仍按名拒绝。
 - **没有用量报告就没有流式用量。** 从不发送用量块的服务商，其 token 记账交给 harness 的估算器。
 
 <a id="dev-note"></a>

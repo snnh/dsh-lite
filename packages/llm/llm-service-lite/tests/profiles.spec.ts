@@ -49,8 +49,8 @@ describe('profile resolution', () => {
   })
 
   it('applies the protocol endpoint default and the profile display name', () => {
-    const profile = resolved({ displayName: 'Acme', interfaceType: 'anthropic-messages', baseURL: undefined })
-    expect(profile.baseURL).toBe('https://api.anthropic.com')
+    const profile = resolved({ displayName: 'Acme', baseURL: undefined })
+    expect(profile.baseURL).toBe('https://api.openai.com/v1')
     expect(profile.displayName).toBe('Acme')
   })
 
@@ -113,6 +113,23 @@ describe('profile validation', () => {
   it('refuses a capability the named protocol cannot carry', () => {
     expect(refused({ promptCaching: true })).toMatch(/promptCaching on interfaceType/)
     expect(refused({ interfaceType: 'anthropic-messages', includeUsage: true })).toMatch(/includeUsage on interfaceType/)
+  })
+
+  it('refuses a protocol this adapter does not serve', () => {
+    // The vocabulary is the port's; the transports are this adapter's. A
+    // profile naming a declared-but-unbuilt protocol is refused by name instead
+    // of being served over a wire that protocol cannot read.
+    expect(refused({ interfaceType: 'openai-responses' })).toMatch(/does not serve yet/)
+  })
+
+  it('serves the protocols whose transports are built', () => {
+    for (const interfaceType of ['openai-chat-completions', 'anthropic-messages'] as const) {
+      const profile = resolveProfiles({
+        gateway: { interfaceType, baseURL: 'https://gateway.test', models: [{ id: 'm' }] },
+      }).get('gateway')
+      expect(profile?.interfaceType).toBe(interfaceType)
+      expect(profile?.diagnostic).toBeUndefined()
+    }
   })
 
   it('refuses a reserved or non-JSON extra body field', () => {
@@ -224,7 +241,7 @@ describe('profile validation', () => {
   it('re-validates only the profiles a write touches', () => {
     const previous: Options = { providers: { stored: { interfaceType: 'openai-chat-completions', baseURL: 'not a url' } } }
     expect(() => { assertServiceable({ providers: { ...previous.providers } }, previous) }).not.toThrow()
-    expect(() => { assertServiceable({ providers: { ...previous.providers, added: { interfaceType: 'openai-responses', baseURL: 'https://ok.test' } } }, previous) }).not.toThrow()
+    expect(() => { assertServiceable({ providers: { ...previous.providers, added: { interfaceType: 'openai-chat-completions', baseURL: 'https://ok.test' } } }, previous) }).not.toThrow()
     expect(() => { assertServiceable({ providers: { ...previous.providers, changed: { interfaceType: 'openai-chat-completions', baseURL: '' } } }, previous) }).toThrow(/empty baseURL/)
   })
 })
