@@ -191,6 +191,38 @@ export interface ResolvedOwcProviderProfile {
 export type ValidationMode = 'strict' | 'deferred'
 
 /**
+ * Route names the first-party DeepSeek channel owns, and the package that owns
+ * each. DeepSeek keeps its official modules: the API-key and account routes are
+ * registered by `@deepseek-ai/dsh-llm-deepseek-*`, they authenticate through
+ * credentials this adapter has no part in, and they serve a request shape of
+ * their own. A profile that claimed one of these names could never serve it —
+ * registering a route another adapter already owns fails plugin loading — so
+ * the name is refused where it is written, with the owner named, instead of
+ * surfacing later as a registration failure that reads like a bug in this
+ * plugin. Any other route name remains available: a deployment that reaches a
+ * DeepSeek-compatible endpoint through this adapter names its own route and
+ * declares that endpoint's own capabilities.
+ */
+export const RESERVED_ROUTE_OWNERS: Readonly<Record<string, string>> = {
+  'deepseek-official': '@deepseek-ai/dsh-llm-deepseek-api-key',
+  'deepseek-account': '@deepseek-ai/dsh-llm-deepseek-account',
+}
+
+/**
+ * Reject a route name the first-party channel owns.
+ * @param provider - route name a profile claimed.
+ * @throws Error naming the owner of the route.
+ */
+function assertRouteName(provider: string): void {
+  const owner = RESERVED_ROUTE_OWNERS[provider]
+  if (owner === undefined) return
+  throw new Error(
+    `llm-service-lite: provider route "${provider}" belongs to ${owner};`
+    + ' DeepSeek keeps the first-party channel, so describe another endpoint under a route name of your own',
+  )
+}
+
+/**
  * Reject a profile that names neither a usable protocol nor a usable endpoint.
  * @param provider - route name, for the diagnostic.
  * @param source - configured profile.
@@ -198,6 +230,7 @@ export type ValidationMode = 'strict' | 'deferred'
  * @throws Error naming the route and the field that cannot be served.
  */
 function assertAddressable(provider: string, source: OwcProviderProfile): ServedInterfaceType {
+  assertRouteName(provider)
   if (!INTERFACE_TYPES.includes(source.interfaceType)) {
     throw new Error(
       `llm-service-lite: provider "${provider}" names interfaceType "${source.interfaceType}",`

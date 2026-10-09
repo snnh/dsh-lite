@@ -106,6 +106,29 @@ describe('profile validation', () => {
     expect(refused({ baseURL: 'ftp://gateway.test' })).toMatch(/http or https/)
   })
 
+  it('refuses a route name the first-party DeepSeek channel owns', () => {
+    // DeepSeek keeps its official modules; a profile under one of their route
+    // names could never serve it, and would fail plugin loading instead.
+    for (const [route, owner] of [
+      ['deepseek-official', '@deepseek-ai/dsh-llm-deepseek-api-key'],
+      ['deepseek-account', '@deepseek-ai/dsh-llm-deepseek-account'],
+    ] as const) {
+      expect(() => resolveProfiles({ [route]: { interfaceType: 'anthropic-messages' } }))
+        .toThrow(new RegExp(`route "${route}" belongs to ${owner.replace(/[/@.]/gu, '\\$&')}`))
+    }
+    // A stored profile keeps its route addressable with the diagnostic; the
+    // other routes in the same document still serve.
+    const profiles = resolveProfiles({
+      'deepseek-official': { interfaceType: 'openai-chat-completions' },
+      gateway: { interfaceType: 'openai-chat-completions', models: [{ id: 'm' }] },
+    }, 'deferred')
+    expect(profiles.get('deepseek-official')?.diagnostic).toMatch(/belongs to @deepseek-ai\/dsh-llm-deepseek-api-key/)
+    expect(serviceableRoutes(profiles)).toEqual(['gateway'])
+    // The provider is not reserved — only the names its official channel owns.
+    expect(resolveProfiles({ deepseek: { interfaceType: 'anthropic-messages', models: [{ id: 'm' }] } })
+      .get('deepseek')?.diagnostic).toBeUndefined()
+  })
+
   it('refuses a credential named twice', () => {
     expect(refused({ apiKeyEnv: 'KEY', apiKey: 'sk-live' })).toMatch(/both apiKeyEnv and apiKey/)
   })
