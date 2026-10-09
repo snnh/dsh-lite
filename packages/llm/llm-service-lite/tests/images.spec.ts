@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { LlmError } from '@deepseek-ai/dsh-llm'
 import type { ImageAttachmentRef, RequestImageAttachment } from '@deepseek-ai/dsh-attachment'
+import type { ImageBlock } from '@deepseek-ai/dsh-llm'
 import {
   DEFAULT_IMAGE_MAX_BYTES,
   IMAGE_MAX_DIMENSION,
   imageDataUrl,
+  imageRequestPricing,
+  imageTokens,
   prepareRequestImages,
   requestImageTarget,
 } from '../src/images.ts'
@@ -116,5 +119,60 @@ describe('request image preparation', () => {
 describe('wire encoding', () => {
   it('encodes request bytes as a base64 data URL naming the media type', () => {
     expect(imageDataUrl(requestImage('abc', 'image/webp'))).toBe('data:image/webp;base64,YWJj')
+  })
+})
+
+describe('request image pricing', () => {
+  /** One durable image occurrence, as the pricing path receives the surface. */
+  const occurrence = (overrides: Partial<ImageAttachmentRef> = {}, offloaded = false): ImageBlock =>
+    image('sha256:a', overrides, offloaded) as ImageBlock
+
+
+  it('charges the pixel grid a profile declared', () => {
+    const model = modelFor({ imageTokens: { kind: 'area', per: 750 } })
+    const pricing = imageRequestPricing(model)
+    expect(pricing?.priceImages([occurrence({ width: 1500, height: 750 })]))
+      .toEqual([{ visualTokens: 1500, text: '' }])
+    // A pixel of overflow pays a whole token: the accounting rounds up.
+    expect(imageTokens({ kind: 'area', per: 750 }, 100, 100)).toBe(14)
+  })
+
+  it('charges a base plus the tiles an image covers', () => {
+    const model = modelFor({ imageTokens: { kind: 'tiles', tile: 512, base: 85, perTile: 170 } })
+    const pricing = imageRequestPricing(model)
+    expect(pricing?.priceImages([occurrence({ width: 1024, height: 513 })]))
+      .toEqual([{ visualTokens: 85 + 170 * 2 * 2, text: '' }])
+  })
+
+  it('prices a retained occurrence at the dimensions the request will ask for', () => {
+    const model = modelFor({ imagePixelBudget: 512 * 512, imageTokens: { kind: 'area', per: 750 } })
+    const pricing = imageRequestPricing(model)
+    const target = requestImageTarget(model, { width: 2048, height: 1536 })
+    expect(pricing?.priceImages([occurrence({ width: 2048, height: 1536 })]))
+      .toEqual([{ visualTokens: imageTokens({ kind: 'area', per: 750 }, target.width, target.height), text: '' }])
+  })
+
+  it('prices an offloaded occurrence as the placeholder the request carries', () => {
+    const model = modelFor({ imageTokens: { kind: 'area', per: 750 } })
+    const pricing = imageRequestPricing(model)
+    const prices = pricing?.priceImages([occurrence({}, true)])
+    expect(prices?.[0]?.visualTokens).toBe(0)
+    expect(prices?.[0]?.text).toContain('image omitted to fit request image limits')
+  })
+
+  it('prices a text-only route as the substitution the runtime performs', () => {
+    const profile = resolveProfiles({
+      gateway: {
+        interfaceType: 'openai-chat-completions',
+        models: [{ id: 'm' }],
+      },
+    }).get('gateway')
+    if (profile === undefined) throw new Error('the route did not resolve')
+    expect(imageRequestPricing(modelOf(profile, 'm'))?.priceImages([occurrence({ attachmentId: 'sha256:abcdef1234567890' as ImageAttachmentRef['attachmentId'] })]))
+      .toEqual([{ visualTokens: 0, text: expect.stringContaining('image omitted because this model accepts text only') as unknown as string }])
+  })
+
+  it('leaves an undeclared accounting to the meter heuristic', () => {
+    expect(imageRequestPricing(modelFor())).toBeUndefined()
   })
 })

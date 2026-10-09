@@ -115,6 +115,30 @@ describe('profile validation', () => {
     expect(refused({ interfaceType: 'anthropic-messages', includeUsage: true })).toMatch(/includeUsage on interfaceType/)
   })
 
+  it('refuses a mid-history capability on a protocol with no mid-history part', () => {
+    // Both declarations are reads of a `system`-role message inside the
+    // conversation, which only the Messages protocol has; the two OpenAI wires
+    // restate the prompt and the tool list on every request.
+    expect(refused({ models: [{ id: 'm', capabilities: { toolUpdate: 'addition-only' } }] }))
+      .toMatch(/toolUpdate on interfaceType "openai-chat-completions"/)
+    expect(refused({ models: [{ id: 'm', capabilities: { systemPromptUpdate: 'in-history' } }] }))
+      .toMatch(/systemPromptUpdate on interfaceType "openai-chat-completions"/)
+    expect(refused({ interfaceType: 'openai-responses', models: [{ id: 'm', capabilities: { toolUpdate: 'in-history' } }] }))
+      .toMatch(/toolUpdate on interfaceType "openai-responses"/)
+  })
+
+  it('carries the mid-history declarations a Messages route makes', () => {
+    const profile = resolved({
+      interfaceType: 'anthropic-messages',
+      models: [{
+        id: 'm',
+        capabilities: { systemPromptUpdate: 'in-history', toolUpdate: 'in-history' },
+      }, { id: 'plain' }],
+    })
+    expect(profile.models.map(model => [model.systemPromptUpdate, model.toolUpdate]))
+      .toEqual([['in-history', 'in-history'], [undefined, undefined]])
+  })
+
   it('serves every protocol the vocabulary declares', () => {
     // A vocabulary entry without a transport would be a protocol a deployment
     // could declare and no request could carry; the transport table is typed
@@ -202,6 +226,68 @@ describe('profile validation', () => {
   it('refuses an image knob on a model that declares no image input', () => {
     expect(refused({ models: [{ id: 'm', imagePixelBudget: 512 * 512 }] })).toMatch(/without declaring image input/)
     expect(refused({ models: [{ id: 'm', imageMaxBytes: 1024 }] })).toMatch(/without declaring image input/)
+  })
+
+  it('refuses an image-token accounting that is incomplete or misplaced', () => {
+    expect(refused({ models: [{ id: 'm', imageTokens: { kind: 'area', per: 750 } }] }))
+      .toMatch(/imageTokens without declaring image input/)
+    expect(refused({ models: [{
+      id: 'm', capabilities: { modalities: ['text', 'image'] }, imageTokens: { kind: 'area' },
+    }] })).toMatch(/needs a positive integer "per"/)
+    expect(refused({ models: [{
+      id: 'm', capabilities: { modalities: ['text', 'image'] }, imageTokens: { kind: 'tiles', perTile: 170 },
+    }] })).toMatch(/needs a positive integer "tile"/)
+    // Two accountings named at once state neither: the fields of the kind the
+    // profile did not name are refused rather than ignored.
+    expect(refused({ models: [{
+      id: 'm', capabilities: { modalities: ['text', 'image'] }, imageTokens: { kind: 'area', per: 750, tile: 512 },
+    }] })).toMatch(/also states the fields of "tiles"/)
+  })
+
+  it('refuses every incomplete spelling of a visual-token accounting', () => {
+    const image = { modalities: ['text', 'image'] }
+    const accounting = (imageTokens: Record<string, unknown>): Record<string, unknown> => ({
+      models: [{ id: 'm', capabilities: image, imageTokens }],
+    })
+    expect(refused(accounting({ kind: 'area', per: 750, base: 85 }))).toMatch(/also states the fields of "tiles"/)
+    expect(refused(accounting({ kind: 'tiles', tile: 512, perTile: 170, per: 750 })))
+      .toMatch(/also states the field of "area"/)
+    expect(refused(accounting({ kind: 'tiles', tile: 512, perTile: 170, base: 1.5 })))
+      .toMatch(/"base" to be a non-negative integer/)
+    expect(refused(accounting({ kind: 'tiles', tile: 512, base: 85 }))).toMatch(/positive integer "perTile"/)
+    expect(refused(accounting({ kind: 'area', per: 0 }))).toMatch(/positive integer "per"/)
+    // A declaration the schema already refused never reaches resolution; an
+    // unknown kind written straight into a resolved document does, and is
+    // refused by the same guard the schema-backed path uses.
+    expect(() => resolveProfiles({
+      gateway: {
+        interfaceType: 'anthropic-messages',
+        models: [{ id: 'm', capabilities: image, imageTokens: { kind: 'patches' } }],
+      },
+    } as never)).toThrow(/names unknown kind "patches"/)
+    // The same holds for the two mid-history vocabulary values, which the
+    // schema refuses before resolution ever sees them.
+    expect(() => resolveProfiles({
+      gateway: {
+        interfaceType: 'anthropic-messages',
+        models: [{ id: 'm', capabilities: { systemPromptUpdate: 'later' } }],
+      },
+    } as never)).toThrow(/declares unknown systemPromptUpdate "later"/)
+    expect(() => resolveProfiles({
+      gateway: {
+        interfaceType: 'anthropic-messages',
+        models: [{ id: 'm', capabilities: { toolUpdate: 'everywhere' } }],
+      },
+    } as never)).toThrow(/declares unknown toolUpdate "everywhere"/)
+  })
+
+  it('carries an image-token accounting in the form the pricing path reads', () => {
+    const profile = resolved({ models: [{
+      id: 'm', capabilities: { modalities: ['text', 'image'] }, imageTokens: { kind: 'tiles', tile: 512, perTile: 170 },
+    }] })
+    // A tile accounting without a base is one that charges nothing per image.
+    expect(profile.models[0]?.imageTokens).toEqual({ kind: 'tiles', tile: 512, base: 0, perTile: 170 })
+    expect(resolved({ models: [{ id: 'plain' }] }).models[0]?.imageTokens).toBeUndefined()
   })
 
   it('refuses the other declared modalities the transport does not carry', () => {

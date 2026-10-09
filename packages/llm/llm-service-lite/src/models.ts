@@ -116,6 +116,12 @@ export function resolvedModelInfo(profile: ResolvedOwcProviderProfile, model: st
     inputModalities: [...facts.modalities],
     context: { contextWindow: facts.contextWindow },
     defaultMaxTokens: facts.maxTokens,
+    // Declared only when the profile declares them: an absent capability is
+    // what makes the harness rewrite the prompt and the tool list every turn,
+    // which is the honest reading of a route that never said it reads either
+    // mid-history.
+    ...facts.systemPromptUpdate === undefined ? {} : { systemPromptUpdate: facts.systemPromptUpdate },
+    ...facts.toolUpdate === undefined ? {} : { toolUpdate: facts.toolUpdate },
     ...levels.length === 0 ? {} : {
       reasoning: {
         efforts: levels.map(level => ({

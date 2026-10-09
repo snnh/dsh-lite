@@ -79,6 +79,64 @@ export const THINKING_STYLES = ['thinking', 'fixed', 'enable_thinking', 'effort_
 /** One thinking wire style from {@link THINKING_STYLES}. */
 export type ThinkingStyle = (typeof THINKING_STYLES)[number]
 
+/**
+ * How a model applies a system prompt that changes mid-conversation, spelled
+ * exactly as the harness spells it. `in-history` declares that the endpoint
+ * reads a `system`-role message at any position of the conversation as the
+ * complete effective prompt, so a changed prompt follows the cached history
+ * instead of rewriting the first message — the same declaration the first-party
+ * DeepSeek catalog makes, and one only a Messages endpoint can be asked for.
+ */
+export const SYSTEM_PROMPT_UPDATES = ['in-history'] as const
+
+/** One system-prompt update mode from {@link SYSTEM_PROMPT_UPDATES}. */
+export type SystemPromptUpdate = (typeof SYSTEM_PROMPT_UPDATES)[number]
+
+/**
+ * How a model accepts tool declarations that change mid-conversation.
+ * `addition-only` declares that the endpoint activates a deferred tool when a
+ * later `system` message names it, so an added tool follows the cached history
+ * instead of rewriting the declaration list; `in-history` adds that a removed
+ * tool keeps its declaration and is deactivated the same way. Omission means
+ * every request declares the complete current list.
+ */
+export const TOOL_UPDATES = ['addition-only', 'in-history'] as const
+
+/** One tool-update mode from {@link TOOL_UPDATES}. */
+export type ToolUpdate = (typeof TOOL_UPDATES)[number]
+
+/**
+ * Which published visual-token accounting an endpoint charges for one request
+ * image. The vocabulary exists because the number decides how much of the
+ * context window an image occupies, and the token meter can only price an image
+ * against the accounting of the route that will carry it: `area` charges a flat
+ * pixel grid (Claude bills one token per 750 pixels) and `tiles` charges a base
+ * plus a price per square tile covered (the OpenAI vision documentation). A
+ * route that declares neither keeps the meter's own structural heuristic.
+ */
+export const IMAGE_TOKEN_KINDS = ['area', 'tiles'] as const
+
+/** One visual-token accounting from {@link IMAGE_TOKEN_KINDS}. */
+export type ImageTokenKind = (typeof IMAGE_TOKEN_KINDS)[number]
+
+/**
+ * The visual-token accounting one model declares. Only the fields of the
+ * declared kind apply; resolution refuses a declaration that states the other
+ * kind's fields, because a profile that names two accountings states neither.
+ */
+export interface OwcImageTokenAccounting {
+  /** Which accounting this endpoint charges. */
+  kind: ImageTokenKind
+  /** `area`: pixels one visual token covers. */
+  per?: number
+  /** `tiles`: side of the square tile the image is charged in, in pixels. */
+  tile?: number
+  /** `tiles`: tokens charged once per image, whatever it covers. */
+  base?: number
+  /** `tiles`: tokens charged for each tile the image covers. */
+  perTile?: number
+}
+
 declare module '@deepseek-ai/dsh-llm' {
   interface ModelModalityMap {
     /**
@@ -184,6 +242,21 @@ export interface OwcModelCapabilities {
    * resume a provider that will not accept its reasoning as plain text.
    */
   responsesEncryptedReplay?: boolean
+  /**
+   * Whether the endpoint reads a mid-conversation `system` message as the
+   * complete effective system prompt. Declaring it is refused on any protocol
+   * but `anthropic-messages`, whose `system` role this adapter can place in the
+   * history; the other two transports have no such part.
+   */
+  systemPromptUpdate?: SystemPromptUpdate
+  /**
+   * Whether the endpoint activates and deactivates tools through mid-history
+   * messages instead of a rewritten declaration list. Declaring it is refused
+   * on any protocol but `anthropic-messages`, and it is what makes the harness
+   * hand this route `tool-addition` and `tool-removal` blocks — with the
+   * declaration list then carrying `defer_loading` for the tools it defers.
+   */
+  toolUpdate?: ToolUpdate
 }
 
 /** One model a route serves, with the endpoint facts a request needs. */
@@ -209,6 +282,11 @@ export interface OwcModelProfile {
    * the smallest output of its quality ladder when no step fits.
    */
   imageMaxBytes?: number
+  /**
+   * Visual-token accounting this model's endpoint charges, which is what lets
+   * the token meter price an image-bearing context instead of guessing.
+   */
+  imageTokens?: OwcImageTokenAccounting
 }
 
 /**
@@ -296,6 +374,10 @@ const capabilities: z<OwcModelCapabilities> = z.object({
   imageOutput: z.boolean(),
   /** Whether the endpoint replays signed reasoning; refused until the responses transport exists. */
   responsesEncryptedReplay: z.boolean(),
+  /** Whether the endpoint reads a mid-conversation system message as the effective prompt. */
+  systemPromptUpdate: z.union(SYSTEM_PROMPT_UPDATES),
+  /** Whether the endpoint activates and deactivates tools through mid-history messages. */
+  toolUpdate: z.union(TOOL_UPDATES),
 })
 
 const modelProfile: z<OwcModelProfile> = z.object({
@@ -313,6 +395,18 @@ const modelProfile: z<OwcModelProfile> = z.object({
   imagePixelBudget: z.union([z.number().step(1).min(1), z.const('low')]),
   /** Encoded-byte target for one request image. */
   imageMaxBytes: z.number().step(1).min(1),
+  /**
+   * Visual-token accounting this endpoint charges. The single-branch union is
+   * what keeps the field absent when a profile omits it: a bare nested object
+   * is materialized as `{}` and would then fail its own required `kind`.
+   */
+  imageTokens: z.union([z.object({
+    kind: z.union(IMAGE_TOKEN_KINDS).required(),
+    per: z.number(),
+    tile: z.number(),
+    base: z.number(),
+    perTile: z.number(),
+  })]),
 })
 
 const providerProfile: z<OwcProviderProfile> = z.object({

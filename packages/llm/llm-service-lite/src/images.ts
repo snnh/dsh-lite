@@ -22,8 +22,15 @@ import {
   LlmError,
   offloadedImageText as offloadedPlaceholderText,
   requiredImageOffload,
+  textOnlyImageText,
 } from '@deepseek-ai/dsh-llm'
-import type { ImageBlock, LlmImageRequestBudget, RequestMessage } from '@deepseek-ai/dsh-llm'
+import type {
+  ImageBlock,
+  LlmImageRequestBudget,
+  LlmImageRequestPrice,
+  LlmImageRequestPricing,
+  RequestMessage,
+} from '@deepseek-ai/dsh-llm'
 import { longEdgeDimensions, requestImageDimensions } from '@deepseek-ai/dsh-attachment'
 import type {
   AttachmentStore,
@@ -31,7 +38,7 @@ import type {
   ImageRequestTarget,
   RequestImageAttachment,
 } from '@deepseek-ai/dsh-attachment'
-import type { ResolvedOwcModel } from './profiles.ts'
+import type { ResolvedImageTokens, ResolvedOwcModel } from './profiles.ts'
 
 /** Encoded-byte ceiling for one request image unless the model states its own. */
 export const DEFAULT_IMAGE_MAX_BYTES = 2 * 1024 * 1024
@@ -167,4 +174,56 @@ export async function prepareRequestImages(
     )
   }
   return versions
+}
+
+/**
+ * The visual tokens one request image of these dimensions costs under a
+ * declared accounting. Both spellings are published provider accountings rather
+ * than inventions: `area` charges a flat pixel grid (Claude bills one token per
+ * 750 pixels), and `tiles` charges a base plus one price per square tile the
+ * image covers, which is how the OpenAI vision documentation describes an
+ * image at full detail. A declaration the profile omitted prices nothing here —
+ * the token meter then keeps its own structural heuristic rather than a number
+ * this adapter guessed.
+ * @param accounting - the route's declared accounting.
+ * @param width - request-image width in pixels.
+ * @param height - request-image height in pixels.
+ * @returns provider visual tokens for one occurrence.
+ */
+export function imageTokens(accounting: ResolvedImageTokens, width: number, height: number): number {
+  if (accounting.kind === 'area') return Math.ceil((width * height) / accounting.per)
+  return accounting.base
+    + accounting.perTile * Math.ceil(width / accounting.tile) * Math.ceil(height / accounting.tile)
+}
+
+/**
+ * Price every surface image occurrence the way this route's request carries it.
+ *
+ * The token meter asks for one price per occurrence of the session surface, in
+ * model-visible order, and adds the returned text under its own text estimator.
+ * A retained occurrence is therefore priced at the very dimensions
+ * {@link requestImageTarget} will ask the attachment provider for — the one
+ * number that decides the endpoint's own charge — and contributes no text,
+ * because this adapter sends none beside the bytes. An offloaded occurrence
+ * contributes exactly the placeholder the request will carry, and a route
+ * without the image modality prices the deterministic substitution text the
+ * runtime puts in the image's place.
+ *
+ * @param model - the route's declared facts for this model.
+ * @returns synchronous per-occurrence pricing, or undefined when a route that
+ *   carries images declared no visual-token accounting.
+ */
+export function imageRequestPricing(model: ResolvedOwcModel): LlmImageRequestPricing | undefined {
+  if (!model.modalities.includes('image')) {
+    return { priceImages: images => images.map(block => ({ visualTokens: 0, text: textOnlyImageText(block.attachment) })) }
+  }
+  const accounting = model.imageTokens
+  if (accounting === undefined) return undefined
+  return {
+    priceImages: (images): readonly LlmImageRequestPrice[] => images.map((block) => {
+      if (block.offloaded === true) return { visualTokens: 0, text: offloadedImageText(block) }
+      const target = requestImageTarget(model, block.attachment)
+      return { visualTokens: imageTokens(accounting, target.width, target.height), text: '' }
+    }),
+  }
 }

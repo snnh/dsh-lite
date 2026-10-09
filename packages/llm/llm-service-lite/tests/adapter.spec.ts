@@ -5,6 +5,7 @@ import { OwcProfilesAdapter } from '../src/adapter.ts'
 import { ConcurrencyLimiter } from '../src/limiter.ts'
 import { resolveProfiles, type ResolvedOwcProviderProfile } from '../src/profiles.ts'
 import type { AttachmentStore, ImageAttachmentRef, ImageRequestTarget } from '@deepseek-ai/dsh-attachment'
+import type { ImageBlock } from '@deepseek-ai/dsh-llm'
 import { assistant, image, request, requestImage, system, text, toolCall, toolResult, user } from './messages.ts'
 
 /** One running mock provider. */
@@ -308,10 +309,49 @@ describe('owc profiles adapter', () => {
       reasoning: { efforts: [{ id: 'low', name: 'Low' }, { id: 'high', name: 'High' }] },
     })
     expect(await adapter.resolveModel('gateway', 'unlisted')).toMatchObject({ id: 'unlisted', context: { contextWindow: 256_000 } })
+    // Mid-history capabilities are declared only where they were declared: a
+    // route that named none keeps the harness restating prompt and tools.
+    expect(await adapter.resolveModel('gateway', 'm')).not.toHaveProperty('systemPromptUpdate')
+    expect(await adapter.resolveModel('gateway', 'm')).not.toHaveProperty('toolUpdate')
     expect(adapter.providerInfo('elsewhere')).toEqual({ id: 'elsewhere', name: 'elsewhere' })
     expect(await adapter.listModels('elsewhere')).toEqual([])
     expect(adapter.providerRetryPolicy('gateway')).toMatchObject({ mode: 'normal' })
     expect(adapter.providerRetryPolicy('elsewhere')).toBeUndefined()
+  })
+
+  it('declares the mid-history capabilities a Messages route named', async () => {
+    const adapter = adapterFor(routeFor('http://127.0.0.1:1/v1', {
+      interfaceType: 'anthropic-messages',
+      models: [{
+        id: 'm',
+        capabilities: { systemPromptUpdate: 'in-history', toolUpdate: 'addition-only' },
+      }],
+    }))
+    expect(await adapter.resolveModel('gateway', 'm')).toMatchObject({
+      systemPromptUpdate: 'in-history',
+      toolUpdate: 'addition-only',
+    })
+  })
+
+  it('prices surface images for a route that declared its accounting', () => {
+    const adapter = adapterFor(routeFor('http://127.0.0.1:1/v1', {
+      models: [{
+        id: 'm',
+        capabilities: { modalities: ['text', 'image'] },
+        imageTokens: { kind: 'area', per: 750 },
+      }, { id: 'plain' }, { id: 'undeclared', capabilities: { modalities: ['text', 'image'] } }],
+    }))
+    const occurrence = image('sha256:a', { width: 1500, height: 750 }) as ImageBlock
+    expect(adapter.imageRequestPricing('gateway', 'm')?.priceImages([occurrence]))
+      .toEqual([{ visualTokens: 1500, text: '' }])
+    // A text-only route prices the substitution the runtime performs, an
+    // image route that declared no accounting answers nothing — which leaves
+    // the meter's own heuristic in place — and an unknown route answers
+    // nothing at all.
+    expect(adapter.imageRequestPricing('gateway', 'plain')?.priceImages([occurrence])
+      .map(price => price.visualTokens)).toEqual([0])
+    expect(adapter.imageRequestPricing('gateway', 'undeclared')).toBeUndefined()
+    expect(adapter.imageRequestPricing('gone', 'm')).toBeUndefined()
   })
 
   it('serves a route that stops being configured with a named refusal', async () => {

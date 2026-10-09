@@ -1,0 +1,19 @@
+# Bilingual-pair consistency record for 2026-10-09-service-lite-declared-parity.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-10-09-service-lite-declared-parity.md
+/agent-note-the-local-llm-service-declares-what-the-first-party-channel-declares:
+  en: d4ad635e9329c03a
+  zh: 7408a4a0930dce9d
+/agent-note-the-local-llm-service-declares-what-the-first-party-channel-declares/problem:
+  en: 1265511ca0b74772
+  zh: e5934a5326250115
+/agent-note-the-local-llm-service-declares-what-the-first-party-channel-declares/decision:
+  en: 6a3034f9d816cfe2
+  zh: b73ffa8b11a349bc
+/agent-note-the-local-llm-service-declares-what-the-first-party-channel-declares/alternatives-considered:
+  en: a6fead3f36d098de
+  zh: 511a41ae18fa6d3d
+/agent-note-the-local-llm-service-declares-what-the-first-party-channel-declares/consequences:
+  en: 3ac8c88f5d5b4109
+  zh: f1b01128d05796c7

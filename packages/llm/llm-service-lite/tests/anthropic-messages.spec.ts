@@ -4,7 +4,8 @@ import type { ContentBlock, GenerateOptions, ModelMessageSource } from '@deepsee
 import type { ResolvedOwcModel, ResolvedOwcProviderProfile } from '../src/profiles.ts'
 import { resolveProfiles } from '../src/profiles.ts'
 import {
-  assistant, developer, image, request, requestImage, system, text, toolCall, toolResult, toolResultWith, toolSchema, user,
+  assistant, developer, developerWith, image, request, requestImage, system, text, toolAddition, toolCall, toolRemoval,
+  toolResult, toolResultWith, toolSchema, user,
 } from './messages.ts'
 
 /** One resolved route from the real schema. */
@@ -364,7 +365,7 @@ describe('anthropic-messages pairing repair', () => {
 
   it('keeps the caller\'s turn roles and order', () => {
     expect(toAnthropicMessages(
-      options({ messages: [user([text('hi')]), assistant([text('hello')])] }), 'gateway', 'm', new Map(),
+      options({ messages: [user([text('hi')]), assistant([text('hello')])] }), 'gateway', modelOf(route(), 'm'), new Map(),
     ).map(message => message.role)).toEqual(['user', 'assistant'])
   })
 })
@@ -465,5 +466,91 @@ describe('anthropic-messages reasoning replay', () => {
       [text(''), image('sha256:x'), text('answer')],
       modelSource([{ type: 'text' }, { type: 'text' }, { type: 'text' }]),
     )).toEqual([{ type: 'text', text: 'answer' }])
+  })
+})
+
+describe('anthropic-messages mid-history changes', () => {
+  /** One resolved route whose single model declares the given capabilities. */
+  const routeWith = (capabilities: Record<string, unknown>): ResolvedOwcProviderProfile => route({
+    models: [{ id: 'm', contextWindow: 8192, maxTokens: 1024, capabilities }],
+  })
+
+  it('carries a declared tool change as the system message this protocol reserves', () => {
+    const profile = routeWith({ toolUpdate: 'in-history' })
+    expect(messagesOf(profile, {
+      messages: [
+        user([text('hi')]),
+        developerWith([text('two tools changed'), toolAddition('shell'), toolRemoval('browser')]),
+        assistant([text('ok')]),
+      ],
+    })).toEqual([
+      { role: 'user', content: [{ type: 'text', text: 'hi' }] },
+      {
+        role: 'system',
+        content: [
+          { type: 'text', text: 'two tools changed' },
+          { type: 'tool_addition', tool: { type: 'tool_reference', name: 'shell' } },
+          { type: 'tool_removal', tool: { type: 'tool_reference', name: 'browser' } },
+        ],
+      },
+      { role: 'assistant', content: [{ type: 'text', text: 'ok' }] },
+    ])
+  })
+
+  it('places a prompt snapshot after the user turn it instructs', () => {
+    const profile = routeWith({ systemPromptUpdate: 'in-history' })
+    const messages = messagesOf(profile, {
+      messages: [
+        user([text('hi')]), assistant([text('a')]), system('new instructions'), user([text('next')]),
+      ],
+    })
+    expect(messages.map(message => message.role)).toEqual(['user', 'assistant', 'user', 'system'])
+    expect(messages[3]?.content).toEqual([{ type: 'text', text: 'new instructions' }])
+  })
+
+  it('keeps the leading system message in the top-level prompt field', () => {
+    const profile = routeWith({ systemPromptUpdate: 'in-history' })
+    const body = bodyOf(profile, { messages: [system('base'), user([text('hi')])] })
+    expect(body['system']).toBe('base')
+    expect(body['messages']).toEqual([{ role: 'user', content: [{ type: 'text', text: 'hi' }] }])
+  })
+
+  it('queues nothing for a mid-history message that carries nothing', () => {
+    const profile = routeWith({ toolUpdate: 'addition-only' })
+    expect(messagesOf(profile, {
+      messages: [user([text('hi')]), developerWith([text('')])],
+    })).toEqual([{ role: 'user', content: [{ type: 'text', text: 'hi' }] }])
+  })
+
+  it('refuses a mid-history change with no user turn to follow', () => {
+    const profile = routeWith({ toolUpdate: 'in-history' })
+    expect(() => messagesOf(profile, {
+      messages: [user([text('hi')]), assistant([text('a')]), developerWith([toolAddition('shell')])],
+    })).toThrow(/no preceding user turn/)
+  })
+
+  it('refuses a tool change on a role this protocol has no part for', () => {
+    const profile = routeWith({ toolUpdate: 'addition-only' })
+    expect(() => messagesOf(profile, {
+      messages: [user([text('hi')]), user([toolAddition('shell')])],
+    })).toThrow(/belong to developer messages/)
+  })
+
+  it('refuses a mid-history block the system role cannot carry', () => {
+    const profile = routeWith({ systemPromptUpdate: 'in-history' })
+    expect(() => messagesOf(profile, {
+      messages: [user([text('hi')]), developerWith([image('sha256:x')])],
+    })).toThrow(/reads only as prompt text or a tool reference/)
+  })
+
+  it('defers a declaration the harness marked, and leaves the rest immediate', () => {
+    const profile = routeWith({ toolUpdate: 'addition-only' })
+    const body = bodyOf(profile, {
+      tools: [{ ...toolSchema('shell'), deferLoading: true }, toolSchema('read')],
+    })
+    expect(body['tools']).toEqual([
+      { name: 'shell', description: 'run shell', input_schema: { type: 'object', properties: {} }, defer_loading: true },
+      { name: 'read', description: 'run read', input_schema: { type: 'object', properties: {} } },
+    ])
   })
 })

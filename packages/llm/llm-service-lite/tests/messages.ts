@@ -33,6 +33,21 @@ export function developer(text: string, id = 'developer'): Message {
   return { id: MessageId(id), role: 'developer', source: { kind: 'system-prompt' }, content: [{ type: 'text', text }] }
 }
 
+/** One developer message carrying the caller's own blocks, tool changes included. */
+export function developerWith(content: ContentBlock[], id = 'developer'): Message {
+  return { id: MessageId(id), role: 'developer', source: { kind: 'system-prompt' }, content }
+}
+
+/** One tool-addition block, naming a tool a historical declaration describes. */
+export function toolAddition(toolName: string): ContentBlock {
+  return { type: 'tool-addition', toolName }
+}
+
+/** One tool-removal block, naming a tool the route declared earlier. */
+export function toolRemoval(toolName: string): ContentBlock {
+  return { type: 'tool-removal', toolName }
+}
+
 /** One tool-result message answering the given call. */
 export function toolResult(callId: string, text: string, id = `result-${callId}`): Message {
   return {

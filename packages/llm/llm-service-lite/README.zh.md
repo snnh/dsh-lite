@@ -97,6 +97,10 @@ kind: "package-reference"
             maxTokens: 64000
             capabilities:
               thinking: [enabled, disabled]
+              # This endpoint reads a later system message as the effective
+              # prompt and activates tools inside the conversation.
+              systemPromptUpdate: in-history
+              toolUpdate: in-history
       # A gateway that routes by header and needs no credential of its own.
       proxy:
         interfaceType: openai-chat-completions
@@ -130,7 +134,7 @@ kind: "package-reference"
 
 ### 声明模型能做什么
 
-模型条目的 `capabilities` 是对端点的声明，不是猜测：没写的就不声明，写下的要么被履行、要么在声明处被按名拒绝——绝不"接受却无人在用"。`effort` 列出可选的推理档位，其值即线上拼写，因此自有词汇表的网关直接声明自己的词汇。`thinking` 列出可接受的思考模式（`enabled`、`disabled`、`adaptive`）。`thinkingStyle` 说明端点如何表达这个开关：`thinking: { type: … }`、顶层 `enable_thinking` 布尔值、始终思考的 `fixed`，或 `effort_only`——"只收档位、没有开关"的显式写法，与省略样式发出的是同一个请求。`reasoningContent` 声明端点会以 `reasoning_content` 返回思考，这正是后续请求得以回带既有思考的依据。`tools` 声明是否允许发送工具声明：关闭的模型收到的请求里没有工具列表，而不是一份会被端点拒绝的清单。`modalities` 声明端点接受哪些输入——`text`、`image`、`video`。其中 `image` 已被承载：保留的图片按模型声明的像素预算（或源尺寸）从附件提供方读取，按模型的字节目标重新编码，并以 base64 `image_url` 内联部分发出；已被会话卸载的图片则贡献它的占位文本。整条路由累计的请求由 `imageRequestMaxBytes`、`imageRequestMaxImages`、`imageOffloadByteQuantum` 与 `imageOffloadCountQuantum` 约束；超预算的请求以 `IMAGE_OFFLOAD_REQUIRED` 失败并给出必须卸载的最旧图片数量，而不是静默丢弃图片。`video` 输入与 `imageOutput` 仍在声明处被拒绝，直到有传输承载它们——一个无人执行的声明会被读成路由并不具备的能力。`responsesEncryptedReplay` 已由 Responses 传输履行：请求会索要 `reasoning.encrypted_content`，并在下一回合把每个 reasoning item 原样交回。
+模型条目的 `capabilities` 是对端点的声明，不是猜测：没写的就不声明，写下的要么被履行、要么在声明处被按名拒绝——绝不"接受却无人在用"。`effort` 列出可选的推理档位，其值即线上拼写，因此自有词汇表的网关直接声明自己的词汇。`thinking` 列出可接受的思考模式（`enabled`、`disabled`、`adaptive`）。`thinkingStyle` 说明端点如何表达这个开关：`thinking: { type: … }`、顶层 `enable_thinking` 布尔值、始终思考的 `fixed`，或 `effort_only`——"只收档位、没有开关"的显式写法，与省略样式发出的是同一个请求。`reasoningContent` 声明端点会以 `reasoning_content` 返回思考，这正是后续请求得以回带既有思考的依据。`tools` 声明是否允许发送工具声明：关闭的模型收到的请求里没有工具列表，而不是一份会被端点拒绝的清单。`modalities` 声明端点接受哪些输入——`text`、`image`、`video`。其中 `image` 已被承载：保留的图片按模型声明的像素预算（或源尺寸）从附件提供方读取，按模型的字节目标重新编码，并以 base64 `image_url` 内联部分发出；已被会话卸载的图片则贡献它的占位文本。整条路由累计的请求由 `imageRequestMaxBytes`、`imageRequestMaxImages`、`imageOffloadByteQuantum` 与 `imageOffloadCountQuantum` 约束；超预算的请求以 `IMAGE_OFFLOAD_REQUIRED` 失败并给出必须卸载的最旧图片数量，而不是静默丢弃图片。`video` 输入与 `imageOutput` 仍在声明处被拒绝，直到有传输承载它们——一个无人执行的声明会被读成路由并不具备的能力。`responsesEncryptedReplay` 已由 Responses 传输履行：请求会索要 `reasoning.encrypted_content`，并在下一回合把每个 reasoning item 原样交回。`systemPromptUpdate` 与 `toolUpdate` 声明 Messages 端点可以被要求的两种"会话中途读取"：把最新的 system 消息读作完整的生效提示词，以及把一次工具变更读作对声明列表中已有工具的启用或停用。声明其中任意一条，harness 才会把 `tool-addition` 与 `tool-removal` 块交给这条路由，而不是每回合重述提示词与工具列表；被推迟的工具，其声明随之带上 `defer_loading`。两条声明在两种 OpenAI 线上都会被拒绝——那里没有可供读取的中途部件。`imageTokens` 声明端点自己的视觉 token 计价——扁平像素网格用 `{ kind: area, per: 750 }`，底价加逐方形瓦片计价用 `{ kind: tiles, tile: 512, base: 85, perTile: 170 }`——token meter 正是据此为含图片的上下文计价；未声明该字段的路由保留 meter 自己的结构化启发式，而不是本适配器臆造的数值。
 
 图片请求需要挂载附件提供方（`attachments`）；只服务纯文本路由的部署从不挂载它，而声明了 `image` 却没有附件提供方的路由，会在端点看到任何部分调用之前就让请求失败。
 
@@ -186,7 +190,7 @@ kind: "package-reference"
 
 Responses 传输把对话映射为该 API 的扁平 item 列表——助手 `message`、每个调用的 `function_call`、以及携带同一 id 的 `function_call_output`——并按同样方式修复这份清单，只有一处是该协议强制的差异：无人回答的调用被丢弃，而不是补占位结果，因为严格的网关会拒绝伪造的输出；一个回合内的并行调用会被归组，使该 API 把它们折叠进同一个助手回合。它的推理遵循模型声明：`reasoningContent` 把思考文本按 `reasoning_text` 回带，`responsesEncryptedReplay` 则把服务商自己的 item 原样交回。该协议不携带停止序列，因此调用方的 `stop` 被省略，而不是被近似。
 
-Messages 传输的提示词取自 `system`，否则取自首条 system 消息。其后出现的 system 或 developer 消息在该协议里没有自己的槽位，因此就地折叠为一个 user 回合，会话中途的指令得以保持位置。工具结果把随附媒体以内联图片块的形式放在文本旁边；`max_tokens` 必发，因为该协议强制要求输出上限；`promptCaching` 标记该协议自己的断点：system 提示与最后一条工具声明。
+Messages 传输的提示词取自 `system`，否则取自首条 system 消息。其后出现的 system 或 developer 消息就地折叠为一个 user 回合，会话中途的指令得以保持位置——除非该模型声明了 `systemPromptUpdate` 或 `toolUpdate`：此时该消息以本协议专为中途变更保留的 `system` 角色消息出行，工具增删写成对被声明工具的引用。这类消息会等到它前面是 user 回合才落位，因为该协议把它读作回合之间的指令；若它本会落在更早的位置，则被按名拒绝，而不是被搬走。工具结果把随附媒体以内联图片块的形式放在文本旁边；`max_tokens` 必发，因为该协议强制要求输出上限；`promptCaching` 标记该协议自己的断点：system 提示与最后一条工具声明。
 
 <a id="further-exploration"></a>
 ## 延伸阅读
@@ -231,9 +235,10 @@ harness 组装出的对话原样：系统提示词作为开头的 system 消息�
 <a id="known-limitations-and-deferred-work"></a>
 
 - **三条协议，三种形态。** 每个被声明的协议都有自己的传输，各自承载本协议的特性：Responses API 的服务端工具（`web_search_call` item）未被承载，也不发送 `store` 字段，因此想要服务端状态的部署应把它排除在请求路径之外。
-- **不支持视频输入与图片输出。** 声明 `video` 输入或 `imageOutput` 的档案会被拒绝，而不是把差异丢掉后照常服务。`image` 输入已被承载，但没有逐图 token 计价：本适配器未实现 `imageRequestPricing`，因此计价界面会把图片当作它所替换的文本来计价。
+- **不支持视频输入与图片输出。** 声明 `video` 输入或 `imageOutput` 的档案会被拒绝，而不是把差异丢掉后照常服务。`image` 输入已被承载，档案通过 `imageTokens` 声明的计价同样被承载；未声明该字段的路由保留 meter 的结构化启发式；字节旁边也不会附带适配器自撰的说明文本，因此一条被计价的出现次数只计入端点实际收取的视觉 token，不计入本适配器臆造的部分。
 - **适配器侧不重试。** 一次调用就是一次服务商尝试，重试策略由 `dsh-llm-retry` 在持久步骤边界执行，重试会重新推导整个请求。
 - **回放元数据是分协议的。** Messages 传输为自己写下的思考签名维护专属信封，Responses 传输则保留每个 reasoning item（id 与加密载荷）供索要加密回放的模型使用；两种信封都不跨服务商移植。
+- **中途变更属于端点自己的契约。** 声明了 `systemPromptUpdate` 或 `toolUpdate` 的路由会以 `system` 角色历史消息接收它们，因此若某端点把该部件挡在 beta 头之后，部署须在 `headers` 里写明该头：本适配器不代端点注入任何东西；而一个前面没有 user 回合可跟随的变更会让请求以 `UNSUPPORTED_CONTENT` 失败，而不是被静默搬移或丢弃。
 - **没有用量报告就没有流式用量。** 从不发送用量块的服务商，其 token 记账交给 harness 的估算器。
 
 <a id="dev-note"></a>

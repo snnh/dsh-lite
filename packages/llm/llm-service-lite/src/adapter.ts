@@ -14,6 +14,7 @@
 import { LlmAdapter, LlmError } from '@deepseek-ai/dsh-llm'
 import type {
   GenerateOptions,
+  LlmImageRequestPricing,
   LlmModelInfo,
   LlmResolvedModelInfo,
   PreparedAdapterCall,
@@ -27,7 +28,7 @@ import { translateAnthropicStream } from './anthropic-stream.ts'
 import { chatRequest, translateChatStream } from './chat-completions.ts'
 import { responsesRequest } from './openai-responses.ts'
 import { translateResponsesStream } from './responses-stream.ts'
-import { prepareRequestImages } from './images.ts'
+import { imageRequestPricing, prepareRequestImages } from './images.ts'
 import { classifyFailure, classifyTransport } from './errors.ts'
 import { ConcurrencyLimiter } from './limiter.ts'
 import { catalogModels, resolvedModelInfo } from './models.ts'
@@ -99,6 +100,21 @@ export class OwcProfilesAdapter extends LlmAdapter {
   override listModels(provider: string): Promise<readonly LlmModelInfo[]> {
     const profile = this.dependencies.profiles().get(provider)
     return Promise.resolve(profile === undefined ? [] : catalogModels(profile))
+  }
+
+  /**
+   * Price one model's surface images the way its endpoint charges for them.
+   *
+   * The token meter asks synchronously, so this reads only the resolved profile
+   * and the request target the adapter would ask the attachment provider for.
+   * A route that declared no accounting answers `undefined`, which keeps the
+   * meter's structural heuristic: a price this adapter made up would be worse
+   * than an estimate the meter already labels as one.
+   */
+  override imageRequestPricing(provider: string, model: string): LlmImageRequestPricing | undefined {
+    const profile = this.dependencies.profiles().get(provider)
+    if (profile === undefined) return undefined
+    return imageRequestPricing(modelOf(profile, model))
   }
 
   override resolveModel(provider: string, model: string, _signal?: AbortSignal): Promise<LlmResolvedModelInfo> {

@@ -65,11 +65,23 @@ type AnthropicPart =
   | { type: 'thinking'; thinking: string; signature: string }
   | { type: 'redacted_thinking'; data: string }
 
-/** One message as the Messages protocol spells it; only these two roles exist. */
+/** One message as the Messages protocol spells it. */
 interface AnthropicMessage {
-  role: 'user' | 'assistant'
-  content: AnthropicPart[]
+  role: 'user' | 'assistant' | 'system'
+  content: (AnthropicPart | AnthropicSystemPart)[]
 }
+
+/**
+ * A part only a `system`-role history message carries: the mid-conversation
+ * prompt snapshot itself, and the two references that activate or deactivate a
+ * declared tool. They are separate from {@link AnthropicPart} because the
+ * protocol admits them on no other role, and a route that declared neither
+ * capability never produces one.
+ */
+type AnthropicSystemPart =
+  | { type: 'text'; text: string }
+  | { type: 'tool_addition'; tool: { type: 'tool_reference'; name: string } }
+  | { type: 'tool_removal'; tool: { type: 'tool_reference'; name: string } }
 
 /** Replay-metadata kinds this transport writes and reads. */
 export const REPLAY_KIND = 'llm-service-lite-anthropic'
@@ -289,9 +301,17 @@ function reasoningPart(text: string, replay: AnthropicReplayBlock | undefined): 
 /**
  * Translate the durable history into Messages wire messages.
  *
+ * A route that declared `systemPromptUpdate` or `toolUpdate` gets those
+ * changes on the wire this protocol spells them: a `system`-role message at
+ * the position the change belongs to, carrying the prompt snapshot and the
+ * tool references that activate or deactivate a declared tool. The message is
+ * held back until the turn it follows is a user turn, because this protocol
+ * reads a system message as an instruction between turns rather than as a
+ * sibling of one. Every other route keeps the folding rule below.
+ *
  * @param options - the assembled request.
  * @param provider - route this request is addressed to, for replay matching.
- * @param model - exact model this request is addressed to, for replay matching.
+ * @param model - the route's declared facts for this model, including replay identity and the two mid-history capabilities.
  * @param versions - prepared request images, keyed by durable attachment id.
  * @returns protocol messages in conversation order, always ending on a user turn
  *   once a call has been made in them.
@@ -299,7 +319,7 @@ function reasoningPart(text: string, replay: AnthropicReplayBlock | undefined): 
 export function toAnthropicMessages(
   options: GenerateOptions,
   provider: string,
-  model: string,
+  model: ResolvedOwcModel,
   versions: ReadonlyMap<string, RequestImageAttachment>,
 ): AnthropicMessage[] {
   const messages = options.messages
@@ -309,6 +329,29 @@ export function toAnthropicMessages(
   let pending: string[] = []
   let batch: AnthropicPart[] = []
   const out: AnthropicMessage[] = []
+
+  /** Whether a mid-history change travels as the `system` message this protocol reserves for it. */
+  const inHistory = model.systemPromptUpdate === 'in-history' || model.toolUpdate !== undefined
+  let updates: AnthropicSystemPart[] = []
+  /**
+   * Place the queued mid-history changes. They belong between the user turn
+   * they instruct and the assistant turn that answers it, which is also the
+   * only position this protocol accepts them in — a change that would land
+   * before any turn is a request the endpoint rejects, so it is refused here
+   * with the reason instead.
+   */
+  const flushUpdates = (): void => {
+    if (updates.length === 0) return
+    if (out.at(-1)?.role !== 'user') {
+      throw new LlmError(
+        'llm-service-lite: a mid-history system update has no preceding user turn to follow;'
+        + ' this route declared systemPromptUpdate or toolUpdate, which needs one',
+        'UNSUPPORTED_CONTENT',
+      )
+    }
+    out.push({ role: 'system', content: updates })
+    updates = []
+  }
 
   /**
    * The one exit for a call the durable log never answered: it is answered with
@@ -368,17 +411,38 @@ export function toAnthropicMessages(
     // order the protocol requires: assistant call, user results, next turn.
     flushBatch()
     flushPending()
+    // A route that reads tool changes must not silently drop one that arrived
+    // on another role: this protocol has no part for it there, and a lost
+    // activation is a request that disagrees with the session about which
+    // tools exist. A route that declared neither capability keeps skipping the
+    // block, which is the same reading it gives every other unknown block.
+    if (inHistory && message.role !== 'system' && message.role !== 'developer'
+      && message.content.some(block => block.type === 'tool-addition' || block.type === 'tool-removal')) {
+      throw new LlmError(
+        `llm-service-lite: a ${message.role} message carries a tool-addition or tool-removal block;`
+        + ' both belong to developer messages, and this protocol has no part for them on another role',
+        'UNSUPPORTED_CONTENT',
+      )
+    }
     if (message.role === 'user') {
       const content = userParts(message.content, versions)
       if (content.length > 0) out.push({ role: 'user', content })
       continue
     }
     if (message.role === 'system' || message.role === 'developer') {
+      // A route that declared mid-history changes keeps the role this
+      // protocol reserves for them: the update is queued and lands between
+      // the user turn it instructs and the answer to it.
+      if (inHistory && (message.role === 'developer' || model.systemPromptUpdate === 'in-history')) {
+        updates.push(...systemParts(message))
+        continue
+      }
       const text = textOf(message)
       if (text.length > 0) out.push({ role: 'user', content: [{ type: 'text', text }] })
       continue
     }
-    const replayed = replayBlocksOf(message, provider, model)
+    flushUpdates()
+    const replayed = replayBlocksOf(message, provider, model.id)
     const content: AnthropicPart[] = []
     for (const [position, block] of message.content.entries()) {
       if (block.type === 'text') {
@@ -405,7 +469,42 @@ export function toAnthropicMessages(
   }
   flushBatch()
   flushPending()
+  flushUpdates()
   return out
+}
+
+/**
+ * The parts one mid-history message contributes when the route declared
+ * mid-history changes: prompt text as itself, and each tool change as the
+ * reference this protocol spells. Any other block is refused by name rather
+ * than dropped — a message the endpoint cannot read in full must not look like
+ * a request that carried it.
+ * @param message - developer or system message from the durable history.
+ * @returns the parts to queue, empty when the message carried nothing.
+ * @throws LlmError `UNSUPPORTED_CONTENT` naming a block this role cannot carry.
+ */
+function systemParts(message: RequestMessage): AnthropicSystemPart[] {
+  const parts: AnthropicSystemPart[] = []
+  for (const block of message.content) {
+    if (block.type === 'text') {
+      if (block.text.length > 0) parts.push({ type: 'text', text: block.text })
+      continue
+    }
+    if (block.type === 'tool-addition') {
+      parts.push({ type: 'tool_addition', tool: { type: 'tool_reference', name: block.toolName } })
+      continue
+    }
+    if (block.type === 'tool-removal') {
+      parts.push({ type: 'tool_removal', tool: { type: 'tool_reference', name: block.toolName } })
+      continue
+    }
+    throw new LlmError(
+      `llm-service-lite: a mid-history system message carries a ${block.type} block,`
+      + ' which this protocol reads only as prompt text or a tool reference',
+      'UNSUPPORTED_CONTENT',
+    )
+  }
+  return parts
 }
 
 /**
@@ -526,7 +625,7 @@ export function anthropicRequest(
     ...options.temperature === undefined ? {} : { temperature: options.temperature },
     ...options.stop === undefined || options.stop.length === 0 ? {} : { stop_sequences: [...options.stop] },
     ...systemField(options, caching),
-    messages: toAnthropicMessages(options, profile.provider, model.id, versions),
+    messages: toAnthropicMessages(options, profile.provider, model, versions),
     ...thinkingFields(model, level, maxTokens),
     // The last declaration carries the breakpoint: caching the tools prefix
     // then covers the whole list for every later request.
@@ -535,6 +634,10 @@ export function anthropicRequest(
         name: tool.name,
         description: tool.description,
         input_schema: tool.parameters,
+        // A deferred declaration stays in the list but is not read until a
+        // later system message activates it; the harness only marks a tool this
+        // way for a route that declared it accepts mid-conversation changes.
+        ...tool.deferLoading === true ? { defer_loading: true } : {},
         ...caching && index === tools.length - 1 ? { cache_control: { type: 'ephemeral' } } : {},
       })),
     },

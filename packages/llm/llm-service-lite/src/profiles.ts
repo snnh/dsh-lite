@@ -26,18 +26,24 @@ import {
   DEFAULT_MAX_CONCURRENT,
   DEFAULT_MAX_TOKENS,
   DEFAULT_STREAM_IDLE_TIMEOUT_MS,
+  IMAGE_TOKEN_KINDS,
   INTERFACE_TYPES,
   MODALITIES,
+  SYSTEM_PROMPT_UPDATES,
+  TOOL_UPDATES,
   type EffortLevel,
   type InterfaceType,
   type Modality,
   type Options,
+  type OwcImageTokenAccounting,
   type OwcModelCapabilities,
   type OwcModelProfile,
   type OwcProviderProfile,
   type ServedInterfaceType,
+  type SystemPromptUpdate,
   type ThinkingMode,
   type ThinkingStyle,
+  type ToolUpdate,
 } from './config.ts'
 
 /** Protocol defaults OWC applies when a profile names no endpoint. */
@@ -80,12 +86,63 @@ export interface ResolvedOwcModel {
    * item, which the Responses protocol hands back verbatim.
    */
   readonly encryptedReplay: boolean
+  /** Whether the endpoint reads a mid-conversation system message as the effective prompt. */
+  readonly systemPromptUpdate: SystemPromptUpdate | undefined
+  /** How the endpoint accepts tool declarations that change mid-conversation. */
+  readonly toolUpdate: ToolUpdate | undefined
   /** Whether tool declarations may be sent to this model. */
   readonly tools: boolean
   /** Pixel budget request images of this model are projected into; absent keeps source dimensions. */
   readonly imagePixelBudget: number | undefined
   /** Encoded-byte target for one request image of this model; absent uses the adapter default. */
   readonly imageMaxBytes: number | undefined
+  /** Visual-token accounting this model's endpoint charges; absent keeps the meter's heuristic. */
+  readonly imageTokens: ResolvedImageTokens | undefined
+}
+
+/**
+ * One validated visual-token accounting, in the form the pricing path reads:
+ * the declared kind's own fields are materialized, and the other kind's are
+ * already gone.
+ */
+export type ResolvedImageTokens =
+  | { kind: 'area'; per: number }
+  | { kind: 'tiles'; tile: number; base: number; perTile: number }
+
+/**
+ * Materialize one declared visual-token accounting, refusing a declaration
+ * that does not state the whole of the accounting it named.
+ * @param provider - route name, for the diagnostic.
+ * @param model - model id, for the diagnostic.
+ * @param declared - the accounting the profile states.
+ * @returns the accounting in the form the pricing path reads.
+ * @throws Error naming the route, the model, and the field that is missing.
+ */
+function resolveImageTokens(
+  provider: string,
+  model: string,
+  declared: OwcImageTokenAccounting,
+): ResolvedImageTokens {
+  const at = `llm-service-lite: provider "${provider}" model "${model}" imageTokens`
+  if (!IMAGE_TOKEN_KINDS.includes(declared.kind)) {
+    throw new Error(`${at} names unknown kind "${declared.kind}"`)
+  }
+  const positive = (value: number | undefined): value is number =>
+    value !== undefined && Number.isSafeInteger(value) && value >= 1
+  if (declared.kind === 'area') {
+    if (declared.tile !== undefined || declared.base !== undefined || declared.perTile !== undefined) {
+      throw new Error(`${at} of kind "area" also states the fields of "tiles"`)
+    }
+    if (!positive(declared.per)) throw new Error(`${at} of kind "area" needs a positive integer "per"`)
+    return { kind: 'area', per: declared.per }
+  }
+  if (declared.per !== undefined) throw new Error(`${at} of kind "tiles" also states the field of "area"`)
+  if (declared.base !== undefined && !(Number.isSafeInteger(declared.base) && declared.base >= 0)) {
+    throw new Error(`${at} of kind "tiles" needs "base" to be a non-negative integer`)
+  }
+  if (!positive(declared.perTile)) throw new Error(`${at} of kind "tiles" needs a positive integer "perTile"`)
+  if (!positive(declared.tile)) throw new Error(`${at} of kind "tiles" needs a positive integer "tile"`)
+  return { kind: 'tiles', tile: declared.tile, base: declared.base ?? 0, perTile: declared.perTile }
 }
 
 /** One provider profile with every route-level default materialized. */
@@ -225,6 +282,7 @@ function assertExtraBody(provider: string, extraBody: Readonly<Record<string, un
 function resolveModel(
   provider: string,
   model: OwcModelProfile,
+  interfaceType: ServedInterfaceType,
   fallbackContextWindow: number,
   fallbackMaxTokens: number,
 ): ResolvedOwcModel {
@@ -258,6 +316,14 @@ function resolveModel(
       + ' without declaring image input',
     )
   }
+  // An accounting is a claim about how this endpoint charges for the images it
+  // receives, so it describes a route that receives some.
+  if (model.imageTokens !== undefined && !carriesImages) {
+    throw new Error(
+      `llm-service-lite: provider "${provider}" model "${model.id}" sets imageTokens`
+      + ' without declaring image input',
+    )
+  }
   // A declaration the request path cannot act on is refused where it is made,
   // in the same place the unimplemented protocols are: accepting it would put a
   // capability in the document that no request ever uses.
@@ -266,6 +332,32 @@ function resolveModel(
       `llm-service-lite: provider "${provider}" model "${model.id}" declares image output,`
       + ' which this adapter does not serve yet; drop the declaration until it does',
     )
+  }
+  // Mid-conversation prompt and tool changes are carried as `system`-role
+  // history, which only the Messages protocol has a part for. The other two
+  // wires declare the complete prompt and tool list on every request, so a
+  // declaration there would be a capability no request could act on.
+  if (capabilities.systemPromptUpdate !== undefined || capabilities.toolUpdate !== undefined) {
+    const declared = capabilities.systemPromptUpdate !== undefined ? 'systemPromptUpdate' : 'toolUpdate'
+    if (interfaceType !== 'anthropic-messages') {
+      throw new Error(
+        `llm-service-lite: provider "${provider}" model "${model.id}" declares ${declared}`
+        + ` on interfaceType "${interfaceType}"; only anthropic-messages carries a mid-history system message`,
+      )
+    }
+    if (capabilities.systemPromptUpdate !== undefined
+      && !SYSTEM_PROMPT_UPDATES.includes(capabilities.systemPromptUpdate)) {
+      throw new Error(
+        `llm-service-lite: provider "${provider}" model "${model.id}" declares unknown`
+        + ` systemPromptUpdate "${capabilities.systemPromptUpdate}"`,
+      )
+    }
+    if (capabilities.toolUpdate !== undefined && !TOOL_UPDATES.includes(capabilities.toolUpdate)) {
+      throw new Error(
+        `llm-service-lite: provider "${provider}" model "${model.id}" declares unknown`
+        + ` toolUpdate "${capabilities.toolUpdate}"`,
+      )
+    }
   }
   return {
     id: model.id,
@@ -278,11 +370,16 @@ function resolveModel(
     thinkingStyle: capabilities.thinkingStyle,
     reasoningContent: capabilities.reasoningContent ?? false,
     encryptedReplay: capabilities.responsesEncryptedReplay ?? false,
+    systemPromptUpdate: capabilities.systemPromptUpdate,
+    toolUpdate: capabilities.toolUpdate,
     tools: capabilities.tools ?? true,
     imagePixelBudget: model.imagePixelBudget === 'low'
       ? LOW_DETAIL_IMAGE_PIXEL_BUDGET
       : model.imagePixelBudget,
     imageMaxBytes: model.imageMaxBytes,
+    imageTokens: model.imageTokens === undefined
+      ? undefined
+      : resolveImageTokens(provider, model.id, model.imageTokens),
   }
 }
 
@@ -322,7 +419,8 @@ export function resolveProfiles(
     const defaultMaxTokens = source.defaultMaxTokens ?? DEFAULT_MAX_TOKENS
     let models: readonly ResolvedOwcModel[]
     try {
-      models = (source.models ?? []).map(model => resolveModel(provider, model, defaultContextWindow, defaultMaxTokens))
+      models = (source.models ?? [])
+        .map(model => resolveModel(provider, model, interfaceType, defaultContextWindow, defaultMaxTokens))
       const ids = new Set<string>()
       for (const model of models) {
         if (ids.has(model.id)) throw new Error(`llm-service-lite: provider "${provider}" declares model "${model.id}" twice`)
@@ -454,11 +552,14 @@ export function modelOf(profile: ResolvedOwcProviderProfile, model: string): Res
     modalities: ['text'],
     imagePixelBudget: undefined,
     imageMaxBytes: undefined,
+    imageTokens: undefined,
     effort: [],
     thinking: [],
     thinkingStyle: undefined,
     reasoningContent: false,
     encryptedReplay: false,
+    systemPromptUpdate: undefined,
+    toolUpdate: undefined,
     tools: true,
   }
 }
