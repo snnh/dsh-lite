@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-llm-service-lite",
   "description": "A lighter LLM service: self-contained provider profiles, a declared model catalog, and the chat-completions, Anthropic Messages, and OpenAI Responses wires, referencing OpenWebCode's implementation",
-  "version": "0.2.1-alpha.1-lite.1",
+  "version": "0.2.1-alpha.2-lite.1",
   "publishConfig": {
     "access": "public"
   },
