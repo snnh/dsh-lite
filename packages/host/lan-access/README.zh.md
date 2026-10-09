@@ -95,6 +95,7 @@ dsh web: http://127.0.0.1:3080/?token=… (LAN: http://192.168.1.5:3080/?token=�
 
 - `@deepseek-ai/dsh-client-connection` 用该令牌换取签名的浏览器 cookie，并拥有 Host/Origin 围栏。
 - `@deepseek-ai/dsh-web-app` 读取 `ctx.lanAccess.host` 作为绑定，并读取 `ctx.lanAccess.lanAddresses` 作为应用 URL 旁打印的 LAN 链接。
+- [LAN 暴露策略只属于一个插件](../../../.agents/notes/implemented/architecture/2026-10-09-lan-exposure-policy-plugin.zh.md) —— 为什么绑定语法由本行而非载体或 bundle 拥有。
 
 -----
 

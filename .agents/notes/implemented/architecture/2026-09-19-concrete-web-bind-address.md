@@ -30,6 +30,8 @@ An operator exposes exactly the interfaces named by `--host` and reaches the lis
 
 The [native HTTPS listener decision](2026-09-23-native-https-web-listener.md) supersedes this note's HTTP-only transport assumption. The non-loopback warning applies only without TLS; bind-address validation and authority admission remain unchanged.
 
+The [LAN exposure policy decision](2026-10-09-lan-exposure-policy-plugin.md) supersedes this note's wildcard refusal and its removal of LAN sampling: the unspecified address is admitted again by the default-on exposure row, which also publishes the fence literals this note had the carrier derive.
+
 ## Testing
 
 `packages/host/webserver/tests/webserver.spec.ts` classifies wildcard and loopback spellings and rejects wildcard config; `packages/bundle/web-app/tests/startup.spec.ts` refuses wildcard `--host` before consumers activate; `packages/client/connection/tests/api-request-trust.host.spec.ts` and `node-half.host.spec.ts` admit the bind literal on any port without admitting other authorities; `packages/bundle/web-app/tests/web-app.spec.ts` covers the bracketed IPv6 URL and the plain-HTTP warning; `apps/cli/tests/profiles/web/tests/public-url.expected.e2e.ts` boots the built profile on a non-loopback and a zoned loopback address; `web-failure-matrix.expected.e2e.ts` and `packages/boot/app-boot/tests/app-boot.spec.ts` report the required `web-runtime` entry.

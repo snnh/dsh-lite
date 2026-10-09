@@ -93,6 +93,7 @@ A loopback bind states no precondition of its own: the connection half authentic
 
 - `@deepseek-ai/dsh-client-connection` exchanges the token for the signed browser cookie and owns the Host/Origin fence.
 - `@deepseek-ai/dsh-web-app` reads `ctx.lanAccess.host` for the bind and `ctx.lanAccess.lanAddresses` for the LAN link it prints beside the application URL.
+- [LAN exposure policy lives in one plugin](../../../.agents/notes/implemented/architecture/2026-10-09-lan-exposure-policy-plugin.md) — why this row, and not the carrier or the bundle, owns the bind grammar.
 
 -----
 

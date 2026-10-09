@@ -1,0 +1,22 @@
+# Bilingual-pair consistency record for 2026-10-09-lan-exposure-policy-plugin.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-10-09-lan-exposure-policy-plugin.md
+/agent-note-lan-exposure-policy-lives-in-one-plugin:
+  en: 0f6a9112fca62c11
+  zh: ce641d702c16696c
+/agent-note-lan-exposure-policy-lives-in-one-plugin/problem:
+  en: fdbeb6d2cfcb49a1
+  zh: f15d5e3f4b85ee7a
+/agent-note-lan-exposure-policy-lives-in-one-plugin/decision:
+  en: 5ca5cd62ab1f6f67
+  zh: ac2034d902b5c5cb
+/agent-note-lan-exposure-policy-lives-in-one-plugin/alternatives-considered:
+  en: cfdb2071c59f965e
+  zh: 3fb828892b5849eb
+/agent-note-lan-exposure-policy-lives-in-one-plugin/consequences:
+  en: d00571bbff6ae248
+  zh: ffadac13c491e29f
+/agent-note-lan-exposure-policy-lives-in-one-plugin/testing:
+  en: 3a16fcc6a831fb4e
+  zh: a69dea8e7b269758
