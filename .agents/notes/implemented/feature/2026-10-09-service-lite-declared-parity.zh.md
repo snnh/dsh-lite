@@ -20,7 +20,7 @@ Status: implemented
 
 **`imageTokens` 声明端点自己的视觉 token 计价**，采用两种公开拼写：扁平像素网格用 `{ kind: 'area', per: 750 }`，底价加逐方形瓦片计价用 `{ kind: 'tiles', tile, base, perTile }`。`LlmAdapter.imageRequestPricing` 按 `requestImageTarget` 将向附件提供方索取的尺寸——决定端点收费的那一个数字——为每次出现计价；已卸载的出现按请求实际携带的占位文本计价；纯文本路由按运行时执行的替换计价。未声明计价的路由回答 `undefined`，把 meter 自己标注为启发式的估算留在原地：本适配器猜出来的数字会被下游读成一次测量。
 
-**那条渠道拥有的路由名在此处被拒绝。** DeepSeek 保留它的官方模块，因此 `deepseek-official` 与 `deepseek-account`——分别由 `@deepseek-ai/dsh-llm-deepseek-api-key` 与 `@deepseek-ai/dsh-llm-deepseek-account` 注册——在被档案占用时按名拒绝，诊断中写明归属方。已存储且占用其一名的档案保持可寻址、但不可服务，而不会把其它路由一起拖下水；何况真去注册它本就会让插件加载失败：关键在于就地指出这处错误，而不是让它看起来像本插件的 bug。被保留的只是名字，不是服务商——若某部署要通过本适配器接入一个兼容 DeepSeek 的端点，就用自己的路由名，并声明该端点自己的能力。
+**那条渠道拥有的路由名在此处被拒绝。** DeepSeek 保留它的官方模块，因此 `deepseek-official` 与 `deepseek-account`——分别由 `@deepseek-ai/dsh-llm-deepseek-api-key` 与 `@deepseek-ai/dsh-llm-deepseek-account` 注册——在被档案占用时按名拒绝，诊断中写明归属方。已存储且占用其一名的档案保持可寻址、但不可服务，而不会把其它路由一起拖下水；何况真去注册它本就会让插件加载失败：关键在于就地指出这处错误，而不是让它看起来像本插件的 bug。被保留的只是名字，不是服务商：本适配器不是那条渠道的替代品；若某部署要通过它接入一个兼容 DeepSeek 的端点，就用自己的路由名，并声明该端点自己的能力。
 
 有三件事是刻意**不**从第一方通道照搬的，README 已逐条写明：中途工具变更所需的 DeepSeek beta 头不会被注入（需要它的档案在 `headers` 里自己写明，因为该头是端点的契约，不是本适配器的知识）；图片字节旁不写任何说明文本（因此被计价的出现次数只计入端点实际收取的部分）；DeepSeek 平台专有能力——Files API 图片通道、账户授权路由、`ctx.deepseekLlmApiExtensions` 请求字段注册表、`x-deepseek-harness-*` 身份头——不进这个以\"档案即全部真相\"为前提的插件。
 

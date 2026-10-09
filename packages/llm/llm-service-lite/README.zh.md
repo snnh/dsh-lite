@@ -29,7 +29,7 @@ kind: "package-reference"
 
 ### 何时选它
 
-本插件只做第三方端点的适配：它注册的每条路由都来自部署自己写的档案，第一方 DeepSeek 渠道保留自己的适配器。DeepSeek 默认就是那条渠道，因此它拥有的路由名——`deepseek-official` 与 `deepseek-account`，分别由 `@deepseek-ai/dsh-llm-deepseek-api-key` 与 `@deepseek-ai/dsh-llm-deepseek-account` 注册——在此处被按名拒绝，诊断里写明归属方，而不是先占用、再让插件加载失败。其余路由名不受限制：若某部署要通过本适配器接入一个兼容 DeepSeek 的端点，就用自己的路由名，并声明该端点自己的能力。同一个组合要服务多个端点时选它——国产模型 API、自建的 vLLM 或 SGLang 网关、公司网络里的代理——每一条都需要被完整描述，而不是从目录里推导。当 pi-ai 目录里已经有对应条目、能提供协议与模型能力时，选 `dsh-llm-pi-ai`。两者可以同时挂载，因为路由名不会冲突；注册一条已被别的适配器占用的路由会让插件加载失败。
+本插件只做第三方端点的适配：它注册的每条路由都来自部署自己写的档案，第一方 DeepSeek 渠道保留自己的适配器。DeepSeek 默认就是那条渠道，因此它拥有的路由名——`deepseek-official` 与 `deepseek-account`，分别由 `@deepseek-ai/dsh-llm-deepseek-api-key` 与 `@deepseek-ai/dsh-llm-deepseek-account` 注册——在此处被按名拒绝，诊断里写明归属方，而不是先占用、再让插件加载失败。DeepSeek 自身就走那些官方模块——本适配器不是那条渠道的替代品。其余路由名不受限制：若某部署要通过本适配器接入一个兼容 DeepSeek 的端点，就用自己的路由名，并声明该端点自己的能力。同一个组合要服务多个端点时选它——国产模型 API、自建的 vLLM 或 SGLang 网关、公司网络里的代理——每一条都需要被完整描述，而不是从目录里推导。当 pi-ai 目录里已经有对应条目、能提供协议与模型能力时，选 `dsh-llm-pi-ai`。两者可以同时挂载，因为路由名不会冲突；注册一条已被别的适配器占用的路由会让插件加载失败。
 
 ### 配置服务商档案
 
