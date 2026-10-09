@@ -27,9 +27,7 @@ import {
   DEFAULT_MAX_TOKENS,
   DEFAULT_STREAM_IDLE_TIMEOUT_MS,
   INTERFACE_TYPES,
-  isServedInterfaceType,
   MODALITIES,
-  SERVED_INTERFACE_TYPES,
   type EffortLevel,
   type InterfaceType,
   type Modality,
@@ -77,6 +75,11 @@ export interface ResolvedOwcModel {
   readonly thinkingStyle: ThinkingStyle | undefined
   /** Whether prior reasoning may be replayed through `reasoning_content`. */
   readonly reasoningContent: boolean
+  /**
+   * Whether prior reasoning must be replayed as the provider's own encrypted
+   * item, which the Responses protocol hands back verbatim.
+   */
+  readonly encryptedReplay: boolean
   /** Whether tool declarations may be sent to this model. */
   readonly tools: boolean
   /** Pixel budget request images of this model are projected into; absent keeps source dimensions. */
@@ -166,18 +169,6 @@ function assertAddressable(provider: string, source: OwcProviderProfile): Served
     )
   }
   assertRouteCapabilities(provider, source)
-  // The vocabulary is the port's; the transports are this plugin's. A profile
-  // declaring a protocol no transport implements is refused by name rather than
-  // served over another one — the request would reach the provider with a body
-  // it cannot read. Internal contradictions above report first: they say what
-  // to change, while this says why the route cannot serve at all.
-  if (!isServedInterfaceType(source.interfaceType)) {
-    throw new Error(
-      `llm-service-lite: provider "${provider}" declares interfaceType "${source.interfaceType}",`
-      + ` which this adapter does not serve yet; it serves ${SERVED_INTERFACE_TYPES.join(' and ')}.`
-      + ' Remove the profile or set its interfaceType once that transport lands.',
-    )
-  }
   assertExtraBody(provider, source.extraBody)
   for (const [name, value] of Object.entries(source.headers ?? {})) {
     try {
@@ -276,12 +267,6 @@ function resolveModel(
       + ' which this adapter does not serve yet; drop the declaration until it does',
     )
   }
-  if (capabilities.responsesEncryptedReplay === true) {
-    throw new Error(
-      `llm-service-lite: provider "${provider}" model "${model.id}" declares encrypted reasoning replay,`
-      + ' which belongs to the openai-responses transport; drop the declaration until it lands',
-    )
-  }
   return {
     id: model.id,
     name: model.name ?? model.id,
@@ -292,6 +277,7 @@ function resolveModel(
     thinking: [...capabilities.thinking ?? []],
     thinkingStyle: capabilities.thinkingStyle,
     reasoningContent: capabilities.reasoningContent ?? false,
+    encryptedReplay: capabilities.responsesEncryptedReplay ?? false,
     tools: capabilities.tools ?? true,
     imagePixelBudget: model.imagePixelBudget === 'low'
       ? LOW_DETAIL_IMAGE_PIXEL_BUDGET
@@ -394,7 +380,7 @@ function unserviceable(provider: string, source: OwcProviderProfile, error: unkn
     provider,
     displayName: source.displayName ?? provider,
     enabled: source.enabled ?? true,
-    interfaceType: isServedInterfaceType(source.interfaceType)
+    interfaceType: (INTERFACE_TYPES as readonly string[]).includes(source.interfaceType)
       ? source.interfaceType
       : 'openai-chat-completions',
     baseURL: source.baseURL ?? ENDPOINT_DEFAULTS['openai-chat-completions'],
@@ -472,6 +458,7 @@ export function modelOf(profile: ResolvedOwcProviderProfile, model: string): Res
     thinking: [],
     thinkingStyle: undefined,
     reasoningContent: false,
+    encryptedReplay: false,
     tools: true,
   }
 }

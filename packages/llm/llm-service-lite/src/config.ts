@@ -35,25 +35,15 @@ export const INTERFACE_TYPES = ['openai-chat-completions', 'anthropic-messages',
 export type InterfaceType = (typeof INTERFACE_TYPES)[number]
 
 /**
- * The protocols this adapter's transports implement. The rest stay in
- * {@link INTERFACE_TYPES} because the vocabulary is the port's — a settings
- * surface must be able to name what a deployment asked for — while resolution
- * refuses them by name instead of serving a declared protocol over another
- * protocol's wire.
+ * The protocols this adapter's transports implement. Every declared protocol
+ * has one, so this list and {@link INTERFACE_TYPES} name the same set: a
+ * vocabulary entry without a transport would be a protocol a deployment could
+ * declare and no request could carry.
  */
-export const SERVED_INTERFACE_TYPES = ['openai-chat-completions', 'anthropic-messages'] as const
+export const SERVED_INTERFACE_TYPES: readonly InterfaceType[] = INTERFACE_TYPES
 
 /** One protocol this adapter serves. */
-export type ServedInterfaceType = (typeof SERVED_INTERFACE_TYPES)[number]
-
-/**
- * Whether a declared protocol is one this adapter serves.
- * @param value - protocol name from a profile.
- * @returns whether a transport implements it.
- */
-export function isServedInterfaceType(value: InterfaceType): value is ServedInterfaceType {
-  return (SERVED_INTERFACE_TYPES as readonly InterfaceType[]).includes(value)
-}
+export type ServedInterfaceType = InterfaceType
 
 /**
  * Reasoning-effort levels a model may offer, ordered least to most expensive.
@@ -188,9 +178,10 @@ export interface OwcModelCapabilities {
    */
   imageOutput?: boolean
   /**
-   * Whether the endpoint replays signed reasoning items. Advertised by OWC's
-   * catalog for the official OpenAI Responses API, which this adapter does not
-   * serve yet; declaring it is refused by name at resolution.
+   * Whether the endpoint replays signed reasoning items: the Responses
+   * transport then requests `reasoning.encrypted_content` and hands each
+   * reasoning item back verbatim, which is what a stateless turn needs to
+   * resume a provider that will not accept its reasoning as plain text.
    */
   responsesEncryptedReplay?: boolean
 }
@@ -230,7 +221,7 @@ export interface OwcProviderProfile {
   displayName?: string
   /** Whether the route registers at all; a disabled profile keeps its configuration but serves nothing. */
   enabled?: boolean
-  /** Wire protocol every model on this route speaks; only a {@link SERVED_INTERFACE_TYPES} entry resolves. */
+  /** Wire protocol every model on this route speaks; every entry in {@link INTERFACE_TYPES} is served. */
   interfaceType: InterfaceType
   /** Endpoint of every model on the route; the protocol's usual host and version apply when omitted. */
   baseURL?: string

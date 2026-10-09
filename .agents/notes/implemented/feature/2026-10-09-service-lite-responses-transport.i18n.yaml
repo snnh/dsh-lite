@@ -1,0 +1,22 @@
+# Bilingual-pair consistency record for 2026-10-09-service-lite-responses-transport.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-10-09-service-lite-responses-transport.md
+/agent-note-the-local-llm-service-speaks-the-openai-responses-api:
+  en: f92ef936d457662e
+  zh: 03bbde9466d5c846
+/agent-note-the-local-llm-service-speaks-the-openai-responses-api/problem:
+  en: 3bf41f8f250850cc
+  zh: 1cb996cd0f9fcadb
+/agent-note-the-local-llm-service-speaks-the-openai-responses-api/decision:
+  en: 2904cc71cf733e4c
+  zh: e54091c1f5af0d1c
+/agent-note-the-local-llm-service-speaks-the-openai-responses-api/alternatives-considered:
+  en: 9b7a1a2b14f255c2
+  zh: a1ce35bedfd15c55
+/agent-note-the-local-llm-service-speaks-the-openai-responses-api/consequences:
+  en: e1a07ec218fff5ad
+  zh: edde0c30b22b97d1
+/agent-note-the-local-llm-service-speaks-the-openai-responses-api/testing:
+  en: 120b09e5f0dee1b7
+  zh: 480042c01dca8ae0

@@ -1,5 +1,5 @@
 ---
-description: "更轻量的 LLM 服务：自包含的服务商档案、显式声明的模型目录，以及接入 harness LLM 缝的原生 chat-completions 与 Anthropic Messages 传输，实现参考 OpenWebCode。"
+description: "更轻量的 LLM 服务：自包含的服务商档案、显式声明的模型目录，以及接入 harness LLM 缝的 chat-completions、Anthropic Messages 与 OpenAI Responses 三条线协议，实现参考 OpenWebCode。"
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-`@deepseek-ai/dsh-llm-service-lite` 负责适配第三方模型端点：每条已配置的服务商档案一条路由，统一走自己的传输——OpenAI 兼容的 chat-completions 线协议与 Anthropic Messages 协议——因此请求路径里既没有服务商 SDK，也没有已安装目录。一条档案是自包含的——线协议、端点、凭据引用、请求体附加字段、并发度，以及该端点所服务的模型——因此自建网关、国产模型 API 与公司网络里的代理走同一条代码路径，也不必有人事先认识这个服务商。
+`@deepseek-ai/dsh-llm-service-lite` 负责适配第三方模型端点：每条已配置的服务商档案一条路由，统一走自己的传输——OpenAI 兼容的 chat-completions 线协议、Anthropic Messages 协议与 OpenAI Responses API——因此请求路径里既没有服务商 SDK，也没有已安装目录。一条档案是自包含的——线协议、端点、凭据引用、请求体附加字段、并发度，以及该端点所服务的模型——因此自建网关、国产模型 API 与公司网络里的代理走同一条代码路径，也不必有人事先认识这个服务商。
 
 ## 目录
 
@@ -70,6 +70,20 @@ kind: "package-reference"
             capabilities:
               effort: [low, high]
               thinkingStyle: enable_thinking
+      # An endpoint reached over the Responses API, with encrypted reasoning
+      # replay declared.
+      openai:
+        interfaceType: openai-responses
+        baseURL: https://api.openai.com/v1
+        apiKeyEnv: OPENAI_API_KEY
+        models:
+          - id: gpt-5
+            contextWindow: 400000
+            maxTokens: 128000
+            capabilities:
+              effort: [minimal, low, medium, high]
+              thinking: [disabled]
+              responsesEncryptedReplay: true
       # An endpoint reached over the Anthropic Messages protocol, with prompt
       # caching and its thinking modes declared.
       claude:
@@ -95,7 +109,7 @@ kind: "package-reference"
 | 字段 | 默认值 | 含义 |
 |---|---|---|
 | `enabled` | `true` | 该路由是否注册 |
-| `interfaceType` | 必填 | `openai-chat-completions`、`anthropic-messages` 或 `openai-responses`；前两个已被承载，第三个在解析时被拒绝 |
+| `interfaceType` | 必填 | `openai-chat-completions`、`anthropic-messages` 或 `openai-responses`；每个值各自选择一条传输 |
 | `baseURL` | 协议默认端点 | 该路由所有模型的端点；省略时采用该协议惯用的主机与版本段 |
 | `apiKeyEnv` | 无 | 凭据引用，按请求经凭据缝解析 |
 | `apiKey` | 无 | 内联凭据，供从别的工具导入的档案使用 |
@@ -116,7 +130,7 @@ kind: "package-reference"
 
 ### 声明模型能做什么
 
-模型条目的 `capabilities` 是对端点的声明，不是猜测：没写的就不声明，写下的要么被履行、要么在声明处被按名拒绝——绝不"接受却无人在用"。`effort` 列出可选的推理档位，其值即线上拼写，因此自有词汇表的网关直接声明自己的词汇。`thinking` 列出可接受的思考模式（`enabled`、`disabled`、`adaptive`）。`thinkingStyle` 说明端点如何表达这个开关：`thinking: { type: … }`、顶层 `enable_thinking` 布尔值、始终思考的 `fixed`，或 `effort_only`——"只收档位、没有开关"的显式写法，与省略样式发出的是同一个请求。`reasoningContent` 声明端点会以 `reasoning_content` 返回思考，这正是后续请求得以回带既有思考的依据。`tools` 声明是否允许发送工具声明：关闭的模型收到的请求里没有工具列表，而不是一份会被端点拒绝的清单。`modalities` 声明端点接受哪些输入——`text`、`image`、`video`。其中 `image` 已被承载：保留的图片按模型声明的像素预算（或源尺寸）从附件提供方读取，按模型的字节目标重新编码，并以 base64 `image_url` 内联部分发出；已被会话卸载的图片则贡献它的占位文本。整条路由累计的请求由 `imageRequestMaxBytes`、`imageRequestMaxImages`、`imageOffloadByteQuantum` 与 `imageOffloadCountQuantum` 约束；超预算的请求以 `IMAGE_OFFLOAD_REQUIRED` 失败并给出必须卸载的最旧图片数量，而不是静默丢弃图片。`video` 输入、`imageOutput` 与 `responsesEncryptedReplay` 仍在声明处被拒绝，直到有传输承载它们——一个无人执行的声明会被读成路由并不具备的能力。
+模型条目的 `capabilities` 是对端点的声明，不是猜测：没写的就不声明，写下的要么被履行、要么在声明处被按名拒绝——绝不"接受却无人在用"。`effort` 列出可选的推理档位，其值即线上拼写，因此自有词汇表的网关直接声明自己的词汇。`thinking` 列出可接受的思考模式（`enabled`、`disabled`、`adaptive`）。`thinkingStyle` 说明端点如何表达这个开关：`thinking: { type: … }`、顶层 `enable_thinking` 布尔值、始终思考的 `fixed`，或 `effort_only`——"只收档位、没有开关"的显式写法，与省略样式发出的是同一个请求。`reasoningContent` 声明端点会以 `reasoning_content` 返回思考，这正是后续请求得以回带既有思考的依据。`tools` 声明是否允许发送工具声明：关闭的模型收到的请求里没有工具列表，而不是一份会被端点拒绝的清单。`modalities` 声明端点接受哪些输入——`text`、`image`、`video`。其中 `image` 已被承载：保留的图片按模型声明的像素预算（或源尺寸）从附件提供方读取，按模型的字节目标重新编码，并以 base64 `image_url` 内联部分发出；已被会话卸载的图片则贡献它的占位文本。整条路由累计的请求由 `imageRequestMaxBytes`、`imageRequestMaxImages`、`imageOffloadByteQuantum` 与 `imageOffloadCountQuantum` 约束；超预算的请求以 `IMAGE_OFFLOAD_REQUIRED` 失败并给出必须卸载的最旧图片数量，而不是静默丢弃图片。`video` 输入与 `imageOutput` 仍在声明处被拒绝，直到有传输承载它们——一个无人执行的声明会被读成路由并不具备的能力。`responsesEncryptedReplay` 已由 Responses 传输履行：请求会索要 `reasoning.encrypted_content`，并在下一回合把每个 reasoning item 原样交回。
 
 图片请求需要挂载附件提供方（`attachments`）；只服务纯文本路由的部署从不挂载它，而声明了 `image` 却没有附件提供方的路由，会在端点看到任何部分调用之前就让请求失败。
 
@@ -151,6 +165,8 @@ kind: "package-reference"
 | `src/chat-completions.ts` | chat-completions 的请求组装与流翻译 |
 | `src/anthropic-messages.ts` | Messages 的请求组装、配对修复与思考签名回放 |
 | `src/anthropic-stream.ts` | 把 Messages 事件流翻译成 harness 的分块词汇 |
+| `src/openai-responses.ts` | Responses 的请求组装、输入项映射与推理回放 |
+| `src/responses-stream.ts` | 把 Responses 事件流翻译成 harness 的分块词汇 |
 | `src/sse.ts` | 只在数据帧上打点的 SSE 分帧 |
 | `src/errors.ts` | 服务商失败分类 |
 | `src/limiter.ts` | 按路由的 FIFO 准入控制 |
@@ -167,6 +183,8 @@ kind: "package-reference"
 两者也都在出门时修复各自协议的配对规则，因为持久历史可能持有端点无法接受的形态。调用已不在的结果被丢弃；同一条助手回合内重复声明、或后续回合再次声明的调用 id，折叠为其首次出现；同一个调用的重复结果只留首条；无人回答的调用补一个占位结果，而不是留给端点回一个 400；同一并行批次的结果合并为两种协议都要求的单个 user 回合。修复发生在线上投影里，因此持久日志绝不会为了请求可被接受而被改写。
 
 思考只在声明过、且历史确实由同一 provider 与 model 产生时才回带。`openai-chat-completions` 经 `reasoning_content` 回带；`anthropic-messages` 通过助手消息上的适配器私有回放元数据回带带签名与 redacted 的思考块，因为该协议拒绝没有签名就返回的 thinking 块；由别的服务商、别的模型或别的适配器写下的元数据只把那一个回合降级为纯文本，而不是让请求失败。
+
+Responses 传输把对话映射为该 API 的扁平 item 列表——助手 `message`、每个调用的 `function_call`、以及携带同一 id 的 `function_call_output`——并按同样方式修复这份清单，只有一处是该协议强制的差异：无人回答的调用被丢弃，而不是补占位结果，因为严格的网关会拒绝伪造的输出；一个回合内的并行调用会被归组，使该 API 把它们折叠进同一个助手回合。它的推理遵循模型声明：`reasoningContent` 把思考文本按 `reasoning_text` 回带，`responsesEncryptedReplay` 则把服务商自己的 item 原样交回。该协议不携带停止序列，因此调用方的 `stop` 被省略，而不是被近似。
 
 Messages 传输的提示词取自 `system`，否则取自首条 system 消息。其后出现的 system 或 developer 消息在该协议里没有自己的槽位，因此就地折叠为一个 user 回合，会话中途的指令得以保持位置。工具结果把随附媒体以内联图片块的形式放在文本旁边；`max_tokens` 必发，因为该协议强制要求输出上限；`promptCaching` 标记该协议自己的断点：system 提示与最后一条工具声明。
 
@@ -212,10 +230,10 @@ harness 组装出的对话原样：系统提示词作为开头的 system 消息�
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- **还有一种协议未实现。** `openai-chat-completions` 与 `anthropic-messages` 已完整服务；`openai-responses` 属于词汇表但在解析时被按名拒绝，因为用不同的线上行为去服务一个已声明的协议，比直说"还没做"更糟。它是下一个里程碑。
+- **三条协议，三种形态。** 每个被声明的协议都有自己的传输，各自承载本协议的特性：Responses API 的服务端工具（`web_search_call` item）未被承载，也不发送 `store` 字段，因此想要服务端状态的部署应把它排除在请求路径之外。
 - **不支持视频输入与图片输出。** 声明 `video` 输入或 `imageOutput` 的档案会被拒绝，而不是把差异丢掉后照常服务。`image` 输入已被承载，但没有逐图 token 计价：本适配器未实现 `imageRequestPricing`，因此计价界面会把图片当作它所替换的文本来计价。
 - **适配器侧不重试。** 一次调用就是一次服务商尝试，重试策略由 `dsh-llm-retry` 在持久步骤边界执行，重试会重新推导整个请求。
-- **回放元数据是分协议的。** Messages 传输为自己写下的思考签名维护专属信封；声明 `responsesEncryptedReplay` 的档案在 responses 传输落地前仍按名拒绝。
+- **回放元数据是分协议的。** Messages 传输为自己写下的思考签名维护专属信封，Responses 传输则保留每个 reasoning item（id 与加密载荷）供索要加密回放的模型使用；两种信封都不跨服务商移植。
 - **没有用量报告就没有流式用量。** 从不发送用量块的服务商，其 token 记账交给 harness 的估算器。
 
 <a id="dev-note"></a>

@@ -71,6 +71,29 @@ function messagesTurn(response: ServerResponse, content = 'hello'): void {
   response.end()
 }
 
+/** Answer a model call with one complete Responses turn. */
+function responsesTurn(response: ServerResponse, content = 'hello'): void {
+  response.writeHead(200, { 'content-type': 'text/event-stream' })
+  frame(response, { type: 'response.created', response: { id: 'resp_1' } })
+  frame(response, { type: 'response.output_item.added', item: { type: 'message', id: 'msg_1' }, output_index: 0 })
+  frame(response, { type: 'response.output_text.delta', delta: content, output_index: 0 })
+  frame(response, {
+    type: 'response.output_item.done',
+    item: { type: 'message', id: 'msg_1', content: [{ type: 'output_text', text: content }] },
+    output_index: 0,
+  })
+  frame(response, {
+    type: 'response.completed',
+    response: {
+      id: 'resp_1',
+      status: 'completed',
+      output: [],
+      usage: { input_tokens: 3, output_tokens: 2, input_tokens_details: { cached_tokens: 1 } },
+    },
+  })
+  response.end()
+}
+
 /** One resolved route pointing at the mock provider. */
 const routeFor = (url: string, overrides: Record<string, unknown> = {}): ResolvedOwcProviderProfile => {
   const profile = resolveProfiles({
@@ -222,6 +245,48 @@ describe('owc profiles adapter', () => {
         }],
       },
     ])
+  })
+
+  it('streams a text turn through an openai-responses route', async () => {
+    const upstream = await provider((response) => { responsesTurn(response) })
+    running.push(upstream)
+    const adapter = adapterFor(routeFor(upstream.url, {
+      interfaceType: 'openai-responses',
+      models: [{ id: 'm', maxTokens: 512 }],
+    }))
+    const chunks = await collect(adapter.stream(request({ messages: [system('be brief'), user([text('hi')])] })))
+    expect(chunks).toEqual([
+      { type: 'block-start', index: 0, blockType: 'text' },
+      { type: 'text-delta', index: 0, text: 'hello' },
+      { type: 'block-end', index: 0, block: { type: 'text', text: 'hello' } },
+      { type: 'usage', usage: { inputTokens: 2, outputTokens: 2, totalTokens: 5, cacheReadTokens: 1, cacheWriteTokens: 0 } },
+      {
+        type: 'finish',
+        reason: { kind: 'stop' },
+        replayState: {
+          response: { kind: 'llm-service-lite-responses', version: 1, stopReason: 'completed', responseId: 'resp_1' },
+          blocks: [{ type: 'text', itemId: 'msg_1' }],
+        },
+      },
+    ])
+    expect(upstream.paths[0]).toBe('/v1/responses')
+    expect(upstream.bodies[0]).toEqual({
+      model: 'm',
+      stream: true,
+      instructions: 'be brief',
+      input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hi' }] }],
+      max_output_tokens: 512,
+    })
+  })
+
+  it('drops a Responses call whose result never landed, so the endpoint accepts it', async () => {
+    const upstream = await provider((response) => { responsesTurn(response) })
+    running.push(upstream)
+    const adapter = adapterFor(routeFor(upstream.url, { interfaceType: 'openai-responses' }))
+    await collect(adapter.stream(request({
+      messages: [assistant([toolCall('call_a', 'shell', '{}')]), toolResult('call_b', 'stray')],
+    })))
+    expect(upstream.bodies[0]?.input).toEqual([])
   })
 
   it('describes routes and models from the profile alone', async () => {

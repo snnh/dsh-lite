@@ -115,15 +115,11 @@ describe('profile validation', () => {
     expect(refused({ interfaceType: 'anthropic-messages', includeUsage: true })).toMatch(/includeUsage on interfaceType/)
   })
 
-  it('refuses a protocol this adapter does not serve', () => {
-    // The vocabulary is the port's; the transports are this adapter's. A
-    // profile naming a declared-but-unbuilt protocol is refused by name instead
-    // of being served over a wire that protocol cannot read.
-    expect(refused({ interfaceType: 'openai-responses' })).toMatch(/does not serve yet/)
-  })
-
-  it('serves the protocols whose transports are built', () => {
-    for (const interfaceType of ['openai-chat-completions', 'anthropic-messages'] as const) {
+  it('serves every protocol the vocabulary declares', () => {
+    // A vocabulary entry without a transport would be a protocol a deployment
+    // could declare and no request could carry; the transport table is typed
+    // over these names, so each one resolves and reaches a wire.
+    for (const interfaceType of ['openai-chat-completions', 'anthropic-messages', 'openai-responses'] as const) {
       const profile = resolveProfiles({
         gateway: { interfaceType, baseURL: 'https://gateway.test', models: [{ id: 'm' }] },
       }).get('gateway')
@@ -214,10 +210,14 @@ describe('profile validation', () => {
     expect(refused({ models: [{ id: 'm', capabilities: { modalities: ['video'] } }] })).toMatch(/declares video input/)
   })
 
-  it('refuses an image-output or signed-replay declaration the transport cannot serve', () => {
+  it('refuses an image-output declaration the transports cannot serve', () => {
     expect(refused({ models: [{ id: 'm', capabilities: { imageOutput: true } }] })).toMatch(/declares image output/)
-    expect(refused({ models: [{ id: 'm', capabilities: { responsesEncryptedReplay: true } }] }))
-      .toMatch(/openai-responses transport/)
+  })
+
+  it('carries a signed-replay declaration, which the responses transport honours', () => {
+    const profile = resolved({ models: [{ id: 'm', capabilities: { responsesEncryptedReplay: true } }] })
+    expect(profile.models[0]?.encryptedReplay).toBe(true)
+    expect(resolved({ models: [{ id: 'm' }] }).models[0]?.encryptedReplay).toBe(false)
   })
 
   it('defaults tool declarations on, and carries a model that turns them off', () => {

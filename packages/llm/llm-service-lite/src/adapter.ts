@@ -25,6 +25,8 @@ import type { AttachmentStore } from '@deepseek-ai/dsh-attachment'
 import { anthropicRequest } from './anthropic-messages.ts'
 import { translateAnthropicStream } from './anthropic-stream.ts'
 import { chatRequest, translateChatStream } from './chat-completions.ts'
+import { responsesRequest } from './openai-responses.ts'
+import { translateResponsesStream } from './responses-stream.ts'
 import { prepareRequestImages } from './images.ts'
 import { classifyFailure, classifyTransport } from './errors.ts'
 import { ConcurrencyLimiter } from './limiter.ts'
@@ -46,6 +48,7 @@ interface Transport {
 const TRANSPORTS: Readonly<Record<ServedInterfaceType, Transport>> = {
   'openai-chat-completions': { request: chatRequest, translate: translateChatStream },
   'anthropic-messages': { request: anthropicRequest, translate: translateAnthropicStream },
+  'openai-responses': { request: responsesRequest, translate: translateResponsesStream },
 }
 
 /** What the adapter needs from its plugin, all read per operation. */
