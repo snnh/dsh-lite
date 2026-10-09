@@ -88,6 +88,7 @@ type ResponsesItem = ResponsesMessageItem | ResponsesCallItem | ResponsesOutputI
 
 /** Replay-metadata kinds this transport writes and reads. */
 export const RESPONSES_REPLAY_KIND = 'llm-service-lite-responses'
+/** Schema version of this transport's replay metadata. */
 export const RESPONSES_REPLAY_VERSION = 1
 
 /** Per-block half of this transport's replay metadata, one entry per durable block. */

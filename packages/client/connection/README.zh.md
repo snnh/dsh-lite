@@ -38,12 +38,13 @@ kind: "package-reference"
 
 每个 Host RPC 方法和 WebSocket 流都要求一个浏览器会话，不存在按方法区分的 loopback 层。每个进程生成一个随机启动令牌。`dsh-web-app` 打印并打开带 `?token=...` 的应用 URL，保留调用方的 authority 与挂载；`frontend-static` 把根路径和 index 请求交给 `ctx.connection.authorizeIndex`，后者只在 `GET /` 接受该令牌，写入绑定 authority 的签名 cookie，再重定向到干净的 `./`，移除令牌并保留请求目录。缺失、过期、畸形或 authority 不匹配的 cookie 会在 RPC 分发前得到 401。静态资源保持公开。HTTP 载体不在根路径交换之外接受 query token，也不接受 Authorization header token。
 
-cookie 签名密钥是 `ctx.credentials` 中由 `client-connection/browser-session` 拥有的 grant 记录。本地提供方把它持久化到 `$DSH_HOME/.credentials.yaml`；`BrowserAuth` 在 Connection 激活期间加载或创建该记录，并把密钥留在内存中，因此请求认证同步执行。删除或替换该记录会在下一次 Connection 激活时生效。cookie 携带绝对签发与过期区间，`cookieMaxAgeDays` 默认设为 30 天，并在确定性名称与签名 payload 中同时绑定规范化 hostname 和 port。它是 host-only、`Path=/`、`HttpOnly`、`SameSite=Strict`；随附服务器使用 loopback HTTP，因此刻意不设置 `Secure`。
+cookie 签名密钥是 `ctx.credentials` 中由 `client-connection/browser-session` 拥有的 grant 记录。本地提供方把它持久化到 `$DSH_HOME/.credentials.yaml`；`BrowserAuth` 在 Connection 激活期间加载或创建该记录，并把密钥留在内存中，因此请求认证同步执行。删除或替换该记录会在下一次 Connection 激活时生效。cookie 携带绝对签发与过期区间，`cookieMaxAgeDays` 默认设为 30 天，并在确定性名称与签名 payload 中同时绑定规范化 hostname 和 port。它是 host-only、`Path=/`、`HttpOnly`、`SameSite=Strict`；收到该 index 请求的监听器提供 TLS 时才带上 `Secure`，且只由该监听器自身的协议决定，`publicUrl` 声明与转发头都不参与判断。
 
-认证之前，每个请求仍经过 `src/api-request-trust.ts`。其 `Host` 必须是 loopback，或与 `trustedHosts` 条目匹配：带端口的 `host:port` 精确匹配，不带端口的条目匹配任意端口，两侧均经 WHATWG 归一化。若附带 `Origin`，它必须等于该 Host；`sec-fetch-site: cross-site` 一律拒绝。畸形配置 authority 会让插件加载失败。这些检查防御 DNS rebinding 与跨站浏览器请求，绝不建立身份。Host/Origin 校验失败返回 403；Host 可信但未认证的请求返回 401。诸如 `dsh web --host 0.0.0.0` 这类可达绑定会被接纳，而认证它的是持久访问令牌。配置的条目在插件加载时即固定：派生的 LAN 字面量只是启动时的一次采样，因此浏览器实际输入的 authority——容器以宿主端口发布的地址，或因新租约而变化的局域网地址——必须显式点名：在 web bundle 中用 `--trusted-host <host-ip>[:port]`，或在拥有该行的 patch 中写成 `trustedHosts` 值。决策记录：[浏览器请求信任](../../../.agents/notes/implemented/architecture/2026-07-28-api-browser-trust-boundary.zh.md)与[浏览器令牌认证](../../../.agents/notes/implemented/architecture/2026-08-24-browser-token-authentication.zh.md)。
+HTTPS cookie 名称与签名 audience 包含 `https:` scheme，因此即使 hostname 和 port 相同，HTTP cookie 也无法通过 TLS 监听器的认证。默认端口按监听器的 scheme 归一化。既有 HTTP cookie audience 保持不变。
 
-一个页面能否*管理*本 Host 是另一个决策，由本行的 `operatorSurface` 声明，默认 `loopback`：设置文档、插件配置与提供商凭据仍然只限 authority 为回环的页面，与从前完全一致。`trusted` 把该特权面扩展到本 Host 提供并经上述围栏接纳的每个页面，这正是 LAN 部署能在它被提供服务的地址上配置自己的原因。这次放宽无需额外检查：Host 自己的文档路由本就在访问令牌闸之后——`GET /` 对令牌交换回应会话 cookie，其余一律 `writeUnauthorized`——因此能存在的页面必已出示有效令牌，而它发起的每个请求仍要过该围栏与会话检查。授予是刻意同步的：在插件的 `apply` 里 await 连接 generation 会死锁，因为连接循环在客户端挂载之后才启动。
+认证之前，每个请求都经过 `src/api-request-trust.ts`。其 `Host` 必须是回环、等于监听器的绑定 IP 字面量（端口不限），或与 `trustedHosts` 条目匹配：带端口的 `host:port` 精确匹配，不带端口的条目匹配任意端口。Host 与配置条目按监听器的 scheme 做 WHATWG 默认端口归一化，不采信转发 header 或 `Origin`。附带的 HTTP(S) `Origin` 必须指向同一 authority；此时按 Origin 的 scheme 解析 Host，以支持 HTTPS 代理转发到 HTTP 上游；`sec-fetch-site: cross-site` 一律拒绝。畸形配置 authority 会让插件加载失败。`allowsRemoteAuthorities` 报告 `trustedHosts` 是否允许非回环 authority——即信任列表里含远程 hostname——而接受绑定 IP 绝不会改变该列表。这些检查防御 DNS rebinding 与跨站浏览器请求，绝不建立身份。Host/Origin 校验失败返回 403；Host 可信但未认证的请求返回 401。诸如 `dsh web --host 0.0.0.0` 这类可达绑定会被接纳，而认证它的是持久访问令牌。配置的条目在插件加载时即固定：派生的 LAN 字面量只是启动时的一次采样，因此浏览器实际输入的 authority——容器以宿主端口发布的地址，或因新租约而变化的局域网地址——必须显式点名：在 web bundle 中用 `--trusted-host <host-ip>[:port]`（其 patch 把 `ctx.lanAccess.trustedHosts` 传入本行），或在拥有该行的 patch 中写成 `trustedHosts` 值。决策记录：[浏览器请求信任](../../../.agents/notes/implemented/architecture/2026-07-28-api-browser-trust-boundary.zh.md)与[浏览器令牌认证](../../../.agents/notes/implemented/architecture/2026-08-24-browser-token-authentication.zh.md)。
 
+一个页面能否*管理*本 Host 是另一个决策，由本行的 `operatorSurface` 声明，默认 `loopback`：设置文档、插件配置与提供商凭据仍然只限 authority 为回环的页面，与从前完全一致。`trusted` 把该特权面扩展到本 Host 提供并经上述信任栅栏接纳的每个页面，这正是 LAN 部署能在它被提供服务的地址上配置自己的原因。这次放宽无需额外检查：Host 自己的文档路由本就在访问令牌闸之后——`GET /` 对令牌交换回应会话 cookie，其余一律 `writeUnauthorized`——因此能存在的页面必已出示有效令牌，而它发起的每个请求仍要过该信任栅栏与会话检查。授予是刻意同步的：在插件的 `apply` 里 await 连接 generation 会死锁，因为连接循环在客户端挂载之后才启动。
 
 每个被接纳的请求都代表同一个 Peer——操作者。`ctx.connection.operator` 就是这个 `PeerScope`：其 `ctx` 是拥有连接期注册的 Cordis scope，随 Connection 一起释放。`ctx.connection.admit(request)` 执行信任与认证检查，以拒绝状态或操作者作答；`/api` 路由与 Gateway 的 WebSocket 升级都经它接纳，每个 RPC 处理器都收到本次调用的 Peer。`OperatorPeer` 对外导出，供没有 Connection 的组合（例如 Gateway 的进程内载体）以同一约定拥有一个操作者 scope。
 
@@ -75,7 +76,7 @@ API Gateway Client 把内部 `$events` 逻辑流注册为唯一 generation sourc
 <a id="known-limitations-and-deferred-work"></a>
 
 - **缓冲型 `/api` 路由会把每个请求体保留在内存里**：`maxRequestBodyBytes`（默认 300 MiB，按默认 200 MiB 图片总量上限经 base64 膨胀加信封余量得出）限制普通图片与 RPC 信封。显式启用的流式路由接收带背压的分块并绕过总量上限；路由实现负责持久化、取消与存储配额。
-- **浏览器 cookie 不带 `Secure`**：当前随产品提供的传输方式是 loopback HTTP；若部署经明文网络暴露同一 authority，bearer cookie 可能在传输中泄露。
+- **明文 HTTP 监听器会在传输中暴露 bearer cookie**：此类部署无法给浏览器 cookie 加 `Secure`；若把同一 authority 暴露到网络上，会话 cookie 可能泄露；在 Web 载体（[`dsh-host-webserver`](../../host/webserver/README.zh.md)）上配置 TLS 即可让 cookie 带上 `Secure` 并只经 TLS 发送。
 - **没有 logout 操作**：清除浏览器 cookie 会结束单个浏览器会话；删除 owner 凭据记录并重启 `dsh` 会撤销全部会话。
 
 

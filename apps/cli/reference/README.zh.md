@@ -4,6 +4,8 @@
 
 本参考定义 profile 启动、插件管理和配置 dump 等命令模式。argv 由 [`src/args.ts`](../src/args.ts) 统一解析一次，[`src/bin.ts`](../src/bin.ts) 只会动态导入选中的运行器。
 
+[生成的命令帮助](../../../docs/cli-help.zh.md)包含启动器、插件管理和随附 profile 的完整帮助。运行 `pnpm run gen-cli-help` 刷新，运行 `pnpm run verify-cli-help` 检查它是否与当前 CLI 一致。
+
 <a id="profile-boot"></a>
 
 ## Profile 启动
@@ -35,7 +37,7 @@ dsh rescue
 
 | Profile | 参数 |
 |---|---|
-| `web` | `--host`、`--port`、`--public-url`、可重复的 `--trusted-host`、`--no-open` |
+| `web` | `--host`、`--port`、`--tls-cert`、`--tls-key`、`--public-url`、可重复的 `--trusted-host`、`--no-open` |
 | `headless` | 任务文本，作为位置参数 |
 | `sdk` | 无选项；stdio 携带 JSON-RPC 协议 |
 | `sdk-minimal` | 无选项；stdio 携带相同的 JSON-RPC 协议 |
@@ -82,6 +84,8 @@ dsh --profile web --patch ./extra.yml --dump-config
 
 `dsh plugin --profile <name> <args...>` 在 profile 缺失时先初始化它（有随附模板的用模板，其他名称只装 `@deepseek-ai/dsh-base`），然后以 profile 目录为工作目录，把 `<args...>` 转发给 `pnpm`：`add`、`remove`、`why`、`update` 及其他所有 pnpm 子命令都照常可用；pnpm 必须在 PATH 上。相对路径 spec（`.`、`../plugin` 及其 `file:`/`link:` 形式）会先锚定到调用目录，因此在插件 checkout 中执行 `add .` 安装的是该 checkout，而不是 profile。每次成功运行后，系统都会根据当前安装状态更新 `dsh.profile.bundles`：如果某项依赖解析到的包在 manifest 中声明了 `"dsh": { "bundle": { "patch": "./cordis.patch.yml" } }`，该依赖就会加入配置层栈；如果某项依赖在 `update` 后获得该声明，也会随即激活。没有组合包声明的依赖仍作为普通依赖保留，并显示一次性警告；已移除的依赖则从配置层栈中删除。
 
+`dsh plugin` 只在被转发的参数之前读取 `--profile`；被转发的参数从它无法识别的第一个 token 开始，因此 `--profile <name>` 必须写在最前面。被转发的参数以 pnpm 命令开头时，该命令之后的所有内容都会原样交给 pnpm，包括 `-h` 和 `--help`。被转发的参数以 `--filter <selector>` 或 `-r` 等 pnpm 选项开头时，后面的 `-h` 或 `--help` 仍会打印转发器的帮助而不是 pnpm 的帮助，因此要查看 pnpm 的帮助，需把 pnpm 命令写在它们之前。在任何被转发的参数之前出现的 `-h` 或 `--help` 会打印转发器自身的帮助并以 0 退出。
+
 Codex 与 Claude Code subagent 提供方是两个彼此独立的可选组合包。可以只添加一个包、在同一命令中添加两个包，或独立移除任一包：
 
 ```sh
@@ -104,19 +108,23 @@ dsh --profile tui
 
 ## Web Profile
 
-`dsh web` 使用 profile 简写。启动器先解析自身的 flag，其余 flag 属于 web 应用，由组合包中的普通提供方解析。`--host` 和 `--port` 覆盖承载它们的那些行的组合取值，可重复的 `--trusted-host` 通过 `ctx.webRuntime.trustedHosts` 提供本次调用的 authority（部署表达式会拼接自己的 authority），`--no-open` 则只对本次调用关闭默认浏览器交接。客户端插件 HMR（热模块替换）接收器始终挂载，在 `pnpm run dev:web` 重建客户端 bundle 之前保持空闲；该命令先构建一次，再启动这同一个启动器并持续重建客户端 bundle，加 `--no-serve` 则只运行 watcher、配合别处启动的 `dsh web`。
+`dsh web` 使用 profile 简写。启动器先解析自身的 flag，其余 flag 属于 web 应用，由组合包中的普通提供方解析。`--host` 与 `--port` 覆盖组合的监听器取值，`--tls-cert`/`--tls-key` 则设置监听器的 `tls` 证书对。`--host` 为单次运行指定绑定地址，并高于组合出的配置行取值：回环拼写（`127.0.0.1`、`localhost`、`::1`、`[::1]`）让监听器只留在回环，`0.0.0.0` 会被接受并绑定所有 IPv4 接口，一个 IPv4 字面量则只绑定该网络。该值由 `lan-access` 行持有，其语法也只有这一个权威判据，因此其他取值会直接导致启动失败，而不会回退到随附姿态；`hostname -i` 可能列出多个地址，请只传一个。可重复的 `--trusted-host` 值会收集到 `ctx.webStartup.trustedHosts`；部署表达式可以添加自己的 authority。`--no-open` 只对本次调用关闭默认浏览器交接。客户端插件 HMR（热模块替换）接收器始终挂载，在 `pnpm run dev:web` 重建客户端 bundle 之前保持空闲；该命令先构建一次，再启动这同一个启动器并持续重建客户端 bundle，加 `--no-serve` 则只运行 watcher、配合别处启动的 `dsh web`。
 
-`--public-url <url>` 公告唯一的 HTTP(S) 应用根——可带转发前缀——替代监听器的 loopback URL。它不授予信任，因此浏览器可见的 authority 仍需用 `--trusted-host` 点名；[在反向代理之后发布 Web UI](../../../docs/user/guide/public-deployments.zh.md)列出了前置代理必须提供的内容。
+`--public-url <url>` 公告唯一的 HTTP(S) 应用根——可带转发前缀——替代监听器的绑定地址 URL（回环绑定时为回环地址）。它不授予信任，因此浏览器可见的 authority 仍需用 `--trusted-host` 点名；[在反向代理之后发布 Web UI](../../../docs/user/guide/public-deployments.zh.md)列出了前置代理必须提供的内容。
+
+`--tls-cert <file>` 与 `--tls-key <file>` 让监听器以 HTTPS 取代明文 HTTP 提供服务。它们属于同一个设置：要么都给，要么都不给；两者各是相对进程工作目录解析的路径。证书文件包含完整证书链（含中间证书），密钥文件为不带口令的 PEM 私钥。文件缺失、不可读、为空或无效时启动失败，且绝不回退到 HTTP；由于载体只读取一次文件，且既不获取、不续期也不监视证书，替换后的证书对只有在重新加载监听器或重启进程后才生效。HTTPS 同样不授予信任：浏览器必须信任该证书并访问其名称覆盖的 authority，Connection 仍认证每个请求并校验 Host/Origin，而由于接收请求的监听器提供 HTTPS，会话 cookie 带 `Secure`。默认端口仍为 3080，`--public-url` 仍是相互独立的公告。
 
 ```sh
 dsh web
+dsh web --host "$(hostname -i | awk '{print $1}')" --public-url https://app.example/ --trusted-host app.example
+dsh web --tls-cert ./server-chain.pem --tls-key ./server-key.pem
 dsh web --no-open
 dsh web --patch ./extra.cordis.yml
 dsh web --dump-config
 dsh web --help
 ```
 
-生产 Web 运行器需要已构建的包和前端产物（`pnpm run build`）。它默认发布所有 IPv4 接口——`lan-access` 行依次解析 `--host`、profile 中持久化的姿态，最后是 `0.0.0.0`，且非回环绑定要求持久访问令牌——而它打印并打开的 URL 仍是回环根 `http://127.0.0.1:3080`，旁边附上采样到的局域网 URL；`--host 0.0.0.0` 会被接受并按原样绑定。「通用」设置页的监听地址行写入的就是同一份持久化姿态——IPv4 字面量或 `localhost`，在下次启动生效而不是作用于运行中的绑定——而对声明了该参数的那次运行，`--host` 依然高于它。本机启动时，只在完整 Loader 配置树结算后才用默认浏览器打开该规范宿主机 URL（配置了 `--public-url` 时即为公告根）。继承的 `SSH_CONNECTION` 或 `SSH_TTY` 非空时会跳过浏览器交接，因为本地转发地址由 SSH 客户端或编辑器持有；宿主机 URL 仍会打印。本机交接前会打印英文提示 `dsh web: opening the default browser; pass --no-open to disable`；若操作系统交接失败，stderr 诊断会说明原因、给出 URL 供手动访问，服务器仍继续运行。`--trusted-host` 可添加 `/api` 浏览器信任围栏接受的具名 authority。
+生产 Web 运行器需要已构建的包和前端产物（`pnpm run build`）。它默认发布所有 IPv4 接口：`lan-access` 行先解析 `--host`，再解析组合配置行中持久化的绑定地址（即「通用」设置页监听地址行保存、下次启动生效的那一行），最后是它自身的 `0.0.0.0` 默认值；任何非回环绑定都会在监听器绑定前解析持久访问令牌——harness home 中没有时即创建，无法建立时该次启动失败，而不是未认证地监听——并向启动日志写入一条暴露警告。URL 行在配置了 `--public-url` 时打印公告地址，否则打印采用监听器协议的绑定地址 URL（`0.0.0.0` 通配绑定下即为回环根 `http://127.0.0.1:3080`，配置 TLS 时为 `https://`），并把该行排名最靠前的局域网地址追加为 `dsh web: <url> (LAN: <url>)`。`/api` 的 Host/Origin 围栏接受该行为此绑定发布的每个地址；代理或 DNS authority 仍需 `--trusted-host`。启动日志与默认浏览器交接都会等待完整 Loader 配置树结算。继承的 `SSH_CONNECTION` 或 `SSH_TTY` 非空时会抑制浏览器打开，但仍会打印启动日志行。浏览器交接前会打印 `dsh web: opening the default browser; pass --no-open to disable`；若操作系统交接失败，stderr 会说明原因并指向启动 URL，服务器仍继续运行。
 
 进程关闭时，插件树最多有 5 秒完成 dispose。首次收到 `SIGINT` 或 `SIGTERM` 时会开始优雅排空：`SIGTERM` 是监督进程发出的常规停止请求，在所有运行模式下都以 0 退出；`SIGINT` 则报告 130。第二次收到信号时会立即强制退出。如果一次性运行在正常结束时已经卡在 dispose 阶段，第一次按下 `Ctrl+C` 就会直接升级为强制退出，而不会被忽略。
 
@@ -124,7 +132,7 @@ dsh web --help
 
 基于 base 的 profile 中，新会话默认使用 `workspace-write` 权限预设。Bash 和文件系统修改仅限于会话 workspace 与平台临时根目录；读取和网络访问不受限制，进程可见性则取决于所选沙箱后端——bwrap 在私有 PID 命名空间中运行命令并隐藏宿主进程，Landlock 与 Seatbelt 保持宿主进程可见性不变。`DSH_PERMISSION_MODE` 更改进程后备值。General settings 中存储的权限影响后续 Web 会话，不改变已打开的会话。独立的 `sdk-minimal` 配置树则固定为 `danger-full-access`，且不挂载 approval 或权限 settings 服务。
 
-`DSH_TOOLS_MODE` 为进程选择 `native`、`ptc` 或 `both`；其他值会导致启动失败。随附的 `minimal` agent preset 会保留该部署的呈现方式，将完整系统提示词固定为 `You are a helpful software engineer assistant.`，并且仅组合按平台选择的持久 shell。创建 Web 会话时请选择极简模式；该 agent 不包含任何其他提示词段落或面向模型的插件，而共享的浏览器、workspace、持久化、沙箱与权限宿主保持不变。
+`DSH_TOOLS_MODE` 为进程选择 `native` 或 `ptc`；其他值会导致启动失败。随附的 `minimal` agent preset 会保留该部署的呈现方式，将完整系统提示词固定为 `You are a helpful software engineer assistant.`，并且仅组合按平台选择的持久 shell。创建 Web 会话时请选择极简模式；该 agent 不包含任何其他提示词段落或面向模型的插件，而共享的浏览器、workspace、持久化、沙箱与权限宿主保持不变。
 
 ## 共享部署行为
 

@@ -1,10 +1,10 @@
 /** Cancellable ordinary-event HTTP exports, including retry waits and response reads. */
 import type { Agent as HttpsAgent } from 'node:https'
 import { gzipSync } from 'node:zlib'
-import { createOtlpNetworkExportDelegate, OTLPExporterBase, type OTLPExporterNodeConfigBase } from '@opentelemetry/otlp-exporter-base'
+import { createOtlpNetworkExportDelegate, OTLPExporterBase } from '@opentelemetry/otlp-exporter-base'
 import { JsonLogsSerializer } from '@opentelemetry/otlp-transformer'
 import type { LogRecordExporter } from '@opentelemetry/sdk-logs'
-import { logTransportOptions } from './transport.ts'
+import { createLogExporterMetrics, type LogExporterOptions, logTransportOptions } from './transport.ts'
 
 /** The `got` implementation exported by the dependency. */
 type Got = typeof import('got')['default']
@@ -28,10 +28,10 @@ function loadGot(): Promise<Got> {
  * @param signal - channel cancellation, shared by current and future batch exports.
  * @returns the SDK exporter; shutdown also destroys its owned HTTP agent.
  */
-export function createEventLogExporter(options: OTLPExporterNodeConfigBase & { url: string }, signal: AbortSignal): LogRecordExporter {
+export function createEventLogExporter(options: LogExporterOptions, signal: AbortSignal): LogRecordExporter {
   const config = logTransportOptions(options)
   let agent: ReturnType<typeof config.agentFactory> | undefined
-  const exporter = new OTLPExporterBase(createOtlpNetworkExportDelegate(config, JsonLogsSerializer, {
+  const exporter = new OTLPExporterBase(createOtlpNetworkExportDelegate(config, JsonLogsSerializer, createLogExporterMetrics(config.url), {
     async send(data, timeoutMillis) {
       signal.throwIfAborted()
       agent ??= config.agentFactory(new URL(config.url).protocol)

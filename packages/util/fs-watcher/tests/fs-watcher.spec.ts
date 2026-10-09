@@ -34,6 +34,10 @@ vi.mock('chokidar', async () => {
     }
 
     async close(): Promise<void> {
+      // Chokidar's own close(): the first call drops every listener
+      // synchronously, while a scheduled write-settle poll may still be
+      // running; a later call returns the same teardown without touching them.
+      if (!this.closed) this.removeAllListeners()
       this.closeCalls += 1
       this.closed = true
     }
@@ -113,6 +117,46 @@ describe('createWatcher', () => {
     await watcher.close()
     expect(fakeWatchers()[0]?.closeCalls).toBe(2)
     expect(liveWatcherCount()).toBe(0)
+  })
+
+  it('contains a backend failure emitted after close dropped its listeners', async () => {
+    const watcher = watch()
+    await watcher.close()
+    expect(fakeWatchers()[0]?.listenerCount('error')).toBe(1)
+    expect(() => { fakeWatchers()[0]?.emit('error', new Error('late failure')) }).not.toThrow()
+  })
+
+  it('routes a post-close failure to the error listener the consumer registered', async () => {
+    const watcher = watch()
+    const failures: unknown[] = []
+    watcher.on('error', (error) => { failures.push(error) })
+    await watcher.close()
+    const failure = new Error('late failure')
+    expect(() => { fakeWatchers()[0]?.emit('error', failure) }).not.toThrow()
+    expect(failures).toEqual([failure])
+  })
+
+  it('re-attaches a once error subscription for its first late failure only', async () => {
+    const watcher = watch()
+    const listener = vi.fn()
+    watcher.once('error', listener)
+    await watcher.close()
+    const first = new Error('first late failure')
+    fakeWatchers()[0]?.emit('error', first)
+    fakeWatchers()[0]?.emit('error', new Error('second late failure'))
+    expect(listener).toHaveBeenCalledExactlyOnceWith(first)
+  })
+
+  it('keeps one containment listener across repeated closes and forgets a removed subscription', async () => {
+    const watcher = watch()
+    const removed = vi.fn()
+    watcher.on('error', removed)
+    watcher.off('error', removed)
+    await watcher.close()
+    await watcher.close()
+    expect(fakeWatchers()[0]?.listenerCount('error')).toBe(1)
+    expect(() => { fakeWatchers()[0]?.emit('error', new Error('late failure')) }).not.toThrow()
+    expect(removed).not.toHaveBeenCalled()
   })
 
   it.each([

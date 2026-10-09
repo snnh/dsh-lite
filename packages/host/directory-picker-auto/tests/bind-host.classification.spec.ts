@@ -17,6 +17,7 @@ import type { DirectoryPickerHostFacts } from '../src/resolve.ts'
 /** An attended Darwin host: a display platform, so no linux fact decides the case. */
 const attended: DirectoryPickerHostFacts = {
   bindHost: '127.0.0.1',
+  allowsRemoteAuthorities: false,
   platform: 'darwin',
   ssh: false,
   env: {},
@@ -41,12 +42,12 @@ describe('resolveDirectoryPickerBackend bind hosts', () => {
     }
   })
 
-  it('resolves browse for a loopback-network address the bind vocabulary does not treat as local', () => {
-    // `127.0.0.2` reaches only this machine, yet it is not one of the four
-    // literals the row admits as loopback; an unproven local bind keeps the
-    // backend that works for every client.
-    expect(isLoopbackHost('127.0.0.2')).toBe(false)
-    expect(resolveDirectoryPickerBackend({ ...attended, bindHost: '127.0.0.2' })).toBe('browse')
+  it('resolves native for the whole loopback network the bind vocabulary treats as local', () => {
+    // Loopback is decided by the address a value names, so `127.0.0.2` — which
+    // reaches only this machine, exactly as `127.0.0.1` does — keeps the native
+    // chooser on an attended host.
+    expect(isLoopbackHost('127.0.0.2')).toBe(true)
+    expect(resolveDirectoryPickerBackend({ ...attended, bindHost: '127.0.0.2' })).toBe('native')
   })
 
   it('classifies every spelling exactly as the row that resolves the bind does', () => {

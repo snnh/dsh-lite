@@ -2,13 +2,15 @@
 
 [English](public-deployments.md) | 中文
 
-`dsh --profile web` 默认发布一个网络地址——本机持有的所有 IPv4 接口——因此任何接入网络上的手机、平板或另一台电脑都无需配置即可打开 Web UI；该默认值是 `lan-access` 行自己的 schema 默认值，任何一次启动都不会把它写进 profile。本页说明这个默认姿态暴露了什么、部署要在它前面加上什么，以及哪些边界仍然由部署者负责。[Web 应用参考](../../../packages/bundle/web-app/README.zh.md#public-deployments)负责 `--public-url` 与 `--trusted-host` 的命令行约定，以及 `publicUrl` 与 `trustedHosts` 字段；[lan-access 参考](../../../packages/host/lan-access/README.zh.md)负责绑定地址这一行，包括「通用」设置页监听地址行保存的那一行。
+`dsh --profile web` 默认发布一个网络地址——本机持有的所有 IPv4 接口——因此任何接入网络上的手机、平板或另一台电脑都无需配置即可打开 Web UI。该姿态来自 Web bundle patch 默认挂载的 `lan-access` 行：绑定相关的每一项决定都在这一行里，从它自己的 schema 默认值 `0.0.0.0` 到可达绑定所需的持久访问令牌，且任何一次启动都不会把这些写进 profile。载体因此保持最薄：`dsh-host-webserver` 接受任意非空监听地址，不做自己的地址语法判断，而语法、令牌与启动警告都由该行负责。本页说明这个默认姿态暴露了什么、部署要在它前面加上什么，以及哪些边界仍然由部署者负责。[Web 应用参考](../../../packages/bundle/web-app/README.zh.md#public-deployments)负责 `--public-url`、`--trusted-host` 与 `--tls-cert`/`--tls-key` 的命令行约定，以及 `publicUrl` 字段；[lan-access 参考](../../../packages/host/lan-access/README.zh.md)负责绑定地址这一行，包括「通用」设置页监听地址行保存的那一行。
 
 ## 默认暴露了什么
 
-服务器发布本机持有的所有 IPv4 接口，因为 `0.0.0.0` 就是 `lan-access` 行的 schema 默认值：本行不会把该值写进任何文件，profile patch 也不会被改动，因此操作者从未声明过的姿态就是当前运行版本随附的那一个。（写入这一行曾被尝试并已回退，因为 Loader 会 reconcile 一个发生变化的配置条目，而读取 `ctx.lanAccess.host` 的 Web 服务器会在新端口重新绑定，让本次启动已经打印的 URL 失效。）容器网桥（`docker0`、`br-<id>`）、veth 对、虚拟机交换机与隧道也随之一并发布；`0.0.0.0` 是 IPv4 通配地址，因此不会有任何 IPv6 监听。`--host 0.0.0.0` 会被接受并落到同一个绑定；删掉该行的 `host` 键，下次启动会回落到这个内置默认值。更窄的姿态就是显式声明 host：`host: 127.0.0.1` 仅回环，或某个网络自己的地址，只发布那一个网络。声明了的 host 会在绑定之前接受校验：本行无法绑定的形式——主机名，或 `--host ::` 这类非回环 IPv6 字面量——会让启动失败，而不是绑上一个随后被信任围栏拒绝所有请求的地址。
+服务器发布本机持有的所有 IPv4 接口，因为 `0.0.0.0` 就是 `lan-access` 行的 schema 默认值，且 Web bundle patch 默认挂载该行：本行不会把该值写进任何文件，profile patch 也不会被改动，因此操作者从未声明过的姿态就是当前运行版本随附的那一个。（写入这一行曾被尝试并已回退，因为 Loader 会 reconcile 一个发生变化的配置条目，而读取 `ctx.lanAccess.host` 的 Web 服务器会在新端口重新绑定，让本次启动已经打印的 URL 失效。）容器网桥（`docker0`、`br-<id>`）、veth 对、虚拟机交换机与隧道也随之一并发布；`0.0.0.0` 是 IPv4 通配地址，因此不会有任何 IPv6 监听。`--host 0.0.0.0` 会被接受并落到同一个绑定；删掉该行的 `host` 键，下次启动会回落到这个内置默认值。更窄的姿态就是显式声明 host：`host: 127.0.0.1` 仅回环，或某个网络自己的地址，只发布那一个网络。声明了的 host 会在绑定之前接受校验：本行无法绑定的形式——主机名，或 `--host ::` 这类非回环 IPv6 字面量——会让启动失败，而不是绑上一个随后被信任围栏拒绝所有请求的地址。
 
 绑定决定可达性：每个能路由到任一已发布地址的设备都能连上监听端口。认证是持久访问令牌，每个非回环绑定都要求它，并从 `$DSH_HOME/access-token` 解析——权限 `0600`、首次启动时创建、可用 `DSH_ACCESS_TOKEN` 覆盖；无法写入的 Harness home 会拒绝该绑定，而不会以未认证的方式监听，因此过去靠回环默认值仍能启动的只读 `DSH_HOME`，现在可能直接让启动中止。每个非回环绑定还会在启动日志里写入一条警告，点名所绑定的地址、作为唯一认证者的令牌，以及回到更窄姿态的两种方式；该警告不携带任何凭据，也不会有任何 Web 横幅征求确认。
+
+启动打印的那一行说明这次绑定发布了什么：应用 URL，以及绑定不止一个地址时排名最靠前的那个局域网地址——`dsh web: http://127.0.0.1:3080/?token=… (LAN: http://192.168.1.5:3080/?token=…)`。这份排序由 `lan-access` 行给出（容器网桥与隧道排在最后，`169.254.*` 链路本地地址被剔除），栅栏的 authority 同样由它发布：本次绑定发布的每个字面量，加上调用里声明的 `--trusted-host`。绑定范围更窄时——仅回环，或某个网络自己的地址——不会打印局域网链接，因为它的 URL 本身已经带着该地址。
 
 令牌是进程凭据，不是用户凭据。它随服务器打印的 URL 出现一次，页面随后把它换成签名的浏览器 cookie——`HttpOnly`、`SameSite=Strict`、不带 `Secure`——两者都走明文 HTTP。任何能看到网络路径的人都能读到令牌或 cookie，并以此浏览器的身份行事。这样接入的客户端拿到的是进程的权限：本机上 agent 的工作区、shell 与文件。
 
@@ -23,7 +25,7 @@
 
 ## 反向代理之后
 
-监听器前面的反向代理拥有这条外部链路——公开主机名、TLS，以及转发前剥离的路径前缀——`--public-url` 则告诉 DSH 浏览器使用的是哪个地址：
+默认绑定已经在服务局域网，因此只有需要对外主机名、TLS 链路或路径前缀时才要在监听器前面加代理。反向代理拥有这条外部链路——公开主机名、TLS，以及转发前剥离的路径前缀——`--public-url` 则告诉 DSH 浏览器使用的是哪个地址：
 
 ```sh
 dsh --profile web --public-url https://app.example/ui/ --trusted-host app.example
@@ -38,14 +40,22 @@ dsh --profile web --public-url https://app.example/ui/ --trusted-host app.exampl
 - **保留浏览器可见的 `Host`。** 栅栏把收到的 `Host` 与被接受的 authority 比对，因此代理应原样转发，而不要改写成监听器的地址。
 - **剥离挂载前缀。** 监听器应答的是 origin-root 路由，因此对 `/ui/api/...` 的请求必须以 `/api/...` 抵达。
 - **转发升级请求。** 页面发出的每个请求与 WebSocket 升级都必须连同其 `Upgrade` 与 `Connection` 头抵达监听器；代理对外提供 HTTPS 时，TLS 在其外部链路上终止。
-- **改写 cookie 作用域。** 后端始终签发不带 `Secure` 的 host-only `Path=/` cookie；代理把 `Path` 改写为挂载（`/ui/`），并仅在其 HTTPS 链路上添加 `Secure`。
+- **改写 cookie 作用域。** 以明文 HTTP 提供服务的后端签发不带 `Secure` 的 host-only `Path=/` cookie；代理再把 `Path` 改写为挂载（`/ui/`），并仅在其 HTTPS 链路上添加 `Secure`。监听器自身提供 TLS 时 cookie 已带 `Secure`，代理只需改写 `Path`。
 - **重定向裸挂载。** `/ui/` 是唯一入口：只有它把启动 token 换成会话 cookie；已持有该 cookie 的浏览器可由它或 `/ui/index.html` 取得文档，因为所提供的文档以自身目录解析 URL。对 `/ui` 的请求必须以 `/ui/` 抵达，而被剥离路径的后端无法重建该外部路径。
 
 ### 信任浏览器使用的 authority
 
-栅栏接受 loopback，以及每个由 `--trusted-host` 点名的 authority。浏览器若以其他任何 authority 访问部署，无论代理多么正确，每个 API 调用都会得到 403，因此请用 `--trusted-host` 点名浏览器可见的 authority；用 `--public-url` 公告它只是展示，并不等于接纳。不带端口的条目匹配任意端口，适合每次绑定不同端口的隧道。栅栏只放行请求；打印 URL 中的启动 token 与签名会话 cookie 才完成认证。
+栅栏接受回环、监听器自身的绑定地址，以及每个由 `--trusted-host` 点名的 authority。浏览器若以其他任何 authority 访问部署，无论代理多么正确，每个 API 调用都会得到 403，因此请用 `--trusted-host` 点名浏览器可见的 authority；用 `--public-url` 公告它只是展示，并不等于接纳。不带端口的条目匹配任意端口，适合每次绑定不同端口的隧道。栅栏只放行请求；打印 URL 中的启动 token 与签名会话 cookie 才完成认证。无论 TLS 在哪里终止都不改变这一切：证书只是向浏览器标识服务器，而不是向服务器标识浏览器。
 
 无论是公告 URL 还是栅栏都不保护监听端口本身，因此请把端口限制在可信代理或网络内。
+
+## 保护对外链路
+
+可以在代理处、监听器本身或两者上终止 TLS；`--public-url` 仍只是公告。面向浏览器的 `http://` 根会明文暴露启动 token。`https://` 代理根保护浏览器到代理这一段；代理与监听器之间是否加密取决于监听器的 TLS 配置。
+
+要在监听器上终止 TLS，请传入 `--tls-cert` 与 `--tls-key`，两者各是相对进程工作目录解析的路径：证书文件包含完整证书链，密钥文件为不带口令的 PEM 私钥。DSH 从不获取、续期或监视证书，且载体只读取一次文件，因此更换文件后需重新加载监听器或重启进程；文件缺失或无效时启动失败，绝不回退到 HTTP。浏览器使用自己的信任库与名称校验，因此证书必须覆盖你所访问的 hostname 或 IP。默认端口仍为 3080。原生 TLS 不需要代理，但代理部署与 `--public-url` 仍分别受支持。TLS 监听器会给会话 cookie 加上 `Secure`；公开部署的浏览器侧链路应保持 HTTPS，才能让浏览器回传这些 cookie。
+
+打印的 URL 携带进程凭据，只应与预期用户分享。
 
 ## 容器与变化的地址
 
@@ -61,8 +71,8 @@ dsh web --host 0.0.0.0 --trusted-host 192.168.1.20:3080
 
 ## 哪些仍由部署负责
 
-- **TLS 终止。** 监听器只提供明文 HTTP，不终止任何 TLS。
-- **`Secure` 与 HSTS。** 没有 cookie 携带 `Secure`，也没有响应携带 HSTS 头，因此这里没有任何东西保护或升级浏览器这一段。
+- **证书。** TLS 监听器只提供交给它的证书与密钥；DSH 从不获取、续期或监视证书，浏览器校验的身份由部署负责。
+- **`Secure` 与 HSTS。** TLS 监听器会给会话 cookie 加上 `Secure`，明文监听器则不会；没有任何响应携带 HSTS 头，因此升级浏览器这一段仍由部署负责。
 - **对端白名单。** 任何抵达该端口的连接都会被服务；限制来源地址属于网络或代理。
 - **按用户身份与第二因素。** 一个令牌以进程身份认证浏览器，没有可用于区分用户的账号。
 - **由栅栏完成认证。** Host/Origin 栅栏拒绝跨站与 DNS 重绑定请求；认证由令牌完成。
@@ -74,8 +84,10 @@ dsh web --host 0.0.0.0 --trusted-host 192.168.1.20:3080
 - **你控制的网络**是预期姿态：明文这一段止于该网络的边界，而其中每台设备本来就能连到该端口。
 - **你无法端到端控制的网络**不可以：不受信任的 WLAN、共享网段，或经路由器转发的端口，会把凭据送到观察该路径的任何人身前。
 
-在代理处终止 TLS、用 VPN 或覆盖网络承载这条连接、以及完全不暴露端口，是三种解法。
+在代理处或监听器上终止 TLS、用 VPN 或覆盖网络承载这条连接，以及完全不暴露端口，都是可选解法。
 
 ## 不暴露也能访问
 
 对于从不需要其他设备的工作，把该行恢复到回环——`host: 127.0.0.1`，或从「通用」设置页的监听地址行保存同一地址——再用 SSH 转发端口：`ssh -L 3080:127.0.0.1:3080 host`。仅回环姿态转发的是回环端点，浏览器随后使用的 `127.0.0.1:3080` authority 是栅栏接受的。随附默认值同样在回环上应答，因为 `0.0.0.0` 覆盖回环，因此在该行收窄之前这条转发也能连上服务器；打印行保留回环 URL，并在旁边附上局域网 URL。
+
+[Web 应用参考](../../../packages/bundle/web-app/README.zh.md#public-deployments)说明 `--public-url`、`--trusted-host` 与 `--tls-cert`/`--tls-key` 命令行选项。在 Web profile 中，`publicUrl` 配置在 `web-runtime` 行，[Connection 行](../../../packages/client/connection/README.zh.md)的 `trustedHosts` 取自 `ctx.lanAccess.trustedHosts`——本次绑定自己的字面量加上 `--trusted-host`——`tls` 配置在 [webserver 行](../../../docs/subsystems/web-server.zh.md#config)。

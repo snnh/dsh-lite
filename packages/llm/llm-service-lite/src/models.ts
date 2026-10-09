@@ -70,7 +70,11 @@ export function reasoningLevelOf(
   return {}
 }
 
-/** Whether a model's route can replay prior reasoning for the next request. */
+/**
+ * Whether a model's route can replay prior reasoning for the next request.
+ * @param model - resolved route.
+ * @returns true when the route carries reasoning content.
+ */
 export function replaysReasoning(model: ResolvedOwcModel): boolean {
   return model.reasoningContent
 }

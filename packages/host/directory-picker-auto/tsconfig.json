@@ -21,6 +21,9 @@
       "path": "../lan-access"
     },
     {
+      "path": "../../client/connection/tsconfig.host.json"
+    },
+    {
       "path": "../webserver"
     },
     {

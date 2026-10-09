@@ -3,16 +3,18 @@
  *
  * The line carries the access token, so naming a `docker0`/`wg`/`169.254`
  * address is naming a URL the operator's browser cannot open. Selection and
- * ordering come from the LAN row's own ranking (`listLanCandidates` +
- * `rankLanCandidates`); the trust fence this bundle publishes stays a superset,
- * because `0.0.0.0` exposure is the bind's decision and not this line's.
+ * ordering belong to the exposure row (`@deepseek-ai/dsh-host-lan-access`,
+ * `resolveLanTrust`), which this glue only reads back through the service it
+ * publishes; the fence is a superset, because `0.0.0.0` exposure is the bind's
+ * decision and not this line's.
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { NetworkInterfaceInfo } from 'node:os'
 import { Context } from '@deepseek-ai/cordis'
+import { resolveLanTrust } from '@deepseek-ai/dsh-host-lan-access'
 import type { WebServer } from '@deepseek-ai/dsh-host-webserver'
-import { apply, Config, internals, resolveLanTrust } from '../src/index.ts'
+import { apply, Config, internals } from '../src/index.ts'
 
 /** Interfaces `node:os` reports for the test in flight. */
 let interfaces: NodeJS.Dict<NetworkInterfaceInfo[]> = {}
@@ -50,6 +52,7 @@ async function readyLine(host: string): Promise<string | undefined> {
   const ctx = new Context()
   ctx.provide('webServer', {
     host,
+    protocol: 'http:',
     port: 4567,
     registerFallback: () => () => {},
     renderIndex: (html: string) => html,
@@ -61,8 +64,11 @@ async function readyLine(host: string): Promise<string | undefined> {
       return url.href
     },
   } as never)
+  // What the exposure row publishes for this bind, derived by the same function
+  // the row calls; this glue only reads `lanAccess` back.
+  ctx.provide('lanAccess', { host, ...resolveLanTrust(host, ['lab.internal']) })
   const log = vi.spyOn(console, 'log').mockImplementation(() => {})
-  apply(ctx, new Config({ openBrowser: false, printUrl: true, surfaceContext: false, trustedHosts: ['lab.internal'] }))
+  apply(ctx, new Config({ openBrowser: false, printUrl: true, surfaceContext: false }))
   await new Promise(resolve => setTimeout(resolve, 0))
   const line = log.mock.calls.map(call => String(call[0])).find(message => message.startsWith('dsh web: http'))
   await ctx.fiber.dispose()

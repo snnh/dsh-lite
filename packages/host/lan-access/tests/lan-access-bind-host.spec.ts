@@ -27,22 +27,24 @@ import {
 
 /** Every host the grammar accepts, with the kind it must classify as. */
 const ACCEPTED: readonly (readonly [string, BindHostKind])[] = [
-  // The four loopback spellings, which name this machine alone however the
-  // stack spells them.
+  // Every loopback spelling, which names this machine alone however the stack
+  // spells it: the names, the mapped literals, a dotted-quad tail, a zone, and
+  // the rest of the loopback network.
   ['127.0.0.1', 'loopback'],
   ['localhost', 'loopback'],
   ['::1', 'loopback'],
   ['[::1]', 'loopback'],
+  ['127.0.0.2', 'loopback'],
+  ['::ffff:127.0.0.1', 'loopback'],
+  ['::ffff:7f00:1', 'loopback'],
+  ['::0.0.0.1', 'loopback'],
+  ['::1%lo', 'loopback'],
   // The IPv4 wildcard: every IPv4 interface, and no IPv6 one.
   ['0.0.0.0', 'wildcard'],
   // Any other IPv4 literal, the whole IPv4 form space included.
   ['192.168.1.5', 'address'],
   ['10.0.0.1', 'address'],
   ['255.255.255.255', 'address'],
-  // The loopback *network* is not a loopback name: `127.0.0.2` is an address
-  // this machine can bind like any other, and the four spellings above are the
-  // entire loopback vocabulary.
-  ['127.0.0.2', 'address'],
 ]
 
 /** Every host the grammar refuses, with what is wrong with it. */
@@ -56,7 +58,8 @@ const REFUSED: readonly (readonly [string, string])[] = [
   ['::', 'the IPv6 wildcard, which this row does not publish'],
   ['fe80::1', 'a non-loopback IPv6 literal'],
   ['2001:db8::1', 'a non-loopback IPv6 literal'],
-  ['::ffff:127.0.0.1', 'an IPv4-mapped IPv6 literal'],
+  ['::ffff:0.0.0.0', 'the IPv4 wildcard in its mapped spelling, which is not the literal this row publishes'],
+  ['fe80::1%lo', 'a non-loopback IPv6 literal, zone or not'],
   ['example.com', 'a hostname'],
   ['localhost.', 'a hostname that only looks like localhost'],
   ['999.1.1.1', 'an IPv4 literal with an out-of-range octet'],
@@ -152,11 +155,11 @@ describe('resolveHost, through apply', () => {
     // refusing beats quietly binding the config's.
     expect(provided(ctx)).toBeUndefined()
     expect(failure.message).toContain('refusing to bind "::"')
-    expect(failure.message).toContain('binds an IPv4 address or a loopback name only')
-    expect(failure.message).toContain('127.0.0.1, localhost, ::1, and [::1]')
+    expect(failure.message).toContain('binds an IPv4 address or a loopback address only')
+    expect(failure.message).toContain('any loopback spelling — 127.0.0.1, localhost, ::1, [::1]')
     expect(failure.message).toContain('0.0.0.0, the IPv4 wildcard, for every IPv4 interface this machine holds')
     expect(failure.message).toContain('never an IPv6 one')
-    expect(failure.message).toContain('an IPv6 literal that is not loopback (:: included)')
+    expect(failure.message).toContain('an IPv6 literal that names no loopback address (:: included)')
     expect(failure.message).toContain('anything longer than 45 characters')
     expect(failure.message).toContain('"host:" configuration')
     expect(failure.message).toContain('--host 127.0.0.1 for one run')

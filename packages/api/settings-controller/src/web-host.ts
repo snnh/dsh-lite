@@ -280,7 +280,7 @@ function checkHost(host: string): string {
   if (classifyBindHost(host) === undefined) {
     throw new RemoteError(
       'web-host/rejected',
-      `"${host}" is neither an IPv4 address nor a loopback name: the lan-access row binds ${LOOPBACK_HOST}, localhost, ::1, [::1], any IPv4 literal, or ${BIND_ALL_HOST} for every IPv4 interface`,
+      `"${host}" is neither an IPv4 address nor a loopback address: the lan-access row binds any loopback spelling (${LOOPBACK_HOST}, localhost, ::1, [::1], a mapped literal such as ::ffff:127.0.0.1, or any other address in 127/8), any IPv4 literal, or ${BIND_ALL_HOST} for every IPv4 interface`,
       { host },
     )
   }

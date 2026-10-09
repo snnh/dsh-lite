@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`@deepseek-ai/dsh-host-lan-access` decides the address the web server binds. It publishes every IPv4 interface this machine holds unless something states a host: that posture is this row's schema default `0.0.0.0`, and the row writes no file while deciding. A reachable address is reachable by anyone who can route to it, so the row refuses a bind it cannot authenticate: every non-loopback host requires the persistent access token, and the row warns once in the startup log. Setting `host: 127.0.0.1` returns the tree to loopback only.
+`@deepseek-ai/dsh-host-lan-access` decides the address the web server binds: every IPv4 interface this machine holds unless something states a host, which is the row's schema default `0.0.0.0` and writes no file. A reachable bind needs the persistent access token, so the row refuses one it cannot authenticate and warns once in the startup log; `host: 127.0.0.1` returns the tree to loopback only. The row also publishes the LAN literals worth printing beside the URL and the authority list the `/api` Host fence admits, both sampled once when it resolves its host.
 
 ## Table of Contents
 
@@ -36,7 +36,7 @@ A stated host is bound as written and persists nothing: `--host` from the invoca
 
 The General Settings page's Listen address row writes this same key: `config.host` of the composed `lan-access` row in the profile's own patch, merged with whatever else that row's patch config already holds. One line, one meaning — an address saved from that page and one edited by hand are indistinguishable to the next start, and the page reads the persisted line back rather than keeping a copy of its own.
 
-The save is deliberately inert. It writes the file and stops there: the running server keeps the address it bound, no access token is created, the printed URL is not rewritten, and the Loader does not reconcile. The operator restarts to apply it, which is why the page shows the saved address beside the address in effect until they do. The write is accepted only for an address this row can bind, judged by the same grammar the bind uses (`classifyBindHost`): a loopback spelling (`127.0.0.1`, `localhost`, `::1`, `[::1]`), the `0.0.0.0` wildcard, or one IPv4 literal. A typed hostname, or a non-loopback IPv6 literal such as `::`, is refused before it reaches the file instead of being persisted as a posture that cannot start; the refusal is the same one a hand-edit would earn on the next start, moved earlier, where it can still be corrected. A non-loopback address saved here is likewise only a request: the persistent access token it needs is created by the start that binds it, not by the save.
+The save is deliberately inert. It writes the file and stops there: the running server keeps the address it bound, no access token is created, the printed URL is not rewritten, and the Loader does not reconcile. The operator restarts to apply it, which is why the page shows the saved address beside the address in effect until they do. The write is accepted only for an address this row can bind, judged by the same grammar the bind uses (`classifyBindHost`): a loopback spelling (`127.0.0.1`, `localhost`, `::1`, `[::1]`, and every other value whose address answers loopback — mapped literals such as `::ffff:127.0.0.1`, a dotted-quad tail, a zone, the rest of 127/8), the `0.0.0.0` wildcard, or one IPv4 literal. A typed hostname, or a non-loopback IPv6 literal such as `::`, is refused before it reaches the file instead of being persisted as a posture that cannot start; the refusal is the same one a hand-edit would earn on the next start, moved earlier, where it can still be corrected. A non-loopback address saved here is likewise only a request: the persistent access token it needs is created by the start that binds it, not by the save.
 
 `--host` still outranks the saved line for the run that states it. The page reports that as a pinned posture: the address is stored, and it takes effect once the flag is removed.
 
@@ -44,7 +44,7 @@ The save is deliberately inert. It writes the file and stops there: the running 
 
 The candidate list keeps an interface's own addresses together as well. Entries sharing a MAC form one contiguous run, with the names inside a run in order, so the interfaces this selection reads are the platform's — and their running order is the order the platform reports them in, not the order `node:os` happened to enumerate entries in.
 
-Every host this row publishes is IPv4. `0.0.0.0` is the IPv4 wildcard — all interfaces, container bridges included — and `detectLanAddress()` reads IPv4 addresses only, so a host that wants IPv6 exposure needs a face this row does not provide. Loopback is the one spelling that reaches further: `::1` and `[::1]` are accepted because they name this machine alone exactly as `127.0.0.1` does, and they bind the IPv6 loopback rather than a network address.
+Every host this row publishes is IPv4. `0.0.0.0` is the IPv4 wildcard — all interfaces, container bridges included — and `detectLanAddress()` reads IPv4 addresses only, so a host that wants IPv6 exposure needs a face this row does not provide. Loopback is what reaches further: every value whose address answers loopback is accepted — `::1` and `[::1]`, a mapped literal such as `::ffff:127.0.0.1`, a dotted-quad tail, a zone-bearing spelling, any other address in 127/8 — because they name this machine alone exactly as `127.0.0.1` does, and they bind a loopback address rather than a network one.
 
 An overlay overrides the choice:
 
@@ -61,9 +61,9 @@ An overlay overrides the choice:
 | `127.0.0.1` | Loopback only — the harness is unreachable from the network |
 | `0.0.0.0` | Every IPv4 interface, container bridges included; no IPv6 listener |
 | `192.168.1.5` | One explicit address, which must be local to this machine |
-| `localhost`, `::1`, `[::1]` | The same loopback posture, spelled as a name or as the IPv6 loopback literal |
+| `localhost`, `::1`, `[::1]`, `::ffff:127.0.0.1`, `::0.0.0.1`, `127.0.0.2` | The same loopback posture, in any spelling the address answers loopback for: a name, an IPv6 form that merely spells a loopback address, a zone-bearing one, or another address in 127/8 |
 
-Anything outside that grammar — a hostname other than `localhost`, a non-loopback IPv6 literal such as `::`, or a blank or space-padded value — is refused at startup, with the accepted shapes stated back.
+Anything outside that grammar — a hostname other than `localhost`, a non-loopback IPv6 literal such as `::` or `fe80::1`, the wildcard in a mapped spelling, or a blank or space-padded value — is refused at startup, with the accepted shapes stated back.
 
 The printed line carries the addresses the server answers on, loopback first and the sampled LAN address beside it:
 
@@ -92,7 +92,7 @@ A loopback bind states no precondition of its own: the connection half authentic
 ## Further Exploration
 
 - `@deepseek-ai/dsh-client-connection` exchanges the token for the signed browser cookie and owns the Host/Origin fence.
-- `@deepseek-ai/dsh-web-app` reads `ctx.lanAccess.host` for the bind, samples the reachable addresses into the trust fence, prints them, and uses the loopback URL as the application URL.
+- `@deepseek-ai/dsh-web-app` reads `ctx.lanAccess.host` for the bind and `ctx.lanAccess.lanAddresses` for the LAN link it prints beside the application URL.
 
 -----
 
@@ -108,7 +108,7 @@ None; the bind posture never enters a model request, so a reusable provider pref
 ## Known Limitations and Deferred Work
 
 - **No TLS, no `Secure` cookie, no HSTS.** The token travels once in the printed URL, then becomes an `HttpOnly` cookie over plain HTTP. Anyone who can observe the network path can read it; a reverse proxy or a virtual network is the answer for anything beyond trusted networks.
-- **The published posture is IPv4 only.** `0.0.0.0` is the IPv4 wildcard, so a dual-stack machine is reachable on its IPv4 addresses and not on its IPv6 ones, and `detectLanAddress()` never returns an IPv6 address. The grammar admits the IPv6 loopback spellings `::1` and `[::1]`, which bind this machine alone; no other IPv6 literal is accepted.
+- **The published posture is IPv4 only.** `0.0.0.0` is the IPv4 wildcard, so a dual-stack machine is reachable on its IPv4 addresses and not on its IPv6 ones, and `detectLanAddress()` never returns an IPv6 address. The grammar admits every value whose address answers loopback — `::1` and `[::1]`, mapped literals such as `::ffff:127.0.0.1`, dotted-quad tails, zones, the rest of 127/8 — all of which bind this machine alone; no other IPv6 literal is accepted.
 - **The shipped default moves with the release.** A machine that has never stated a host adopts whatever posture the release it starts ships, because the row writes no line of its own; stating `host` in the profile patch, or saving one on the settings page, is the only pin.
 - **Ranking is by interface name, not by route.** Bridges and tunnels are demoted, but among interfaces that rank alike the operating system's enumeration order decides. The selection is an exported helper rather than part of the bind decision, so an operator who cares which network is published sets `host` explicitly.
 - **The interface name is the only signal.** There is no platform I/O behind this table — no route lookup, no sysfs or WMI reading of the interface type — so a name the table does not carry is treated as a LAN interface: a bridge an operator renamed, a virtualization product with its own grammar (Parallels `enp*`/`vnic*`, say), or a platform whose switch names are not `virbr*`/`vmnet*`/`vEthernet*` ranks with the physical interfaces and may win the bind, bounded by the fact that a demoted address is still bound when nothing else exists, and by `host` stating the choice outright.

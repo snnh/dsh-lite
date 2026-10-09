@@ -17,8 +17,8 @@
  * samples once per bind instead of re-reading the host's interfaces at request
  * time, so a changed host address never follows along on its own.
  *
- * The two halves are asserted together on purpose. `resolveLanTrust` (this
- * bundle) derives the fence's `trustedHosts`, and `isTrustedApiRequest`
+ * The two halves are asserted together on purpose. `resolveLanTrust` (the
+ * exposure row, `@deepseek-ai/dsh-host-lan-access`) derives the fence's `trustedHosts`, and `isTrustedApiRequest`
  * (client-connection, which owns the /api route) consumes them; each half is
  * covered by its own suite already, and only the seam between them is the
  * reported defect.
@@ -26,7 +26,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { isTrustedApiRequest } from '@deepseek-ai/dsh-client-connection/src/api-request-trust.ts'
-import { resolveLanTrust } from '../src/index.ts'
+import { resolveLanTrust } from '@deepseek-ai/dsh-host-lan-access'
 
 /** `node:os` as the container sees it: loopback plus this container's own bridge address. */
 vi.mock('node:os', async importOriginal => ({

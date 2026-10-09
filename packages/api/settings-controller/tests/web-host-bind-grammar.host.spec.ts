@@ -45,6 +45,8 @@ const ACCEPTED: readonly (readonly [string, string])[] = [
   // literal does, so the page that persists a posture admits them too.
   ['::1', 'loopback'],
   ['[::1]', 'loopback'],
+  ['127.0.0.2', 'loopback'],
+  ['::ffff:127.0.0.1', 'loopback'],
   ['0.0.0.0', 'wildcard'],
   ['192.168.1.5', 'address'],
   ['10.0.0.9', 'address'],
@@ -58,13 +60,13 @@ const REFUSED: readonly (readonly [string, string])[] = [
   [' 127.0.0.1', 'no surrounding whitespace'],
   ['127.0.0.1 ', 'no surrounding whitespace'],
   ['0'.repeat(46), 'at most 45 characters'],
-  ['::', 'is neither an IPv4 address nor a loopback name'],
-  ['fe80::1', 'is neither an IPv4 address nor a loopback name'],
-  ['::ffff:127.0.0.1', 'is neither an IPv4 address nor a loopback name'],
-  ['example.com', 'is neither an IPv4 address nor a loopback name'],
-  ['localhost.', 'is neither an IPv4 address nor a loopback name'],
-  ['999.1.1.1', 'is neither an IPv4 address nor a loopback name'],
-  ['192.168.1.5:3080', 'is neither an IPv4 address nor a loopback name'],
+  ['::', 'is neither an IPv4 address nor a loopback address'],
+  ['fe80::1', 'is neither an IPv4 address nor a loopback address'],
+  ['::ffff:0.0.0.0', 'is neither an IPv4 address nor a loopback address'],
+  ['example.com', 'is neither an IPv4 address nor a loopback address'],
+  ['localhost.', 'is neither an IPv4 address nor a loopback address'],
+  ['999.1.1.1', 'is neither an IPv4 address nor a loopback address'],
+  ['192.168.1.5:3080', 'is neither an IPv4 address nor a loopback address'],
 ]
 
 const contexts: Context[] = []

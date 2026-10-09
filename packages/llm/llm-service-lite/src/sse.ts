@@ -43,7 +43,10 @@ export class SseReader {
     return this.done
   }
 
-  /** Decode the stream into JSON events until the sentinel or the last frame. */
+  /**
+   * Decode the stream into JSON events until the sentinel or the last frame.
+   * @returns the parsed events in arrival order.
+   */
   async * events(): AsyncGenerator<Record<string, unknown>> {
     const frames = this.body
       .pipeThrough(new TextDecoderStream())

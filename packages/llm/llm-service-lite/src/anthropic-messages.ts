@@ -85,6 +85,7 @@ type AnthropicSystemPart =
 
 /** Replay-metadata kinds this transport writes and reads. */
 export const REPLAY_KIND = 'llm-service-lite-anthropic'
+/** Schema version of this transport's replay metadata. */
 export const REPLAY_VERSION = 1
 
 /** Per-block half of this transport's replay metadata, one entry per durable block. */

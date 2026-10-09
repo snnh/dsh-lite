@@ -71,7 +71,11 @@ export interface Watcher {
   off<E extends keyof WatcherEventMap>(event: E, listener: (...args: WatcherEventMap[E]) => void): this
   /**
    * Stop watching and release the backend's handles. Safe to call more than
-   * once: the live-watcher count only drops on the first call.
+   * once: the live-watcher count only drops on the first call, and the
+   * subscriptions registered with {@link Watcher.on} and {@link Watcher.once}
+   * for `error` stay attached across the close, so a failure arriving while the
+   * teardown settles still reaches the handler that owns reporting instead of
+   * being rethrown as an uncaught exception.
    * @returns A promise that settles once the backend released its handles.
    */
   close(): Promise<void>
@@ -137,9 +141,29 @@ function resolveFactory(loaded: ChokidarNamespace): WatchFactory | undefined {
   return loaded.default?.watch
 }
 
+/**
+ * Absorb a watcher failure that arrives after close. The registration is gone
+ * and no refresh will run, so nothing can act on it; the facade keeps the
+ * process alive rather than letting Node rethrow an emitter `error` nobody
+ * subscribes to.
+ */
+function absorbLateError(): void {
+  // Deliberately empty: failures are reported while the watcher is live.
+}
+
 /** Watcher facade over one Chokidar instance; every event method delegates. */
 class ChokidarWatcher implements Watcher {
   private readonly instance: WatchInstance
+
+  /**
+   * The `error` subscriptions this facade registered, keyed by the listener the
+   * consumer passed and holding what the backend was registered with. Teardown
+   * re-attaches these after the backend dropped its own listeners.
+   */
+  private readonly errorListeners = new Map<BackendListener, BackendListener>()
+
+  /** Whether a close already restored the backend's `error` listeners. */
+  private restored = false
 
   /**
    * @param instance The Chokidar watcher this facade owns.
@@ -149,23 +173,51 @@ class ChokidarWatcher implements Watcher {
   }
 
   on<E extends keyof WatcherEventMap>(event: E, listener: (...args: WatcherEventMap[E]) => void): this {
+    if (event === 'error') this.errorListeners.set(listener, listener)
     this.instance.on(event, listener)
     return this
   }
 
   once<E extends keyof WatcherEventMap>(event: E, listener: (...args: WatcherEventMap[E]) => void): this {
-    this.instance.once(event, listener)
+    if (event !== 'error') {
+      this.instance.once(event, listener)
+      return this
+    }
+    // A once-listener stops being re-attachable the moment it fires, so the
+    // backend gets a wrapper that forgets the subscription and detaches itself
+    // first — that also keeps one error from firing it twice once it has been
+    // re-attached for a close.
+    const wrapper = (...args: WatcherEventMap[E]): void => {
+      this.errorListeners.delete(listener)
+      this.instance.off('error', wrapper)
+      listener(...args)
+    }
+    this.errorListeners.set(listener, wrapper)
+    this.instance.once(event, wrapper)
     return this
   }
 
   off<E extends keyof WatcherEventMap>(event: E, listener: (...args: WatcherEventMap[E]) => void): this {
+    if (event === 'error') this.errorListeners.delete(listener)
     this.instance.off(event, listener)
     return this
   }
 
   async close(): Promise<void> {
     liveWatchers.delete(this)
-    await this.instance.close()
+    const closing = this.instance.close()
+    if (!this.restored) {
+      this.restored = true
+      // The backend's close() drops every listener yet leaves a scheduled
+      // write-settle poll; that straggler stats a path this teardown is
+      // deleting, which Windows reports as EPERM, and an `error` emission with
+      // no listener is rethrown as an uncaught exception. Re-attach across the
+      // close: the absorber keeps the process alive, and the consumer's own
+      // subscriptions still route the failure to whoever owns reporting.
+      this.instance.on('error', absorbLateError)
+      for (const listener of this.errorListeners.values()) this.instance.on('error', listener)
+    }
+    await closing
   }
 }
 

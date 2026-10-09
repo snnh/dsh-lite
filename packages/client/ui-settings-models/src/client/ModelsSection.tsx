@@ -263,6 +263,10 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
   const snapshot = injected.useSnapshot(value => value)
   const state = { ...snapshot, rows: snapshot.rows.map(row => row.entry.provider === 'deepseek-account'
     ? { ...row, entry: { ...row.entry, displayName: t('deepSeekAccount') } } : row) }
+  /** A new or failed surface waits for a current snapshot; background refreshes preserve its drafts. */
+  const [hasReadySnapshot, setHasReadySnapshot] = useState(state.status === 'ready')
+  if (state.status === 'ready' && !hasReadySnapshot) setHasReadySnapshot(true)
+  if (state.status === 'error' && hasReadySnapshot) setHasReadySnapshot(false)
   const [editing, setEditing] = useState<EditorTarget | undefined>(undefined)
   const [addOpen, setAddOpen] = useState(false)
   const [addMode, setAddMode] = useState<AddMode>('catalog')
@@ -351,6 +355,14 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
         <button type="button" className={styles['secondaryButton']} onClick={() => { void controller.load() }}>
           {t('retry')}
         </button>
+      </div>
+    )
+  }
+  if (!hasReadySnapshot && state.status !== 'ready') {
+    return (
+      <div className={styles['section']}>
+        <h2 className={styles['title']}>{t('title')}</h2>
+        <p className={styles['intro']}>{t('intro')}</p>
       </div>
     )
   }
@@ -541,7 +553,9 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
                     type="button"
                     className={styles['secondaryButton']}
                     aria-label={providerCopy(t('editProvider'), target)}
+                    disabled={!open && state.status !== 'ready'}
                     onClick={() => {
+                      if (!open && controller.store.getSnapshot().status !== 'ready') return
                       setSavedTarget(undefined)
                       // One card at a time: the add card closes with whatever
                       // it held, since closing either card would otherwise
@@ -558,8 +572,9 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
                         type="button"
                         className={styles['dangerButton']}
                         aria-label={providerCopy(t('removeProvider'), target)}
-                        disabled={!state.writable}
+                        disabled={!state.writable || state.status !== 'ready'}
                         onClick={() => {
+                          if (controller.store.getSnapshot().status !== 'ready') return
                           setSavedTarget(undefined)
                           setDeleteFailure(undefined)
                           setDeleteTarget(target)
@@ -737,8 +752,9 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
                 <button
                   type="button"
                   className={styles['addButton']}
-                  disabled={!state.writable || usable.length === 0}
+                  disabled={!state.writable || state.status !== 'ready' || usable.length === 0}
                   onClick={() => {
+                    if (controller.store.getSnapshot().status !== 'ready') return
                     const first = addable[0]
                     setSavedTarget(undefined)
                     setEditing(first === undefined ? undefined : targetOf(first.row))

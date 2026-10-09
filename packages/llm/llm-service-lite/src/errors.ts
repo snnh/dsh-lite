@@ -22,7 +22,11 @@ import {
 /** Response headers a provider uses to name a request across support tickets. */
 const REQUEST_ID_HEADERS = ['request-id', 'x-request-id', 'x-deepseek-request-id'] as const
 
-/** Joined provider error code, type, and message text used by the classifiers. */
+/**
+ * Joined provider error code, type, and message text used by the classifiers.
+ * @param raw - the provider's error body or error object, as received.
+ * @returns the distinct non-empty text parts, joined by one space.
+ */
 export function errorDetail(raw: unknown): string {
   const envelope = typeof raw === 'object' && raw !== null ? raw as Record<string, unknown> : {}
   const error = typeof envelope.error === 'object' && envelope.error !== null
@@ -33,7 +37,12 @@ export function errorDetail(raw: unknown): string {
   return [...new Set(parts)].join(' ')
 }
 
-/** Human-readable message from a provider error body, with a status-based fallback. */
+/**
+ * Human-readable message from a provider error body, with a status-based fallback.
+ * @param raw - the provider's error body or error object, as received.
+ * @param status - HTTP status when the failure carried one.
+ * @returns the provider's own message, or a status-based diagnostic.
+ */
 export function errorMessage(raw: unknown, status: number | undefined): string {
   const envelope = typeof raw === 'object' && raw !== null ? raw as Record<string, unknown> : {}
   const error = typeof envelope.error === 'object' && envelope.error !== null

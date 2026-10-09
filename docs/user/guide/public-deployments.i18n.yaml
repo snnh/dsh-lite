@@ -3,11 +3,11 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/user/guide/public-deployments.md
 /deploy-the-web-ui-exposure-and-trust-boundaries:
-  en: bffbb8b72ca714c3
-  zh: 7d45557468195cde
+  en: 5f29bf447c111ffe
+  zh: 139e58e2bab35ef1
 /deploy-the-web-ui-exposure-and-trust-boundaries/what-the-default-exposes:
-  en: e7e805fa2989abab
-  zh: dde24b4de8c26ba1
+  en: 93cf8449d9d0422b
+  zh: cc4bfa673131b75b
 /deploy-the-web-ui-exposure-and-trust-boundaries/choose-a-posture:
   en: 45dda2820d22d1c6
   zh: e3d8713749fa048d
@@ -15,26 +15,29 @@
   en: 06199f06d997a7bc
   zh: 3d86cc90de8b9443
 /deploy-the-web-ui-exposure-and-trust-boundaries/behind-a-reverse-proxy:
-  en: 1be11391edea3f66
-  zh: 97500201d0caba2c
+  en: 1314bcb2aad18293
+  zh: 7c2acc51af782b5e
 /deploy-the-web-ui-exposure-and-trust-boundaries/behind-a-reverse-proxy/what-public-url-advertises:
   en: 8922acdf5904f40d
   zh: 568b97e298731bf0
 /deploy-the-web-ui-exposure-and-trust-boundaries/behind-a-reverse-proxy/what-the-proxy-must-do:
-  en: e6a0d25b1f05c393
-  zh: 548890d480692121
+  en: e774642e705f8886
+  zh: 31abcaafe04baa2e
 /deploy-the-web-ui-exposure-and-trust-boundaries/behind-a-reverse-proxy/trust-the-authority-browsers-use:
-  en: a1f6f7e3aa202fd9
-  zh: 938eeec3548eff6e
+  en: 48eadd3a52a7e011
+  zh: 7e1552659dfe8fc2
+/deploy-the-web-ui-exposure-and-trust-boundaries/secure-the-external-leg:
+  en: 6ed0302420029ee8
+  zh: 8937842ec4e99264
 /deploy-the-web-ui-exposure-and-trust-boundaries/containers-and-addresses-that-move:
   en: bcc2b3869378e256
   zh: b8cfb8c00b9559d8
 /deploy-the-web-ui-exposure-and-trust-boundaries/what-stays-the-deployment-s-job:
-  en: c938be08f332bc1b
-  zh: 3af8ddc026f772bb
+  en: 4f5a98b50a804e70
+  zh: e3b701a1c84f00c6
 /deploy-the-web-ui-exposure-and-trust-boundaries/when-plain-http-is-acceptable:
-  en: 53fa669ff8492bfe
-  zh: 7bbe9fa21e9e3c3b
+  en: d9d19e94103443a7
+  zh: e8715c9c7bf8e097
 /deploy-the-web-ui-exposure-and-trust-boundaries/reach-it-without-exposing-it:
-  en: 9713a929321e9f41
-  zh: 27d3c65dd70a9fec
+  en: bac3464a48c8a1c5
+  zh: 5647ec421dcbf9e7

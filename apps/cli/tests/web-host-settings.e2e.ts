@@ -255,7 +255,7 @@ describe('the web-address settings page against the real CLI', () => {
       const refused = await callWebHost(port, cookie, 'webHost/save', { host: 'web.example.com' })
       expect(refused.status).toBe(200)
       expect(refused.body.result).toMatchObject({ ok: false })
-      expect(JSON.stringify(refused.body)).toContain('neither an IPv4 address nor a loopback name')
+      expect(JSON.stringify(refused.body)).toContain('neither an IPv4 address nor a loopback address')
 
       // A loopback name, not the wildcard: the shipped default already publishes
       // every interface, so only an address the default cannot produce makes

@@ -39,10 +39,13 @@
  *
  * The hosts this row will bind are one closed grammar, classified in one place
  * ({@link classifyBindHost}): an IPv4 literal — `0.0.0.0` for every IPv4
- * interface, any address this machine holds, or `127.0.0.1` — or one of the
- * four loopback names `127.0.0.1`, `localhost`, `::1`, and `[::1]`. A shape
- * outside that grammar names no address this row can bind, and the value a
- * setting page shares the grammar with is refused before it is persisted. A
+ * interface, any address this machine holds, or `127.0.0.1` — or a loopback
+ * spelling, which is any value the address it names answers loopback for: the
+ * names `127.0.0.1`, `localhost`, `::1`, and `[::1]`, the mapped literals
+ * (`::ffff:127.0.0.1`, `::0.0.0.1`), a zone-bearing one, and every address in
+ * 127/8. A shape outside that grammar names no address this row can bind, and
+ * the value a setting page shares the grammar with is refused before it is
+ * persisted. A
  * host the operator states that falls outside it — an unqualified hostname, a
  * non-loopback IPv6 literal such as `::` — is not settled to the shipped
  * posture: the start fails and states the grammar back, because a silent
@@ -77,6 +80,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { ACCESS_TOKEN_FILENAME, ensureAccessToken } from '@deepseek-ai/dsh-access-token'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
+import { isLoopbackHost as isLoopbackLiteral } from '@deepseek-ai/dsh-host-webserver'
 
 /** Stable Cordis plugin name. */
 export const name = 'lan-access'
@@ -91,13 +95,22 @@ export const LOOPBACK_HOST = '127.0.0.1'
 export const BIND_ALL_HOST = '0.0.0.0'
 
 /**
+ * The IPv4 link-local prefix (`169.254.0.0/16`, RFC 3927). A machine that
+ * cannot reach a DHCP server assigns itself one of these, and the network it
+ * names routes nowhere, so a printed link carrying it is a dead link.
+ */
+const LINK_LOCAL_PREFIX = '169.254.'
+
+/**
  * The `webStartup` values this row reads. It narrows the web bundle's own
- * service to the one field a bind decision needs, so this package depends on
- * the service's shape rather than on the bundle that provides it.
+ * service to the fields a bind decision needs, so this package depends on the
+ * service's shape rather than on the bundle that provides it.
  */
 interface WebStartupHosts {
   /** `--host`, absent when the invocation did not name one. */
   readonly host?: string
+  /** Explicit `--trusted-host` authorities, in argument order. */
+  readonly trustedHosts?: readonly string[]
 }
 
 /**
@@ -149,9 +162,29 @@ const VIRTUAL_INTERFACE_PREFIXES = [
 ] as const
 
 /** What this row publishes through {@link LAN_ACCESS_SERVICE}. */
-export interface LanAccessValues {
+export interface LanAccessValues extends LanRuntimeValues {
   /** The host the web server should bind. */
   readonly host: string
+}
+
+/**
+ * The bind-dependent values the Web bundle reads besides the host: what the URL
+ * line may name and what the `/api` fence admits.
+ */
+export interface LanRuntimeValues {
+  /**
+   * Print-worthy LAN IPv4 literals, best first: the row's own candidate ranking
+   * minus the link-local and address-less records no peer can open. The first
+   * entry is the address the URL line names; the list is empty whenever this
+   * bind is not the wildcard, whose URL already carries its address.
+   */
+  readonly lanAddresses: string[]
+  /**
+   * Every LAN literal this bind publishes followed by the explicit invocation
+   * authorities — the trust fence's admission list, which the display selection
+   * above never narrows.
+   */
+  readonly trustedHosts: string[]
 }
 
 /** Row configuration surface; see {@link Config.host} for the posture default. */
@@ -183,8 +216,9 @@ export const Config: z<Config> = z.object({
 declare module '@deepseek-ai/cordis' {
   interface Context {
     /**
-     * The bind host this row admitted. Absent when the row is not mounted, which
-     * leaves the web bundle's own loopback default in place.
+     * The bind host this row admitted, with the LAN literals it publishes and
+     * the fence authorities it derived. Absent when the row is not mounted,
+     * which leaves the web bundle's own loopback default in place.
      */
     lanAccess: LanAccessValues
   }
@@ -326,6 +360,60 @@ export function detectLanAddress(): string | undefined {
   return rankLanCandidates(listLanCandidates())[0]?.address
 }
 
+/**
+ * The addresses worth naming in the printed LAN link, best first.
+ *
+ * Selection and ordering are this row's own — {@link listLanCandidates} for
+ * what this machine holds and {@link rankLanCandidates} for which of them a
+ * peer is most likely to reach — so the URL line names the same address the row
+ * would bind and never disagrees with it by enumeration order. A physical
+ * interface outranks a bridge or tunnel: on a container host `docker0` is often
+ * reported first, and a token pointing at it is a token pointing at a network
+ * the operator's browser cannot route to.
+ *
+ * Two kinds of candidate are dropped rather than ranked, because both are
+ * addresses the line would hand the token to for nothing: an empty literal (an
+ * interface mid-teardown reports no address) and a link-local `169.254.*`
+ * literal, which is reachable from no interface but the one that invented it.
+ * Dropping them never narrows the trust fence, which keeps every address the
+ * bind publishes.
+ *
+ * @returns the candidate addresses, best first; empty when this machine holds
+ *   nothing worth printing.
+ */
+export function printableLanAddresses(): string[] {
+  return rankLanCandidates(listLanCandidates())
+    .map(candidate => candidate.address)
+    .filter(address => address.length > 0 && !address.startsWith(LINK_LOCAL_PREFIX))
+}
+
+/**
+ * Resolve one LAN-trust snapshot from a bind host.
+ *
+ * Derived entries are port-less IP literals: DNS rebinding needs an
+ * attacker-controlled name, while an IP-literal Host is safe on any port and an
+ * OS-assigned port is unknowable before bind.
+ *
+ * @param bindHost - the bind host this row resolved.
+ * @param extra - explicit `--trusted-host` values, in argument order.
+ * @returns the ranked LAN display addresses and the bind's fence authorities.
+ */
+export function resolveLanTrust(bindHost: string, extra: readonly string[]): LanRuntimeValues {
+  // A specific non-loopback address is itself the network address this host is
+  // reachable at, so it joins the fence instead of being sampled; the wildcard
+  // is not an authority, so its addresses are.
+  const reachable = bindHost === BIND_ALL_HOST
+    ? listLanCandidates().map(candidate => candidate.address)
+    : isLoopbackHost(bindHost) ? [] : [bindHost]
+  // The LAN link is printed beside the application URL, so it is only worth
+  // reporting when the URL does not already carry the bound address — and only
+  // the best-ranked candidate is worth printing, since the token it carries is
+  // the one a peer will actually open. The fence above keeps every address the
+  // bind publishes: exposure is the wildcard's decision, not this line's.
+  const lanAddresses = bindHost === BIND_ALL_HOST ? printableLanAddresses() : []
+  return { lanAddresses, trustedHosts: [...reachable, ...extra] }
+}
+
 /** How a bind host is shaped. */
 export type BindHostKind = 'loopback' | 'wildcard' | 'address'
 
@@ -339,11 +427,14 @@ export type BindHostKind = 'loopback' | 'wildcard' | 'address'
  * refused rather than trimmed, because silently correcting the operator's input
  * is the kind of hidden edit this row exists to keep visible.
  *
- * `loopback` names this machine alone: `127.0.0.1`, `localhost`, `::1`, and
- * `[::1]`. The IPv6 spellings are accepted as loopback even though nothing this
- * row binds is IPv6, because they mean exactly what the IPv4 literal means —
- * this machine's own stack — and refusing them would make the same intent
- * succeed or fail on the spelling alone.
+ * `loopback` names this machine alone: `127.0.0.1`, `localhost`, `::1`,
+ * `[::1]`, every other address in 127/8, and the IPv6 forms that merely spell
+ * one of those — a mapped literal (`::ffff:127.0.0.1`, `::ffff:7f00:1`), a
+ * dotted-quad tail (`::0.0.0.1`), and any of those with a zone. The IPv6
+ * spellings are accepted as loopback even though nothing this row binds is
+ * IPv6, because they mean exactly what the IPv4 literal means — this machine's
+ * own stack — and refusing them would make the same intent succeed or fail on
+ * the spelling alone.
  *
  * `wildcard` is `0.0.0.0`: every IPv4 interface this machine holds, and never
  * an IPv6 one. `address` is any other IPv4 literal, which publishes exactly the
@@ -357,6 +448,13 @@ export function classifyBindHost(host: string): BindHostKind | undefined {
   if (host.length > MAX_BIND_HOST_LENGTH) return undefined
   if (host.trim() !== host) return undefined
   if (LOOPBACK_HOSTS.has(host)) return 'loopback'
+  // Loopback is decided by the address a value names, not by its spelling: a
+  // mapped literal (`::ffff:127.0.0.1`), a dotted-quad tail (`::0.0.0.1`), a
+  // zone-bearing one, and every address in 127/8 all reach this machine alone,
+  // and the carrier's own parser is the one authority on which literal names
+  // which address. Nothing widens here: a non-loopback IPv6 literal still
+  // names a face this row does not publish, and is refused below.
+  if (isLoopbackLiteral(host)) return 'loopback'
   if (host === BIND_ALL_HOST) return 'wildcard'
   return isIPv4(host) ? 'address' : undefined
 }
@@ -369,7 +467,7 @@ export function classifyBindHost(host: string): BindHostKind | undefined {
  * drift apart.
  *
  * @param host - the configured or detected bind host.
- * @returns true for loopback literals and `localhost`.
+ * @returns true for every value whose address is loopback, `localhost` included.
  */
 export function isLoopbackHost(host: string): boolean {
   return classifyBindHost(host) === 'loopback'
@@ -404,7 +502,10 @@ export async function apply(ctx: Context, config?: Config): Promise<void> {
     ctx.logger.warn(warning)
     console.warn(warning)
   }
-  ctx.provide(LAN_ACCESS_SERVICE, { host })
+  ctx.provide(LAN_ACCESS_SERVICE, {
+    host,
+    ...resolveLanTrust(host, (ctx.get('webStartup') as WebStartupHosts | undefined)?.trustedHosts ?? []),
+  })
 }
 
 /**
@@ -454,10 +555,11 @@ function resolveHost(ctx: Context, config?: Config): string {
 function bindableHost(host: string): string {
   if (classifyBindHost(host) !== undefined) return host
   throw new Error(
-    `lan-access: refusing to bind ${JSON.stringify(host)}: this row binds an IPv4 address or a loopback name only. `
-    + 'Accepted: 127.0.0.1, localhost, ::1, and [::1] for this machine alone; any IPv4 literal such as 192.168.1.5 for the one interface holding it; '
+    `lan-access: refusing to bind ${JSON.stringify(host)}: this row binds an IPv4 address or a loopback address only. `
+    + 'Accepted: any loopback spelling — 127.0.0.1, localhost, ::1, [::1], a mapped literal such as ::ffff:127.0.0.1, '
+    + 'or any other address in 127/8 — for this machine alone; any IPv4 literal such as 192.168.1.5 for the one interface holding it; '
     + `and ${BIND_ALL_HOST}, the IPv4 wildcard, for every IPv4 interface this machine holds — container bridges included, and never an IPv6 one. `
-    + 'A hostname other than localhost, an IPv6 literal that is not loopback (:: included), a blank or padded value, '
+    + 'A hostname other than localhost, an IPv6 literal that names no loopback address (:: included), a blank or padded value, '
     + `and anything longer than ${MAX_BIND_HOST_LENGTH} characters name no address here to bind. `
     + 'Correct the "host:" configuration of this row — or pass --host 127.0.0.1 for one run — '
     + 'or save a bindable host on the web-address settings page.',

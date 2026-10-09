@@ -37,7 +37,14 @@ function fixture(overrides: Partial<Config> = {}) {
   roots.push(ctx)
   const effects = vi.spyOn(ctx.fiber, 'effect')
   const sandboxPolicy = { defaultMode: 'danger-full-access', workspaceRoot: '/workspace', resolve: vi.fn((): SandboxExecutionPolicy => ({ mode: 'danger-full-access', workspaceRoot: '/workspace' })) }
+  // The execution environment resolves the Session's directory through the
+  // working-directory service; this fixture states one without filesystem work.
+  const workingDirectory = {
+    get: vi.fn<(session: Agent['session']) => string>(session => session.header.cwd ?? '/workspace'),
+    ensure: vi.fn<(agent: Agent, signal?: AbortSignal) => Promise<string>>(async agent => agent.session.header.cwd ?? '/workspace'),
+  }
   ctx.provide('sandboxPolicy', sandboxPolicy as never)
+  ctx.provide('workingDirectory', workingDirectory as never)
   // Every allocation gets its own process range, so two live terminals never share an output stream.
   const handles: Handle[] = []
   const handle = (): Handle => {

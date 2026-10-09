@@ -6,27 +6,29 @@
  * config), mounts the `frontend-static` fallback owner over it, registers the
  * harness-source and web-surface prompt sections, the bash-visible web runtime
  * variable, the process-token URL line, and the default-browser handoff. An
- * advertised `publicUrl` replaces the published root — the loopback URL
- * otherwise. App command-line values arrive through the `webStartup` service
- * expressions in the bundle patch.
+ * advertised `publicUrl` replaces the published bind-address URL; when the
+ * exposure row is mounted, the URL line also names the LAN address it chose.
+ * App command-line values arrive through the `webStartup` service expressions
+ * in the bundle patch, and the exposure row owns the bind posture, its
+ * warning, and the `/api` trust list.
  * @module @deepseek-ai/dsh-web-app
  */
 
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createRequire } from 'node:module'
+import { isIP } from 'node:net'
 import { dirname, join } from 'node:path'
-import { networkInterfaces } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { addHarnessSourceSection, auditStartupEntries } from '@deepseek-ai/dsh-app-boot'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import * as FrontendStatic from '@deepseek-ai/dsh-host-frontend-static'
-import { listLanCandidates, rankLanCandidates } from '@deepseek-ai/dsh-host-lan-access'
+import type {} from '@deepseek-ai/dsh-host-lan-access'
+import { isLoopbackHost, normalizeBindAddress } from '@deepseek-ai/dsh-host-webserver'
 import { launchedThroughSsh, launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 import { scrubbedParentEnv } from '@deepseek-ai/dsh-subprocess'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
-import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-shell-env'
 import { parsePublicUrl } from './public-url.ts'
 
@@ -36,9 +38,6 @@ export const name = 'web-app'
 /** This dsh installation's root, from either this package's source or built entry. */
 const SOURCE_ROOT = fileURLToPath(new URL('../../../..', import.meta.url))
 const ANNOUNCED_ROOTS = new WeakSet<Context>()
-
-/** Runtime service that releases Web rows after bind-dependent values resolve. */
-const WEB_RUNTIME_SERVICE = 'webRuntime'
 
 /** Services required before the web runtime can mount. */
 export const inject = ['webServer']
@@ -59,13 +58,11 @@ export interface Config {
   /**
    * Canonical HTTP(S) root to advertise in the printed and opened URL,
    * `DSH_WEB_URL`, and the web-surface orientation, e.g.
-   * `https://app.example/ui/`, normalized to end in `/`. Advertisement only;
-   * see [public deployments](../README.md#public-deployments). Absent or YAML
-   * `null` advertises the loopback URL.
+   * `https://app.example/ui/`, normalized to end in `/`. Configures no routing
+   * or authentication; see [public deployments](../README.md#public-deployments).
+   * Absent or YAML `null` advertises the bind-address URL.
    */
   publicUrl?: string
-  /** Explicit `--trusted-host` authorities from this invocation. */
-  trustedHosts: string[]
 }
 
 export const Config: z<Config> = z.object({
@@ -73,41 +70,10 @@ export const Config: z<Config> = z.object({
   printUrl: z.boolean().default(true),
   surfaceContext: z.boolean().default(true),
   publicUrl: z.transform(z.string(), value => parsePublicUrl(value).href),
-  trustedHosts: z.array(String).default([]),
 })
-
-/** Bind-dependent Web values shared by the trust fence and URL display. */
-export interface WebRuntimeValues {
-  /**
-   * Print-worthy LAN IPv4 literals sampled once when the server binds all
-   * interfaces, most reachable first: the row's own candidate ranking, minus
-   * the link-local and address-less records no peer can open. The first entry
-   * is the address the URL line names; the list is empty when this machine
-   * holds nothing but loopback, link-local, or address-less interfaces.
-   */
-  lanAddresses: string[]
-  /**
-   * Every LAN literal the bind publishes followed by explicit invocation
-   * authorities — the trust fence's admission list, which is never narrowed by
-   * the display selection above.
-   */
-  trustedHosts: string[]
-}
 
 /** Environment variable naming the advertised URL of this Web GUI. */
 const DSH_WEB_URL = 'DSH_WEB_URL' as const
-
-// Display-only mirror of the webserver schema's loopback host: the address the
-// local URL always prints. Not a source of truth — the schema is.
-const LOOPBACK_HOST = '127.0.0.1'
-/** The webserver schema's all-interfaces bind literal. */
-const ALL_INTERFACES_HOST = '0.0.0.0'
-/**
- * The IPv4 link-local prefix (`169.254.0.0/16`, RFC 3927). A machine that
- * cannot reach a DHCP server assigns itself one of these, and the network it
- * names routes nowhere, so a printed link carrying it is a dead link.
- */
-const LINK_LOCAL_PREFIX = '169.254.'
 
 const BROWSER_OPENER_MODULE = import.meta.resolve('open')
 
@@ -140,61 +106,6 @@ try {
 }
 `
 
-/**
- * The addresses worth naming in the printed LAN link, best first.
- *
- * Selection and ordering are the LAN row's own — `listLanCandidates` for what
- * this machine holds and `rankLanCandidates` for which of them a peer is most
- * likely to reach — so the URL line names the same address the row would bind
- * and never disagrees with it by enumeration order. A physical interface
- * outranks a bridge or tunnel: on a container host `docker0` is often reported
- * first, and a token pointing at it is a token pointing at a network the
- * operator's browser cannot route to.
- *
- * Two kinds of candidate are dropped rather than ranked, because both are
- * addresses the line would hand the token to for nothing: an empty literal (an
- * interface mid-teardown reports no address) and a link-local `169.254.*`
- * literal, which is reachable from no interface but the one that invented it.
- * Dropping them never narrows the trust fence, which keeps every address the
- * bind publishes.
- *
- * @returns the candidate addresses, best first; empty when this machine holds
- *   nothing worth printing.
- */
-function printableLanAddresses(): string[] {
-  return rankLanCandidates(listLanCandidates())
-    .map(candidate => candidate.address)
-    .filter(address => address.length > 0 && !address.startsWith(LINK_LOCAL_PREFIX))
-}
-
-/**
- * Resolve one LAN-trust snapshot from the active server bind.
- *
- * Derived entries are port-less IP literals: DNS rebinding needs an
- * attacker-controlled name, while an IP-literal Host is safe on any port and
- * an OS-assigned port is unknowable before bind.
- * @param bindHost - the active webserver bind host.
- * @param extra - explicit `--trusted-host` values, in argument order.
- * @returns the ranked LAN display addresses and invocation-derived fence authorities.
- */
-export function resolveLanTrust(bindHost: string, extra: readonly string[]): WebRuntimeValues {
-  // A specific non-loopback address is itself the network address this host is
-  // reachable at, so it joins the fence instead of being sampled; `0.0.0.0` is
-  // not an authority, so its addresses are.
-  const reachable = bindHost === ALL_INTERFACES_HOST
-    ? Object.values(networkInterfaces()).flat()
-      .filter((iface): iface is NonNullable<typeof iface> => iface !== undefined && iface.family === 'IPv4' && !iface.internal)
-      .map(iface => iface.address)
-    : bindHost === LOOPBACK_HOST ? [] : [bindHost]
-  // The LAN link is printed beside the application URL, so it is only worth
-  // reporting when the URL does not already carry the bound address — and only
-  // the best-ranked candidate is worth printing, since the token it carries is
-  // the one a peer will actually open. The fence above keeps every address the
-  // bind publishes: exposure is `0.0.0.0`'s decision, not this line's.
-  const lanAddresses = bindHost === ALL_INTERFACES_HOST ? printableLanAddresses() : []
-  return { lanAddresses, trustedHosts: [...reachable, ...extra] }
-}
-
 /** Model-visible orientation and acceptance boundary for sessions created through `dsh web`. */
 function webSurfacePrompt(webUrl: string): string {
   const updateContract = 'The client-plugin HMR receiver is active, but client-plugin changes reload without a refresh only while '
@@ -209,28 +120,60 @@ function webSurfacePrompt(webUrl: string): string {
     + 'Do not start a replacement server unless the user asks; if one is needed, use a managed background job and verify its exact URL.'
 }
 
-/** Resolve the canonical loopback URL from the active Web server. */
+// Display-only mirrors of the webserver schema's own host spellings: the
+// address the URL names for a bind that covers loopback, and the wildcard that
+// covers it. Not a source of truth — the schema is.
+const LOOPBACK_HOST = '127.0.0.1'
+const ALL_INTERFACES_HOST = '0.0.0.0'
+
+/**
+ * Root URL of the active Web server, using the browser-compatible form of its
+ * bind address and brackets for IPv6 literals.
+ *
+ * An all-interfaces bind covers loopback as well but is not an address a
+ * browser can open, so the URL keeps the loopback literal for it; any other
+ * bind address is the one this machine's browser must use, and a non-loopback
+ * one — a container's Pod address, say — advertises that address.
+ * @throws when the runtime resolves without a bound webServer, or when the bind
+ *   address has no URL form (see {@link advertisedBindHost}).
+ */
 function localWebUrl(ctx: Context): string {
   const webServer = ctx.get('webServer')
-  // A webserver without a bound port — the service is gone, or the bind was
-  // torn down mid-request — names no URL a browser could open: formatting it
-  // would hand `http://127.0.0.1:undefined` to the prompt and the URL line.
-  if (webServer?.port === undefined) {
-    throw new Error('web-app: webServer service missing or unbound while resolving Web runtime')
+  const port = webServer?.port
+  if (webServer === undefined || port === undefined) {
+    throw new Error('web-app: webServer service missing while resolving Web runtime')
   }
-  const port = webServer.port
-  // `0.0.0.0` covers loopback as well but is not an address a browser can open,
-  // so the printed URL keeps the loopback literal for it; a specific bind
-  // address is the one this machine's browser must use.
-  const host = webServer.host === ALL_INTERFACES_HOST ? LOOPBACK_HOST : webServer.host
-  return `http://${host}:${String(port)}`
+  const host = advertisedBindHost(webServer.host === ALL_INTERFACES_HOST ? LOOPBACK_HOST : webServer.host)
+  return `${webServer.protocol}//${isIP(host) === 6 ? `[${host}]` : host}:${String(port)}`
 }
 
+/** Resolve the advertised root: this plugin's canonical `publicUrl`, or the bind-address URL (loopback when bound to loopback). */
 function appRootUrl(ctx: Context, publicUrl: string | undefined): string {
   if (publicUrl !== undefined) return publicUrl
   return localWebUrl(ctx)
 }
 
+/**
+ * Bind address in a URL. Loopback addresses use their canonical address text,
+ * so browsers treat them as local, trustworthy origins: a genuinely mapped
+ * literal such as `::ffff:127.0.0.1` reads as `127.0.0.1`, and a dotted-quad
+ * tail reads as the address it names, so `::0.0.0.1` reads as `::1` rather
+ * than as `0.0.0.1`. Interface zone IDs cannot appear in a URL; only a
+ * redundant loopback zone can be dropped.
+ * @param host - webserver bind address.
+ * @returns the zone-free URL host.
+ * @throws when a non-loopback zone requires an explicit public URL.
+ */
+function advertisedBindHost(host: string): string {
+  const zoneAt = host.indexOf('%')
+  const bare = zoneAt === -1 ? host : host.slice(0, zoneAt)
+  if (isLoopbackHost(bare)) return normalizeBindAddress(bare)
+  if (zoneAt === -1) return host
+  throw new Error(
+    `web-app: bind address ${JSON.stringify(host)} carries an interface zone id, which no URL can express;`
+    + ' pass --public-url with the root browsers actually reach it through',
+  )
+}
 /**
  * Dist location is workspace knowledge of this bundle: anchored on the
  * frontend package manifest, not configured. Existence is a request-time
@@ -302,15 +245,15 @@ export const internals: {
  * @param config - validated {@link Config}.
  */
 export function apply(ctx: Context, config: Config): void {
-  const runtime = resolveLanTrust(ctx.webServer.host, config.trustedHosts)
   // The schema validates a present string; an explicit YAML `null` bypasses
   // the string transform and reaches here, meaning unset.
   const publicUrl = config.publicUrl ?? undefined
-  // The loopback URL belongs to this host. Under SSH, the operator reaches it
+  // A bind the URL has no form for is refused here rather than printed wrong.
+  const boundHost = ctx.webServer.host
+  if (publicUrl === undefined) advertisedBindHost(boundHost)
+  // The bind URL belongs to this host. Under SSH, the operator reaches it
   // through a local forwarding address that this process cannot derive.
   const handoffBrowser = config.openBrowser && !launchedThroughSsh(launchEnvironmentOf(ctx))
-  // Release dependent rows only after bind-dependent trust has been sampled once.
-  ctx.provide(WEB_RUNTIME_SERVICE, runtime)
   ctx.plugin(FrontendStatic, { distIndex: internals.resolveDistIndex() })
   if (config.surfaceContext) {
     ctx.inject(['systemPrompt'], (promptCtx) => {
@@ -342,14 +285,15 @@ export function apply(ctx: Context, config: Config): void {
         if (ANNOUNCED_ROOTS.has(connectionCtx.root)) return
         const webUrl = appRootUrl(connectionCtx, publicUrl)
         const authenticatedUrl = connectionCtx.connection.authenticatedUrl(webUrl)
-        // The snapshot's best-ranked candidate, sampled once at bind: the /api
-        // fence admits every address this bind publishes, while the line names
-        // the one a peer is most likely to reach.
-        const lanCandidate = runtime.lanAddresses[0]
+        // The exposure row publishes the LAN literals worth naming, best
+        // ranked first: the /api fence admits every address this bind
+        // publishes, while the line names the one a peer is most likely to
+        // reach. Absent without that row, which leaves the local URL alone.
+        const lanCandidate = connectionCtx.get('lanAccess')?.lanAddresses[0]
         const port = connectionCtx.webServer.port
         const lanUrl = lanCandidate === undefined
           ? undefined
-          : connectionCtx.connection.authenticatedUrl(`http://${lanCandidate}:${String(port)}`)
+          : connectionCtx.connection.authenticatedUrl(`${connectionCtx.webServer.protocol}//${lanCandidate}:${String(port)}`)
         ANNOUNCED_ROOTS.add(connectionCtx.root)
         if (config.printUrl) {
           console.log(`dsh web: ${authenticatedUrl}${lanUrl === undefined ? '' : ` (LAN: ${lanUrl})`}`)
