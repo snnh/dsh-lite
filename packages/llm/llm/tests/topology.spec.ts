@@ -218,6 +218,22 @@ describe('model discovery registry', () => {
     const discover = (): Promise<never[]> => Promise.resolve([])
 
     expect(() => ctx.llm.registerModelDiscovery('', discover)).toThrow(/non-empty settings namespace/)
+    // The defaults seam answers with whatever the adapter would declare.
+    const describe = async (request: { models: readonly string[] }) =>
+      request.models.map(id => ({ id, capabilities: { modalities: ['text'] }, note: 'test' }))
+    const disposeDefaults = ctx.llm.registerModelDefaults('llm-example', describe)
+    await expect(ctx.llm.modelDefaults('llm-example', { models: ['a', 'b'] }))
+      .resolves.toEqual([
+        { id: 'a', capabilities: { modalities: ['text'] }, note: 'test' },
+        { id: 'b', capabilities: { modalities: ['text'] }, note: 'test' },
+      ])
+    // A namespace with no registration, an empty id list, and a duplicate
+    // registration are all refused by name.
+    await expect(ctx.llm.modelDefaults('llm-other', { models: ['a'] })).rejects.toThrow(/no model defaults/)
+    await expect(ctx.llm.modelDefaults('llm-example', { models: [''] })).rejects.toThrow(/at least one model id/)
+    expect(() => ctx.llm.registerModelDefaults('llm-example', describe)).toThrow(/already registered/)
+    disposeDefaults()
+    await expect(ctx.llm.modelDefaults('llm-example', { models: ['a'] })).rejects.toThrow(/no model defaults/)
     ctx.llm.registerModelDiscovery('llm-example', discover)
     expect(() => ctx.llm.registerModelDiscovery('llm-example', discover)).toThrow(/already registered/)
     // The refused second registration left the first one serving.

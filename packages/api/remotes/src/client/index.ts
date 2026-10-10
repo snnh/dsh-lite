@@ -143,7 +143,7 @@ export type {
 } from '@deepseek-ai/dsh-settings/types'
 // Provider registry and discovery vocabulary for the llm namespace.
 export type {
-  LlmConfigurableProvider, LlmDiscoveredModel,
+  LlmConfigurableProvider, LlmDiscoveredModel, LlmModelDefaultEntry, LlmModelDefaultsRequest,
   LlmModelDiscoveryRequest, LlmProviderInfo,
 } from '@deepseek-ai/dsh-llm/types'
 // Reference-discovery result vocabulary for the fileReferences and

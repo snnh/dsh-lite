@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   ANTHROPIC_FALLBACK_MAX_TOKENS,
+  declaredDefaultsOf,
   MODEL_DEFAULT_RULES,
   anthropicMaxTokensOf,
   modelDefaultRuleOf,
@@ -84,6 +85,22 @@ describe('model family defaults', () => {
   it('matches ids case-insensitively', () => {
     expect(familyOf('GLM-5.3')).toBe('glm-5.3')
     expect(familyOf('DeepSeek-V4-Flash')).toBe('deepseek-v4-vision')
+  })
+
+  it('matches a namespaced id as the model its gateway names', () => {
+    // Gateways and routers spell the same model with a vendor prefix, and the
+    // router form that marks a normalized id with a leading `~`.
+    expect(familyOf('anthropic/claude-haiku-5.5')).toBe('claude-5')
+    expect(familyOf('anthropic/claude-opus-4-5')).toBe('claude-64k')
+    expect(familyOf('openai/gpt-5.4')).toBe('openai-reasoning')
+    expect(familyOf('deepseek/deepseek-v4-pro')).toBe('deepseek-v4')
+    expect(familyOf('z-ai/glm-5.3')).toBe('glm-5.3')
+    expect(familyOf('moonshotai/kimi-k2.6')).toBe('kimi-k2.6')
+    expect(familyOf('bytedance-seed/seed-2.0-code')).toBe('doubao-seed')
+    expect(familyOf('~anthropic/claude-fable-5-latest')).toBe('claude-5-reasoning')
+    // A prefixless id and its namespaced form answer alike.
+    expect(familyOf('anthropic/claude-opus-5-5')).toBe(familyOf('claude-opus-5-5'))
+    expect(anthropicMaxTokensOf('anthropic/claude-opus-4-5')).toBe(64 * 1024)
   })
 
   it('leaves an unknown model without family facts, which is not an error', () => {
@@ -201,8 +218,9 @@ describe('model family defaults', () => {
 
   it('keeps every rule sourced, matchable, and free of sampling parameters', () => {
     const allowed = new Set([
-      'family', 'match', 'modalities', 'reasoningContent', 'replayReasoning', 'replayRequired',
-      'thinkingStyle', 'effort', 'effortDefault', 'thinking', 'anthropicMaxTokens', 'note',
+      'family', 'match', 'contextWindow', 'maxTokens', 'modalities', 'reasoningContent',
+      'replayReasoning', 'replayRequired', 'thinkingStyle', 'effort', 'effortDefault', 'thinking',
+      'anthropicMaxTokens', 'note',
     ])
     for (const rule of MODEL_DEFAULT_RULES) {
       expect(rule.match.length).toBeGreaterThan(0)
@@ -214,10 +232,45 @@ describe('model family defaults', () => {
       }
       // A mandatory replay that is also declared off would contradict itself.
       if (rule.replayRequired === true) expect([rule.family, rule.replayReasoning]).toEqual([rule.family, true])
+      // A capacity is a token count, never a guess with a fractional part.
+      for (const capacity of [rule.contextWindow, rule.maxTokens]) {
+        if (capacity === undefined) continue
+        expect([rule.family, Number.isInteger(capacity) && capacity > 0]).toEqual([rule.family, true])
+      }
       // A default effort the family does not publish is a typo, not a default.
       if (rule.effortDefault !== undefined) expect([rule.family, rule.effort?.includes(rule.effortDefault)]).toEqual([rule.family, true])
     }
     const families = MODEL_DEFAULT_RULES.map(rule => rule.family)
     expect(new Set(families).size).toBe(families.length)
+  })
+})
+
+describe('declared defaults for a configuration surface', () => {
+  it('spells a family as a profile could state it', () => {
+    expect(declaredDefaultsOf('deepseek-v4-flash')).toMatchObject({
+      id: 'deepseek-v4-flash',
+      contextWindow: 1_000_000,
+      maxTokens: 393_216,
+      capabilities: {
+        modalities: ['text', 'image'],
+        effort: ['low', 'high', 'max'],
+        thinkingStyle: 'thinking',
+        reasoningContent: true,
+        replayReasoning: true,
+      },
+      defaults: {},
+    })
+    // The Messages protocol needs a cap, so the family's own becomes a
+    // configured default there and nowhere else.
+    expect(declaredDefaultsOf('claude-opus-5-5', 'anthropic-messages')?.defaults).toEqual({ maxTokens: 128 * 1024 })
+    expect(declaredDefaultsOf('claude-opus-5-5')?.defaults).toEqual({})
+    // A namespaced id is described like the bare one; the entry stays keyed by
+    // the id the caller asked about.
+    const bare = declaredDefaultsOf('claude-opus-5-5')
+    const namespaced = declaredDefaultsOf('anthropic/claude-opus-5-5')
+    expect(namespaced?.id).toBe('anthropic/claude-opus-5-5')
+    expect({ ...namespaced, id: bare?.id }).toEqual(bare)
+    // Nothing to declare is not an error: the surface says so instead.
+    expect(declaredDefaultsOf('acme-7b')).toBeUndefined()
   })
 })

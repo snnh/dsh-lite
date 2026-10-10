@@ -32,6 +32,8 @@
  * @module dsh-llm-service-lite/model-defaults
  */
 
+import type { JsonValue } from '@deepseek-ai/dsh-util-values'
+import type { LlmModelDefaultEntry } from '@deepseek-ai/dsh-llm'
 import type { EffortLevel, Modality, ThinkingMode, ThinkingStyle } from './config.ts'
 
 /** One family's researched defaults, keyed by model-id patterns. */
@@ -58,6 +60,18 @@ export interface ModelDefaultRule {
   readonly replayRequired?: boolean
   /** How the family spells its thinking switch on a chat-completions wire. */
   readonly thinkingStyle?: ThinkingStyle
+  /**
+   * Context capacity the family's own platform documents, in tokens. A
+   * generated profile carries it so a user reads the number instead of
+   * inheriting an unstated one.
+   */
+  readonly contextWindow?: number
+  /**
+   * Output capacity the family's own platform documents, in tokens. It stays a
+   * capacity: a request asks for a cap through `defaults.maxTokens`, never
+   * through this.
+   */
+  readonly maxTokens?: number
   /** Selectable reasoning-effort levels the family publishes, in escalation order. */
   readonly effort?: readonly EffortLevel[]
   /**
@@ -100,6 +114,8 @@ export const MODEL_DEFAULT_RULES: readonly ModelDefaultRule[] = [
   {
     family: 'claude-5-reasoning',
     match: [/^claude-(fable-5|sonnet-5)/],
+    contextWindow: 1000000,
+    maxTokens: 128000,
     modalities: ['text', 'image'],
     effort: ['low', 'medium', 'high', 'xhigh', 'max'],
     effortDefault: 'high',
@@ -109,6 +125,8 @@ export const MODEL_DEFAULT_RULES: readonly ModelDefaultRule[] = [
   {
     family: 'claude-opus-5',
     match: [/^claude-opus-5/],
+    contextWindow: 1000000,
+    maxTokens: 128000,
     modalities: ['text', 'image'],
     effort: ['low', 'medium', 'high', 'xhigh', 'max'],
     effortDefault: 'medium',
@@ -118,6 +136,8 @@ export const MODEL_DEFAULT_RULES: readonly ModelDefaultRule[] = [
   {
     family: 'claude-5',
     match: [/^claude-(opus-5|sonnet-5|haiku-5|fable-5)/],
+    contextWindow: 1000000,
+    maxTokens: 128000,
     modalities: ['text', 'image'],
     effort: ['low', 'medium', 'high', 'xhigh', 'max'],
     anthropicMaxTokens: 128 * 1024,
@@ -127,6 +147,8 @@ export const MODEL_DEFAULT_RULES: readonly ModelDefaultRule[] = [
   {
     family: 'claude-128k',
     match: [/^claude-(opus-4-[678]|sonnet-4-6)/],
+    contextWindow: 1000000,
+    maxTokens: 128000,
     modalities: ['text', 'image'],
     effort: ['low', 'medium', 'high', 'xhigh', 'max'],
     anthropicMaxTokens: 128 * 1024,
@@ -137,6 +159,8 @@ export const MODEL_DEFAULT_RULES: readonly ModelDefaultRule[] = [
   {
     family: 'claude-64k',
     match: [/^claude-(opus-4-5|sonnet-4-5|haiku-4-5)/],
+    contextWindow: 200000,
+    maxTokens: 64000,
     modalities: ['text', 'image'],
     anthropicMaxTokens: 64 * 1024,
     note: 'Anthropic models overview (Haiku 4.5 max output 64K) + official catalog, read 2026-10-10',
@@ -153,6 +177,8 @@ export const MODEL_DEFAULT_RULES: readonly ModelDefaultRule[] = [
   {
     family: 'kimi-coding-k3',
     match: [/^k3(-256k)?$/],
+    contextWindow: 1048576,
+    maxTokens: 131072,
     modalities: ['text', 'image'],
     effort: ['low', 'high', 'max'],
     effortDefault: 'max',
@@ -162,6 +188,8 @@ export const MODEL_DEFAULT_RULES: readonly ModelDefaultRule[] = [
   {
     family: 'kimi-coding',
     match: [/^kimi-for-coding/],
+    contextWindow: 1048576,
+    maxTokens: 32768,
     modalities: ['text', 'image'],
     effort: ['low', 'high', 'max'],
     effortDefault: 'max',
@@ -174,6 +202,8 @@ export const MODEL_DEFAULT_RULES: readonly ModelDefaultRule[] = [
   {
     family: 'minimax-m3.1',
     match: [/^minimax-m3\.1/],
+    contextWindow: 1000000,
+    maxTokens: 512000,
     modalities: ['text', 'image'],
     effort: ['low', 'medium', 'high', 'xhigh', 'max'],
     effortDefault: 'max',
@@ -183,6 +213,8 @@ export const MODEL_DEFAULT_RULES: readonly ModelDefaultRule[] = [
   {
     family: 'minimax-m3',
     match: [/^minimax-m3/],
+    contextWindow: 1000000,
+    maxTokens: 512000,
     modalities: ['text', 'image'],
     thinking: ['adaptive', 'disabled'],
     anthropicMaxTokens: 512 * 1024,
@@ -191,6 +223,8 @@ export const MODEL_DEFAULT_RULES: readonly ModelDefaultRule[] = [
   {
     family: 'minimax-m2',
     match: [/^minimax-m2/],
+    contextWindow: 204800,
+    maxTokens: 131072,
     modalities: ['text'],
     anthropicMaxTokens: 128 * 1024,
     note: 'MiniMax Anthropic API docs + models.dev: output 131072, read 2026-10-10',
@@ -202,6 +236,8 @@ export const MODEL_DEFAULT_RULES: readonly ModelDefaultRule[] = [
   {
     family: 'deepseek-v4-vision',
     match: [/^deepseek-(v4-flash|v4\.1|flash)/],
+    contextWindow: 1000000,
+    maxTokens: 393216,
     modalities: ['text', 'image'],
     reasoningContent: true,
     replayReasoning: true,
@@ -214,6 +250,8 @@ export const MODEL_DEFAULT_RULES: readonly ModelDefaultRule[] = [
   {
     family: 'deepseek-v4',
     match: [/^deepseek-v4/],
+    contextWindow: 1000000,
+    maxTokens: 393216,
     modalities: ['text'],
     reasoningContent: true,
     replayReasoning: true,
@@ -236,6 +274,8 @@ export const MODEL_DEFAULT_RULES: readonly ModelDefaultRule[] = [
   {
     family: 'kimi-k3',
     match: [/^kimi-k3/],
+    contextWindow: 1048576,
+    maxTokens: 1048576,
     modalities: ['text', 'image'],
     reasoningContent: true,
     replayReasoning: true,
@@ -249,6 +289,8 @@ export const MODEL_DEFAULT_RULES: readonly ModelDefaultRule[] = [
   {
     family: 'kimi-k2.7',
     match: [/^kimi-k2\.7/],
+    contextWindow: 262144,
+    maxTokens: 262144,
     modalities: ['text', 'image'],
     reasoningContent: true,
     replayReasoning: true,
@@ -259,6 +301,8 @@ export const MODEL_DEFAULT_RULES: readonly ModelDefaultRule[] = [
   {
     family: 'kimi-k2.6',
     match: [/^kimi-k2\.6/],
+    contextWindow: 262144,
+    maxTokens: 262144,
     modalities: ['text', 'image'],
     reasoningContent: true,
     thinking: ['enabled', 'disabled'],
@@ -278,6 +322,8 @@ export const MODEL_DEFAULT_RULES: readonly ModelDefaultRule[] = [
   {
     family: 'glm-5.3-vision',
     match: [/^glm-5\.3-flash/],
+    contextWindow: 1000000,
+    maxTokens: 131072,
     modalities: ['text', 'image'],
     reasoningContent: true,
     thinkingStyle: 'thinking',
@@ -291,6 +337,8 @@ export const MODEL_DEFAULT_RULES: readonly ModelDefaultRule[] = [
   {
     family: 'glm-vision',
     match: [/^glm-5v/, /^glm-4\.6v/],
+    contextWindow: 200000,
+    maxTokens: 131072,
     modalities: ['text', 'image'],
     reasoningContent: true,
     thinkingStyle: 'thinking',
@@ -299,6 +347,8 @@ export const MODEL_DEFAULT_RULES: readonly ModelDefaultRule[] = [
   {
     family: 'glm-5.3',
     match: [/^glm-5\.3/],
+    contextWindow: 1000000,
+    maxTokens: 131072,
     reasoningContent: true,
     thinkingStyle: 'thinking',
     thinking: ['enabled'],
@@ -310,6 +360,8 @@ export const MODEL_DEFAULT_RULES: readonly ModelDefaultRule[] = [
   {
     family: 'glm-5.2',
     match: [/^glm-5\.2/],
+    contextWindow: 1000000,
+    maxTokens: 131072,
     reasoningContent: true,
     thinkingStyle: 'thinking',
     effort: ['high', 'max'],
@@ -331,6 +383,8 @@ export const MODEL_DEFAULT_RULES: readonly ModelDefaultRule[] = [
   {
     family: 'qwen3.8-max',
     match: [/^qwen3\.8-max/],
+    contextWindow: 1000000,
+    maxTokens: 131072,
     modalities: ['text', 'image'],
     reasoningContent: true,
     replayReasoning: true,
@@ -344,6 +398,8 @@ export const MODEL_DEFAULT_RULES: readonly ModelDefaultRule[] = [
   {
     family: 'qwen3.8',
     match: [/^qwen3\.8/],
+    contextWindow: 1000000,
+    maxTokens: 131072,
     modalities: ['text', 'image'],
     reasoningContent: true,
     thinkingStyle: 'enable_thinking',
@@ -355,6 +411,8 @@ export const MODEL_DEFAULT_RULES: readonly ModelDefaultRule[] = [
   {
     family: 'qwen3.7-max',
     match: [/^qwen3\.7-max/],
+    contextWindow: 1000000,
+    maxTokens: 131072,
     modalities: ['text'],
     reasoningContent: true,
     thinkingStyle: 'enable_thinking',
@@ -364,6 +422,8 @@ export const MODEL_DEFAULT_RULES: readonly ModelDefaultRule[] = [
   {
     family: 'qwen3.5+',
     match: [/^qwen3\.[5-8]/],
+    contextWindow: 1000000,
+    maxTokens: 65536,
     modalities: ['text', 'image'],
     reasoningContent: true,
     thinkingStyle: 'enable_thinking',
@@ -384,6 +444,8 @@ export const MODEL_DEFAULT_RULES: readonly ModelDefaultRule[] = [
   {
     family: 'doubao-seed-2.0',
     match: [/^doubao-seed-2-0/, /^doubao-seed-character/],
+    contextWindow: 256000,
+    maxTokens: 128000,
     modalities: ['text', 'image'],
     reasoningContent: true,
     thinkingStyle: 'thinking',
@@ -394,6 +456,8 @@ export const MODEL_DEFAULT_RULES: readonly ModelDefaultRule[] = [
   {
     family: 'doubao-seed',
     match: [/^doubao-/, /^seed-/, /\/seed-/],
+    contextWindow: 256000,
+    maxTokens: 256000,
     modalities: ['text', 'image'],
     reasoningContent: true,
     thinkingStyle: 'thinking',
@@ -406,6 +470,8 @@ export const MODEL_DEFAULT_RULES: readonly ModelDefaultRule[] = [
   {
     family: 'hunyuan-hy4',
     match: [/^hy4/, /^hunyuan-4/],
+    contextWindow: 1024000,
+    maxTokens: 64000,
     reasoningContent: true,
     thinkingStyle: 'thinking',
     effort: ['low', 'medium', 'high'],
@@ -415,6 +481,8 @@ export const MODEL_DEFAULT_RULES: readonly ModelDefaultRule[] = [
   {
     family: 'hunyuan',
     match: [/^hy\d/, /^hunyuan/],
+    contextWindow: 256000,
+    maxTokens: 128000,
     reasoningContent: true,
     thinkingStyle: 'thinking',
     effort: ['low', 'medium', 'high'],
@@ -428,6 +496,8 @@ export const MODEL_DEFAULT_RULES: readonly ModelDefaultRule[] = [
   {
     family: 'ernie-5.0',
     match: [/^ernie-5\.0/],
+    contextWindow: 131072,
+    maxTokens: 65536,
     modalities: ['text', 'image'],
     reasoningContent: true,
     thinkingStyle: 'enable_thinking',
@@ -437,6 +507,8 @@ export const MODEL_DEFAULT_RULES: readonly ModelDefaultRule[] = [
   {
     family: 'ernie-5.1',
     match: [/^ernie-5\.1/],
+    contextWindow: 131072,
+    maxTokens: 65536,
     modalities: ['text'],
     reasoningContent: true,
     thinkingStyle: 'enable_thinking',
@@ -446,6 +518,8 @@ export const MODEL_DEFAULT_RULES: readonly ModelDefaultRule[] = [
   {
     family: 'ernie-x1',
     match: [/^ernie-x1/],
+    contextWindow: 65536,
+    maxTokens: 65536,
     reasoningContent: true,
     thinking: ['enabled'],
     note: 'Baidu Qianfan deep-thinking docs: ERNIE X1 is thinking-only, read 2026-10-10',
@@ -453,6 +527,8 @@ export const MODEL_DEFAULT_RULES: readonly ModelDefaultRule[] = [
   {
     family: 'ernie-vl',
     match: [/^ernie-.*-vl/],
+    contextWindow: 131072,
+    maxTokens: 16384,
     modalities: ['text', 'image'],
     note: 'Baidu Qianfan vision model list (ernie-4.5-turbo-vl, ernie-4.5-vl-28b-a3b), read 2026-10-10',
   },
@@ -461,8 +537,20 @@ export const MODEL_DEFAULT_RULES: readonly ModelDefaultRule[] = [
   // levels are documented as low/medium/high with medium the recommended
   // default.
   {
+    family: 'step-5',
+    match: [/^step-5/],
+    contextWindow: 1000000,
+    maxTokens: 65536,
+    modalities: ['text', 'image'],
+    effort: ['low', 'medium', 'high'],
+    effortDefault: 'medium',
+    note: 'StepFun docs: step-5-preview carries a 1M context; reasoning_effort low/medium/high, medium recommended, read 2026-10-10',
+  },
+  {
     family: 'step',
     match: [/^step-\d/],
+    contextWindow: 256000,
+    maxTokens: 256000,
     modalities: ['text', 'image'],
     effort: ['low', 'medium', 'high'],
     effortDefault: 'medium',
@@ -476,6 +564,8 @@ export const MODEL_DEFAULT_RULES: readonly ModelDefaultRule[] = [
   {
     family: 'mimo',
     match: [/^mimo-/],
+    contextWindow: 1048576,
+    maxTokens: 131072,
     modalities: ['text', 'image'],
     reasoningContent: true,
     replayReasoning: true,
@@ -493,6 +583,8 @@ export const MODEL_DEFAULT_RULES: readonly ModelDefaultRule[] = [
   {
     family: 'sensenova',
     match: [/^sensenova-/],
+    contextWindow: 262144,
+    maxTokens: 65536,
     modalities: ['text', 'image'],
     effort: ['low', 'medium', 'high', 'max'],
     effortDefault: 'high',
@@ -505,6 +597,8 @@ export const MODEL_DEFAULT_RULES: readonly ModelDefaultRule[] = [
   {
     family: 'longcat',
     match: [/^longcat/],
+    contextWindow: 1000000,
+    maxTokens: 131072,
     modalities: ['text'],
     thinkingStyle: 'thinking',
     thinking: ['enabled', 'disabled'],
@@ -519,6 +613,8 @@ export const MODEL_DEFAULT_RULES: readonly ModelDefaultRule[] = [
   {
     family: 'openai-reasoning-nodefault',
     match: [/^gpt-5\.1/],
+    contextWindow: 400000,
+    maxTokens: 128000,
     modalities: ['text', 'image'],
     replayReasoning: false,
     effort: ['low', 'medium', 'high'],
@@ -527,6 +623,8 @@ export const MODEL_DEFAULT_RULES: readonly ModelDefaultRule[] = [
   {
     family: 'openai-reasoning',
     match: [/^gpt-5/, /^gpt-6/, /^o[1-4]/],
+    contextWindow: 400000,
+    maxTokens: 128000,
     modalities: ['text', 'image'],
     replayReasoning: false,
     effort: ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
@@ -536,13 +634,78 @@ export const MODEL_DEFAULT_RULES: readonly ModelDefaultRule[] = [
 ]
 
 /**
- * The rule that speaks for one model, or nothing when no family matches.
+ * Every spelling of one model id a rule may be written against.
+ *
+ * Providers name their models in more than one shape: the vendor's own id
+ * (`claude-haiku-5.5`), a gateway's namespaced form
+ * (`anthropic/claude-haiku-5.5`), and the router form that marks a normalized
+ * id with a leading `~` (`~anthropic/claude-opus-latest`). A rule is written
+ * once against the model's own name, and every spelling is offered to it, so a
+ * namespaced id resolves to the same family as the bare one.
  * @param modelId - the model id as the profile spells it.
+ * @returns the lowercased id and every suffix after a leading `vendor/` or `~`.
+ */
+function idSpellingsOf(modelId: string): string[] {
+  const id = modelId.toLowerCase()
+  const spellings = [id]
+  let rest = id.startsWith('~') ? id.slice(1) : id
+  spellings.push(rest)
+  while (rest.includes('/')) {
+    rest = rest.slice(rest.indexOf('/') + 1)
+    spellings.push(rest)
+  }
+  return spellings
+}
+
+/**
+ * The rule that speaks for one model, or nothing when no family matches.
+ * @param modelId - the model id as the profile spells it, in any provider naming.
  * @returns the first matching rule in table order.
  */
 export function modelDefaultRuleOf(modelId: string): ModelDefaultRule | undefined {
-  const id = modelId.toLowerCase()
-  return MODEL_DEFAULT_RULES.find(rule => rule.match.some(pattern => pattern.test(id)))
+  const spellings = idSpellingsOf(modelId)
+  return MODEL_DEFAULT_RULES.find(rule => rule.match.some(pattern => spellings.some(id => pattern.test(id))))
+}
+
+/**
+ * One model's researched defaults, spelled as a profile would state them.
+ *
+ * This is what a configuration surface writes into a document when a user asks
+ * to see the defaults rather than inherit them: every field is the same
+ * vocabulary the profile schema accepts, so the reply can be written through
+ * unchanged and edited afterwards like anything else the user typed.
+ * @param modelId - the model id as the profile spells it.
+ * @param interfaceType - the route's protocol, which decides whether a cap is stated.
+ * @returns the declarations, or nothing when no family speaks for this id.
+ */
+export function declaredDefaultsOf(
+  modelId: string,
+  interfaceType?: string,
+): LlmModelDefaultEntry | undefined {
+  const rule = modelDefaultRuleOf(modelId)
+  if (rule === undefined) return undefined
+  const capabilities: Record<string, JsonValue> = {}
+  if (rule.modalities !== undefined) capabilities['modalities'] = [...rule.modalities]
+  if (rule.effort !== undefined) capabilities['effort'] = [...rule.effort]
+  if (rule.thinking !== undefined) capabilities['thinking'] = [...rule.thinking]
+  if (rule.thinkingStyle !== undefined) capabilities['thinkingStyle'] = rule.thinkingStyle
+  if (rule.reasoningContent !== undefined) capabilities['reasoningContent'] = rule.reasoningContent
+  if (rule.replayReasoning !== undefined) capabilities['replayReasoning'] = rule.replayReasoning
+  // The Anthropic protocol requires a cap, so the family's own value becomes a
+  // configured request default there; the OpenAI wires send none unless the
+  // user asks, and this writes nothing they would have to undo.
+  const defaults: Record<string, JsonValue> =
+    interfaceType === 'anthropic-messages' && rule.anthropicMaxTokens !== undefined
+      ? { maxTokens: rule.anthropicMaxTokens }
+      : {}
+  return {
+    id: modelId,
+    ...rule.contextWindow === undefined ? {} : { contextWindow: rule.contextWindow },
+    ...rule.maxTokens === undefined ? {} : { maxTokens: rule.maxTokens },
+    capabilities,
+    defaults,
+    note: rule.note,
+  }
 }
 
 /**

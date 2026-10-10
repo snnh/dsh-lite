@@ -64,7 +64,7 @@ describe('profile resolution', () => {
       id: 'm',
       name: 'm',
       contextWindow: 256_000,
-      maxTokens: 8_192,
+      maxTokens: 65_536,
       modalities: ['text'],
       effort: [],
       thinking: [],

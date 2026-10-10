@@ -490,7 +490,7 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
      */
     const capacityHint = (): Readonly<Record<'contextWindow' | 'maxTokens', string>> => ({
       contextWindow: formatCapacity(inheritedNumber('defaultContextWindow') ?? 256_000),
-      maxTokens: formatCapacity(inheritedNumber('defaultMaxTokens') ?? 8_192),
+      maxTokens: formatCapacity(inheritedNumber('defaultMaxTokens') ?? 65_536),
     })
 
     /** The family's model list: one contract, family-owned extras. */

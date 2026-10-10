@@ -11,6 +11,7 @@ afterEach(cleanup)
 function operations(discoverModels: ModelsOperations['discoverModels']): ModelsOperations {
   return {
     discoverModels,
+    modelDefaults: vi.fn(() => Promise.resolve({ kind: 'described', models: [] } as const)),
     describeCredential: vi.fn(),
     storeCredential: vi.fn(),
     removeCredential: vi.fn(),
@@ -103,5 +104,60 @@ it('restores inherited image input after a failed catalog read is retried manual
   expect(image.checked).toBe(true)
   expect(screen.queryByText('Catalog unavailable')).toBeNull()
   expect(discover).toHaveBeenCalledTimes(2)
+  expect(onChange).not.toHaveBeenCalled()
+})
+
+it('writes what the adapter declares about the drafted ids into their rows', async () => {
+  const onChange = vi.fn()
+  const modelDefaults: ModelsOperations['modelDefaults'] = vi.fn(() => Promise.resolve({
+    kind: 'described' as const,
+    models: [{
+      id: 'deepseek-v4-flash',
+      contextWindow: 1_000_000,
+      maxTokens: 393_216,
+      capabilities: { modalities: ['text', 'image'], effort: ['low', 'high', 'max'], replayReasoning: true },
+      defaults: { maxTokens: 1024 },
+    }],
+  }))
+  render(<ModelListEditor
+    models={[{ id: 'deepseek-v4-flash', name: 'Flash', capabilities: { tools: false } }, { id: 'acme-7b' }]}
+    onChange={onChange}
+    probe={{ settingsNs: 'llm-service-lite' }}
+    disabled={false} t={key => en[key]} onBusyChange={() => {}}
+    operations={{ ...operations(() => Promise.resolve({ kind: 'found', models: [] })), modelDefaults }}
+  />)
+  expect(modelDefaults).toHaveBeenCalledTimes(0)
+  fireEvent.click(screen.getByRole('button', { name: en.writeDeclaredDefaults }))
+  await waitFor(() => { expect(onChange).toHaveBeenCalledTimes(1) })
+  expect(modelDefaults).toHaveBeenCalledWith('llm-service-lite', {
+    models: ['deepseek-v4-flash', 'acme-7b'],
+  })
+  // The capacities and declared fields land in the row, the row's own fields
+  // survive, and an id the adapter could not describe is left exactly as it was.
+  expect(onChange).toHaveBeenCalledWith([
+    {
+      id: 'deepseek-v4-flash',
+      name: 'Flash',
+      contextWindow: 1_000_000,
+      maxTokens: 393_216,
+      capabilities: { tools: false, modalities: ['text', 'image'], effort: ['low', 'high', 'max'], replayReasoning: true },
+      defaults: { maxTokens: 1024 },
+    },
+    { id: 'acme-7b' },
+  ])
+  expect(screen.getByText(en.declaredDefaultsWritten)).toBeTruthy()
+})
+
+it('says so when no family describes any of the drafted ids', async () => {
+  const onChange = vi.fn()
+  render(<ModelListEditor
+    models={[{ id: 'acme-7b' }]}
+    onChange={onChange}
+    probe={{ settingsNs: 'llm-service-lite' }}
+    disabled={false} t={key => en[key]} onBusyChange={() => {}}
+    operations={{ ...operations(() => Promise.resolve({ kind: 'found', models: [] })), modelDefaults: vi.fn(() => Promise.resolve({ kind: 'described' as const, models: [] })) }}
+  />)
+  fireEvent.click(screen.getByRole('button', { name: en.writeDeclaredDefaults }))
+  await waitFor(() => { expect(screen.getByText(en.declaredDefaultsNone)).toBeTruthy() })
   expect(onChange).not.toHaveBeenCalled()
 })

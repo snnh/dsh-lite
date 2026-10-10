@@ -36,9 +36,9 @@ The Anthropic transport had a related gap. Its protocol requires `max_tokens` on
 
 **Send the family's default effort on every request, including ones where the caller named a level.** Rejected: a caller's own level is the more specific instruction, and the vendor default only exists to fill the silence.
 
-**Give the table its own spoken format (YAML or JSON data file).** Rejected for now: the lite package ships a bundled `lib/index.js` with no asset pipeline, so a separate data file would need packaging and runtime path work for no reading benefit; the module is a flat table with a per-rule provenance line, and it is type-checked.
+**Give the table its own spoken format (YAML or JSON data file).** Rejected for now: the lite package ships a bundled `lib/index.js` with no asset pipeline, so a separate data file would need packaging and runtime path work for no reading benefit; the module is a flat table whose every rule carries the vendor document it was read from, and it is type-checked.
 
-**Keep a family whose only source was the official catalog.** Partially rejected: the ant-ling (`Ring-*`) family was dropped for lack of its own platform documentation, and LongCat was restored once its own API docs were read. The catalog-only entries that remain are labelled as such in their provenance line.
+**Keep a family whose only source was the official catalog.** Partially rejected: the ant-ling (`Ring-*`) family was dropped for lack of its own platform documentation, and LongCat was restored once its own API docs were read. The catalog-only entries that remain say so in their `note` line.
 
 ## Consequences
 
@@ -46,7 +46,7 @@ A bare `models: [{ id: … }]` route is now usually enough: image input, thinkin
 
 Three externally visible changes follow. A model's `maxTokens` no longer becomes a request cap on the OpenAI wires. The Messages wire takes its cap from the configured default, the family, then 64K. Turning off the reasoning replay where the family requires it is now refused by name. All three are in the upgrade guide.
 
-The table is data, not logic: adding a model family means one rule with its provenance, and the test file pins the family each representative id resolves to, so a rule inserted in the wrong order fails rather than silently shadowing another.
+The table is data, not logic: adding a model family means one rule that names the document it came from, and the test file pins the family each representative id resolves to, so a rule inserted in the wrong order fails rather than silently shadowing another.
 
 Deferred: a per-thinking-level default table (`samplingParamsByThinkingLevel`-style), a settings-page surface for editing the table's values, and the effort ladder for families whose platform documents a level set without publishing a default.
 

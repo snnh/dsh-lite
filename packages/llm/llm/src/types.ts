@@ -4,6 +4,7 @@
  * mapped interfaces make the content, source, and finish unions extensible.
  */
 
+import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import type { Branded } from '@deepseek-ai/dsh-brand'
 import type { FileAttachmentRef, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import type { MessageId, ToolCallId, ProviderRequestId, ReasoningEffortId } from './brand.ts'
@@ -305,7 +306,57 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
       readonly settingsNs: string
       readonly baseURL?: string
     }
+    /** A model-defaults request was refused. */
+    'llm/model-defaults-rejected': {
+      readonly settingsNs: string
+    }
   }
+}
+
+/**
+ * A configuration surface's ask for what the route's adapter would declare
+ * about the model ids the surface is editing.
+ *
+ * The surface has the ids (the user typed or discovered them) and nothing
+ * else: only the adapter knows what a family implies, and only the adapter can
+ * spell a declaration in the vocabulary its own profile schema accepts. The
+ * reply is therefore a draft the surface may write into its document, not a
+ * resolved fact — the profile keeps the last word once it states anything.
+ */
+export interface LlmModelDefaultsRequest {
+  /** Wire protocol the declarations are for, when the surface names one. */
+  api?: string
+  /** Model ids to describe, in the caller's order. */
+  models: readonly string[]
+}
+
+/**
+ * One model's adapter-declared configuration, in the profile's own vocabulary.
+ *
+ * Both halves are optional and both are the adapter's own field names — the
+ * surface writes them through unchanged, so a newer adapter that declares more
+ * than the surface understands still hands the user a document its own schema
+ * accepts.
+ */
+export interface LlmModelDefaultEntry {
+  /** Model id these declarations are for. */
+  id: string
+  /** Model context capacity the adapter documents, when it documents one. */
+  contextWindow?: number
+  /** Model output capacity the adapter documents, when it documents one. */
+  maxTokens?: number
+  /** Capability declarations, keyed as the profile's `capabilities` object. */
+  capabilities?: Record<string, JsonValue>
+  /** Request parameters, keyed as the profile's `defaults` object. */
+  defaults?: Record<string, JsonValue>
+  /** The vendor document or catalog the declarations were read from. */
+  note?: string
+}
+
+/** Answer to one {@link LlmModelDefaultsRequest}. */
+export interface LlmModelDefaultsReply {
+  /** One entry per id the adapter could describe, in the request's order. */
+  models: readonly LlmModelDefaultEntry[]
 }
 
 /**

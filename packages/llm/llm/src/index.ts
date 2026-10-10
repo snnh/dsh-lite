@@ -17,6 +17,8 @@ import type {
   LlmFailure,
   LlmImageRequestPricing,
   LlmModelContext,
+  LlmModelDefaultEntry,
+  LlmModelDefaultsRequest,
   LlmModelDiscoveryRequest,
   LlmModelInfo,
   LlmResolvedModelInfo,
@@ -346,6 +348,10 @@ export class LlmRuntime extends TypertRemoteService {
     string,
     (request: LlmModelDiscoveryRequest, signal?: AbortSignal) => Promise<readonly LlmDiscoveredModel[]>
   >()
+  private defaultsProviders = new Map<
+    string,
+    (request: LlmModelDefaultsRequest) => Promise<readonly LlmModelDefaultEntry[]>
+  >()
 
   constructor(ctx: Context) {
     super(ctx, 'llm')
@@ -643,6 +649,88 @@ export class LlmRuntime extends TypertRemoteService {
           settingsNs,
           ...request.baseURL === undefined ? {} : { baseURL: request.baseURL },
         },
+        { cause: error },
+      )
+    }
+  }
+
+  /**
+   * Register what one settings namespace's adapter declares about model ids a
+   * configuration surface is editing. A namespace holds one registration; the
+   * handler answers from the adapter's own knowledge and never reads settings
+   * or credentials, because the surface owns the draft it is editing.
+   * @param settingsNs - namespace whose adapter answers.
+   * @param describe - one request in, one entry per id the adapter can describe.
+   * @returns disposer that removes the registration.
+   */
+  registerModelDefaults(
+    settingsNs: string,
+    describe: (request: LlmModelDefaultsRequest) => Promise<readonly LlmModelDefaultEntry[]>,
+  ): () => void {
+    const dispose = this.ctx.effect(function* (this: LlmRuntime) {
+      if (settingsNs.length === 0) {
+        throw new LlmError('model defaults need a non-empty settings namespace', 'INVALID_DISCOVERY')
+      }
+      if (this.defaultsProviders.has(settingsNs)) {
+        throw new LlmError(`model defaults for "${settingsNs}" are already registered`, 'DUPLICATE_DISCOVERY')
+      }
+      this.defaultsProviders.set(settingsNs, describe)
+      yield () => {
+        this.defaultsProviders.delete(settingsNs)
+      }
+    }.bind(this), 'llm.registerModelDefaults()')
+    return () => void dispose()
+  }
+
+  /**
+   * Ask one namespace's adapter what it would declare about the given model
+   * ids, in the vocabulary the namespace's own profile schema accepts.
+   * @param settingsNs - namespace whose registered adapter answers.
+   * @param request - the ids to describe, and the protocol they are for.
+   * @returns one entry per id the adapter could describe, in request order.
+   */
+  async modelDefaults(
+    settingsNs: string,
+    request: LlmModelDefaultsRequest,
+  ): Promise<LlmModelDefaultEntry[]> {
+    const describe = this.defaultsProviders.get(settingsNs)
+    if (describe === undefined) {
+      throw new LlmError(`no model defaults are registered for "${settingsNs}"`, 'NO_DISCOVERY')
+    }
+    const wanted = request.models.filter(id => typeof id === 'string' && id.length > 0)
+    if (wanted.length === 0) {
+      throw new LlmError('model defaults need at least one model id', 'INVALID_DISCOVERY')
+    }
+    const described = await describe({ ...request, models: wanted })
+    const seen = new Set<string>()
+    const models: LlmModelDefaultEntry[] = []
+    for (const entry of described) {
+      if (typeof entry.id !== 'string' || entry.id.length === 0 || seen.has(entry.id)) continue
+      seen.add(entry.id)
+      models.push(entry)
+    }
+    return models
+  }
+
+  /**
+   * Remote adapter for one model-defaults request.
+   * @param settingsNs - namespace whose registered adapter answers.
+   * @param request - the ids to describe, and the protocol they are for.
+   * @returns declarations the caller may write into its document.
+   * @throws RemoteError with `llm/model-defaults-rejected` when it refuses.
+   */
+  @Remote('modelDefaults')
+  async remoteModelDefaults(
+    settingsNs: string,
+    request: LlmModelDefaultsRequest,
+  ): Promise<LlmModelDefaultEntry[]> {
+    try {
+      return await this.modelDefaults(settingsNs, request)
+    } catch (error: unknown) {
+      throw new RemoteError(
+        'llm/model-defaults-rejected',
+        error instanceof Error ? error.message : String(error),
+        { settingsNs },
         { cause: error },
       )
     }

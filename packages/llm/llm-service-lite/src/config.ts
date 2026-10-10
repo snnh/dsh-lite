@@ -183,7 +183,13 @@ export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 300_000
 export const DEFAULT_CONTEXT_WINDOW = 256_000
 
 /** Output capability assumed for a model the profile does not size. */
-export const DEFAULT_MAX_TOKENS = 8_192
+/**
+ * Output capacity a model the profile sizes nowhere falls back to, and the
+ * number a blank capacity field shows as inherited. It matches the cap the
+ * Anthropic Messages wire sends for a model no family speaks for, so the
+ * displayed default and the sent one are the same number.
+ */
+export const DEFAULT_MAX_TOKENS = 64 * 1024
 
 /**
  * Accumulated base64 image payload one request may carry. The default matches

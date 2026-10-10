@@ -49,6 +49,7 @@ import { deepEqualJson } from '@deepseek-ai/dsh-util-values'
 import { OwcProfilesAdapter } from './adapter.ts'
 import { Config, type Options } from './config.ts'
 import { discoverEndpointModels } from './discovery.ts'
+import { declaredDefaultsOf } from './model-defaults.ts'
 import { ConcurrencyLimiter } from './limiter.ts'
 import {
   assertServiceable,
@@ -209,6 +210,15 @@ export function apply(ctx: Context, config: Config): void {
     registeredDirectory = entries
   }
   ensureDirectory()
+
+  // A configuration surface asks what this adapter would declare about the ids
+  // it is editing; the answer is profile vocabulary, so the surface can write
+  // it into the user's document and the user can edit it there.
+  ctx.llm.registerModelDefaults(settingsNs, request => Promise.resolve(
+    request.models.flatMap((id) => {
+      const declared = declaredDefaultsOf(id, request.api)
+      return declared === undefined ? [] : [declared]
+    })))
 
   ctx.llm.registerModelDiscovery(settingsNs, (request, signal) => {
     const stored = request.provider === undefined ? undefined : profiles().get(request.provider)

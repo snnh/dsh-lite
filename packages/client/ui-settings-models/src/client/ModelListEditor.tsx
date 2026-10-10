@@ -57,6 +57,13 @@ function textOf(model: ModelDraft, key: string): string {
 }
 
 /** A row's numeric field, or `undefined` when unset or not a number. */
+/** One drafted sub-object, or an empty one to merge declarations into. */
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? { ...value as Record<string, unknown> }
+    : {}
+}
+
 function numberOf(model: ModelDraft, key: string): number | undefined {
   const value = model[key]
   return typeof value === 'number' ? value : undefined
@@ -185,6 +192,7 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
   const [busy, setBusy] = useState(false)
   useEffect(() => { onBusyChange(busy) }, [busy, onBusyChange])
   const [failure, setFailure] = useState<string | undefined>(undefined)
+  const [notice, setNotice] = useState<string | undefined>(undefined)
   const [inheritedCatalog, setInheritedCatalog] = useState<{
     provider: string
     models: readonly LlmDiscoveredModel[]
@@ -273,6 +281,7 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
   const fetchModels = async (): Promise<void> => {
     setBusy(true)
     setFailure(undefined)
+    setNotice(undefined)
     try {
       const answer = await operations.discoverModels(probe.settingsNs, {
         ...probe.provider === undefined ? {} : { provider: probe.provider },
@@ -351,6 +360,56 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
     })
   }
 
+  /**
+   * Write what the route's adapter declares about the drafted ids into their
+   * rows: the model's family supplies the capabilities and request parameters
+   * a user would otherwise have to know by heart, and they land in the
+   * document where every other declaration is editable.
+   */
+  const writeDeclaredDefaults = async (): Promise<void> => {
+    const ids = models.flatMap(model => typeof model['id'] === 'string' && model['id'].length > 0 ? [model['id']] : [])
+    if (ids.length === 0) return
+    setBusy(true)
+    setFailure(undefined)
+    setNotice(undefined)
+    try {
+      const answer = await operations.modelDefaults(probe.settingsNs, {
+        ...probe.api === undefined ? {} : { api: probe.api },
+        models: ids,
+      })
+      if (answer.kind === 'refused') {
+        setFailure(answer.message)
+        return
+      }
+      const declared = new Map(answer.models.map(entry => [entry.id, entry]))
+      if (declared.size === 0) {
+        setFailure(t('declaredDefaultsNone'))
+        return
+      }
+      // Fields the adapter did not speak about survive: this fills the
+      // declarations a family implies, it does not replace the row.
+      onChange(models.map((model) => {
+        const entry = declared.get(String(model['id']))
+        if (entry === undefined) return model
+        const defaults = entry.defaults ?? {}
+        return {
+          ...model,
+          ...entry.contextWindow === undefined ? {} : { contextWindow: entry.contextWindow },
+          ...entry.maxTokens === undefined ? {} : { maxTokens: entry.maxTokens },
+          ...Object.keys(entry.capabilities ?? {}).length === 0
+            ? {}
+            : { capabilities: { ...asRecord(model['capabilities']), ...entry.capabilities } },
+          ...Object.keys(defaults).length === 0
+            ? {}
+            : { defaults: { ...asRecord(model['defaults']), ...defaults } },
+        }
+      }))
+      setNotice(t('declaredDefaultsWritten'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   // A route the adapter already describes answers without an endpoint; only a
   // draft with neither has nothing to ask about.
   const askable = probe.provider !== undefined || (probe.baseURL !== undefined && probe.baseURL.length > 0)
@@ -379,6 +438,15 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
             </button>
           )
           : null}
+        <button
+          type="button"
+          className={styles['linkButton']}
+          disabled={disabled || busy}
+          title={t('declaredDefaultsWritten')}
+          onClick={() => { void writeDeclaredDefaults() }}
+        >
+          {t('writeDeclaredDefaults')}
+        </button>
         <button
           type="button"
           className={styles['linkButton']}
@@ -450,6 +518,7 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
         {t('addModel')}
       </button>
       {failure !== undefined ? <p className={styles['error']}>{failure}</p> : null}
+      {notice !== undefined ? <p className={styles['advancedHint']}>{notice}</p> : null}
       <Modal
         open={candidates !== undefined}
         onClose={closePicker}

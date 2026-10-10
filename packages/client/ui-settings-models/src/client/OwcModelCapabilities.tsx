@@ -160,6 +160,7 @@ export function OwcModelCapabilities({ model, position, disabled, t, onChange }:
     <>
       <fieldset className={styles['modelCapabilities']} aria-label={groupLabel('owcThinkingFormat')}>
         <legend className={styles['modelFieldLabel']}>{t('owcThinkingFormat')}</legend>
+        <p className={styles['advancedHint']}>{t('owcFamilyHint')}</p>
         {/* One row per question a reader asks in order: which modes, which
             switch spelling, which ladder, and what travels back. */}
         <div className={styles['capabilityRows']}>

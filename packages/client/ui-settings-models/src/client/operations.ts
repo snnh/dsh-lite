@@ -7,8 +7,8 @@
 
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {
-  CredentialInfo, LlmDiscoveredModel, LlmModelDiscoveryRequest,
-  SettingsNamespaceView, SettingsPathOpView,
+  CredentialInfo, LlmDiscoveredModel, LlmModelDefaultEntry, LlmModelDefaultsRequest,
+  LlmModelDiscoveryRequest, SettingsNamespaceView, SettingsPathOpView,
 } from '@deepseek-ai/dsh-api-remotes/client'
 
 /** What one namespace write answered. */
@@ -31,6 +31,15 @@ export type ModelDiscoveryOutcome =
   | { readonly kind: 'refused'; readonly message: string }
 
 /** The Host operations the Models page and its cards invoke. */
+/**
+ * What the adapter declared about the ids a surface asked about, or why it
+ * refused to answer.
+ */
+export type ModelDefaultsOutcome =
+  | { readonly kind: 'described'; readonly models: readonly LlmModelDefaultEntry[] }
+  | { readonly kind: 'refused'; readonly message: string }
+
+/** One adapter's answer to a model-discovery request. */
 export interface ModelsOperations {
   /**
    * Read one credential reference's state.
@@ -71,6 +80,13 @@ export interface ModelsOperations {
    * @returns the candidates, or the refusal.
    */
   discoverModels(settingsNs: string, request: LlmModelDiscoveryRequest): Promise<ModelDiscoveryOutcome>
+  /**
+   * Ask a provider's adapter what it would declare about these model ids.
+   * @param settingsNs - namespace whose adapter family answers.
+   * @param request - the ids to describe, and the protocol they are for.
+   * @returns the declarations, or the refusal.
+   */
+  modelDefaults(settingsNs: string, request: LlmModelDefaultsRequest): Promise<ModelDefaultsOutcome>
 }
 
 /**
@@ -103,6 +119,12 @@ export function createModelsOperations(ctx: ClientContext): ModelsOperations {
       const response = await ctx.remote.llm.discoverModels(settingsNs, request)
       return response.ok
         ? { kind: 'found', models: response.value }
+        : { kind: 'refused', message: response.error.message }
+    },
+    modelDefaults: async (settingsNs, request) => {
+      const response = await ctx.remote.llm.modelDefaults(settingsNs, request)
+      return response.ok
+        ? { kind: 'described', models: response.value }
         : { kind: 'refused', message: response.error.message }
     },
   }

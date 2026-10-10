@@ -2154,7 +2154,7 @@ export type Config = Readonly<Record<string, never>>
 
 - `inject`: `llm`
 - `refs`: [`RetryPolicyConfig`](../packages/llm/llm/src/index.ts) · `Volatile` (`@deepseek-ai/cordis`)
-- `source`: [`packages/llm/llm-service-lite/src/config.ts:404`](../packages/llm/llm-service-lite/src/config.ts)
+- `source`: [`packages/llm/llm-service-lite/src/config.ts:410`](../packages/llm/llm-service-lite/src/config.ts)
 
 ```ts config-catalog
 /**
