@@ -48,6 +48,27 @@ describe('owc profiles plugin', () => {
     ])
   })
 
+  it('reports what an official catalog conversion could not carry', async () => {
+    const ctx = await harness({
+      gateway: {
+        catalog: {
+          'openai-completions': {
+            'chat:m': { id: 'm', cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 } },
+          },
+        },
+      },
+    })
+    // The route serves from the converted facts; the loss is reported rather
+    // than hidden, and the profile behind it stays addressable.
+    expect(ctx.llm.listProviders()).toEqual([{ id: 'gateway', name: 'gateway' }])
+    expect(await ctx.llm.listModels('gateway')).toEqual([
+      { provider: 'gateway', id: 'm', name: 'm', inputModalities: ['text'] },
+    ])
+    expect(ctx.llm.listConfigurableProviders()).toMatchObject([
+      { provider: 'gateway', declared: true, settingsPath: ['providers', 'gateway'] },
+    ])
+  })
+
   it('serves a configured route end to end through the credential seam', async () => {
     vi.stubEnv('OWC_TEST_KEY', 'key-from-environment')
     const upstream = await mockProvider((response) => { textTurn(response, 'from-gateway') })

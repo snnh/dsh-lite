@@ -2,13 +2,14 @@ import { describe, expect, it } from 'vitest'
 import { LlmError } from '@deepseek-ai/dsh-llm'
 import type { StreamChunk } from '@deepseek-ai/dsh-llm'
 import { translateResponsesStream } from '../src/responses-stream.ts'
+import type { AdapterChunk } from '../src/image-output.ts'
 
 /** Collect one translation of the given provider events. */
 const translate = async (
   events: Array<Record<string, unknown>>,
   sawSentinel = false,
-): Promise<StreamChunk[]> => {
-  const chunks: StreamChunk[] = []
+): Promise<AdapterChunk[]> => {
+  const chunks: AdapterChunk[] = []
   for await (const chunk of translateResponsesStream((async function* generate() {
     yield* events
   })(), () => sawSentinel)) {
@@ -49,6 +50,14 @@ const callItem = (id = 'fc_1', callId = 'call_a'): Record<string, unknown> => (
 /** One reasoning item. */
 const reasoningItem = (id = 'rs_1'): Record<string, unknown> => ({ type: 'reasoning', id, summary: [] })
 
+/** One PNG payload, and the image item this protocol returns it in. */
+const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+const imageItem = (id = 'ig_1'): Record<string, unknown> => ({
+  type: 'image_generation_call',
+  id,
+  result: Buffer.from(PNG_BYTES).toString('base64'),
+})
+
 describe('openai-responses stream translation', () => {
   it('reconstructs a streamed text turn and its accounting', async () => {
     const events = [
@@ -74,6 +83,29 @@ describe('openai-responses stream translation', () => {
         },
       },
     ])
+  })
+
+  it('carries an image the endpoint generated as a block of its own', async () => {
+    const chunks = await translate([
+      { type: 'response.created', response: { id: 'resp_1' } },
+      { type: 'response.output_item.added', item: { type: 'image_generation_call', id: 'ig_1' }, output_index: 0 },
+      { type: 'response.output_item.done', item: imageItem(), output_index: 0 },
+      completed([imageItem()]),
+    ])
+    expect(chunks).toContainEqual({ type: 'block-start', index: 0, blockType: 'image' })
+    expect(chunks).toContainEqual({ type: 'generated-image', index: 0, mediaType: 'image/png', data: PNG_BYTES })
+    // The terminal event restates the item it already closed: the image is not
+    // carried twice.
+    expect(chunks.filter(chunk => chunk.type === 'generated-image')).toHaveLength(1)
+  })
+
+  it('carries an image the terminal event alone reports, and refuses one it cannot read', async () => {
+    const late = await translate([completed([imageItem('ig_2')])])
+    expect(late.filter(chunk => chunk.type === 'generated-image')).toHaveLength(1)
+    const broken = await failure([completed([{ type: 'image_generation_call', id: 'ig_3', result: '' }])])
+    expect(broken.code).toBe('EMPTY_RESPONSE')
+    const notAnImage = await failure([completed([{ type: 'image_generation_call', id: 'ig_4', result: 'AQID' }])])
+    expect(notAnImage.message).toMatch(/are not image\/png/)
   })
 
   it('streams the text a closing item carries beyond the deltas', async () => {
@@ -245,7 +277,7 @@ describe('openai-responses stream translation', () => {
   })
 
   it('maps the statuses this protocol reports', async () => {
-    const turn = async (events: Array<Record<string, unknown>>, sawSentinel = false): Promise<StreamChunk | undefined> =>
+    const turn = async (events: Array<Record<string, unknown>>, sawSentinel = false): Promise<AdapterChunk | undefined> =>
       (await translate(events, sawSentinel)).at(-1)
     const text = { type: 'response.output_text.delta', delta: 'hi', output_index: 0 }
 

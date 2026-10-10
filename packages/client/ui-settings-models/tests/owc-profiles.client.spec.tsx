@@ -687,12 +687,12 @@ describe('owc model capabilities', () => {
     expect(screen.getByRole<HTMLInputElement>('checkbox', { name: en.owcTools }).checked).toBe(true)
   })
 
-  it('corrects a wider input declaration where it is made, not only on the saved row', async () => {
+  it('says how a declared video input travels, where the declaration is made', async () => {
     mountOwc({ effective: { acme: declared({}) } })
     expandModel(1)
     fireEvent.click(within(screen.getByRole('group', { name: `${en.modelInputTypes} 1` }))
       .getByRole('checkbox', { name: en.modelInputVideo }))
-    expect(screen.getByText(en.owcModalityRefused)).toBeTruthy()
+    expect(screen.getByText(en.owcVideoAsFile)).toBeTruthy()
   })
 
   it('turns tool declarations off explicitly, and back to the adapter default', async () => {

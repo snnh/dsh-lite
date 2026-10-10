@@ -21,11 +21,14 @@
   en: 029c07f062bbdc2f
   zh: d2f89b33bbaeac2a
 /deepseek-ai-dsh-llm-service-lite/use-this-package/configure-provider-profiles:
-  en: 13d27f0d36be9559
-  zh: 98fbeee2c54f2b85
+  en: 1144eb3ca323f203
+  zh: 99aa148e8ec5a6e7
+/deepseek-ai-dsh-llm-service-lite/use-this-package/start-from-an-official-configuration-file:
+  en: e812700236ada013
+  zh: 532db7bcb7fbc3a5
 /deepseek-ai-dsh-llm-service-lite/use-this-package/declare-what-a-model-can-do:
-  en: dd8ba7ec60fc794a
-  zh: 7c1c612729ef6b25
+  en: f2096655efa8baab
+  zh: 74301c3f94a8ba68
 /deepseek-ai-dsh-llm-service-lite/use-this-package/change-configuration-at-runtime:
   en: d0c770533a5037a8
   zh: 56f691cf59f6d61d
@@ -48,8 +51,8 @@
   en: 20c4bd7d60ec2b93
   zh: ebcd06ccd6140175
 /deepseek-ai-dsh-llm-service-lite/understand-the-implementation/wire-translation:
-  en: bb0dd9753c2226db
-  zh: 5c6a414f6d80032d
+  en: e3ed70685cd266b4
+  zh: eaee610e64ac8655
 /deepseek-ai-dsh-llm-service-lite/further-exploration:
   en: c2aad7bfde0abd8f
   zh: 39261b52303f903e
@@ -81,8 +84,8 @@
   en: a9a89439f9e5760e
   zh: d328cf3a4fecc212
 /deepseek-ai-dsh-llm-service-lite/known-limitations-and-deferred-work:
-  en: 5e06cd888d31aa08
-  zh: bfa00f94cf6a1f29
+  en: 94db3e188d0c25aa
+  zh: da1cd17179603a4b
 /deepseek-ai-dsh-llm-service-lite/known-limitations-and-deferred-work/dev-note:
   en: 9d74633e23e0b757
   zh: d3e3019b543253a8

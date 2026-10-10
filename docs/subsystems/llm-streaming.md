@@ -516,6 +516,8 @@ interface LlmModelInfo {
   description?: string
   /** Accepted request modalities; absent means unknown, while an explicit omission is negative capability. */
   inputModalities?: readonly ModelModality[]
+  /** Modalities a response may carry; absent means unknown, while an explicit omission is negative capability. */
+  outputModalities?: readonly ModelModality[]
 }
 ```
 

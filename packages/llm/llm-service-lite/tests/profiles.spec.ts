@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest'
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Config } from '../src/config.ts'
 import { assertServiceable, modelOf, registrationFacts, resolveProfiles, serviceableRoutes } from '../src/profiles.ts'
 import type { Options } from '../src/config.ts'
@@ -21,6 +24,27 @@ const resolved = (profile: Record<string, unknown>) => {
   const entry = profiles.get('gateway')
   if (entry === undefined) throw new Error('the route did not resolve')
   return entry
+}
+
+/**
+ * Resolve a declaration that names no protocol of its own, which is what lets
+ * a catalog supply one.
+ */
+const resolvedCatalog = (profile: Record<string, unknown>) => {
+  const profiles = resolveProfiles(Config({ providers: { gateway: profile } }).providers.get() as unknown as Options['providers'])
+  const entry = profiles.get('gateway')
+  if (entry === undefined) throw new Error('the route did not resolve')
+  return entry
+}
+
+/** The refusal message of a declaration that names no protocol of its own. */
+const refusedCatalog = (profile: Record<string, unknown>): string => {
+  try {
+    resolvedCatalog(profile)
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error)
+  }
+  throw new Error('the profile was accepted')
 }
 
 describe('profile resolution', () => {
@@ -94,7 +118,7 @@ describe('profile validation', () => {
   }
 
   it('refuses a profile that names no protocol', () => {
-    expect(() => resolveProfiles({ gateway: {} as never })).toThrow(/interfaceType/)
+    expect(() => resolveProfiles({ gateway: {} })).toThrow(/interfaceType/)
   })
 
   it('refuses an array-shaped providers section', () => {
@@ -313,14 +337,136 @@ describe('profile validation', () => {
     expect(resolved({ models: [{ id: 'plain' }] }).models[0]?.imageTokens).toBeUndefined()
   })
 
-  it('refuses the other declared modalities the transport does not carry', () => {
-    // OWC's vocabulary names video as well; this wire has no video part, so the
-    // declaration is refused rather than accepted with nothing acting on it.
-    expect(refused({ models: [{ id: 'm', capabilities: { modalities: ['video'] } }] })).toMatch(/declares video input/)
+  it('carries a video declaration as a file, and refuses a modality outside the vocabulary', () => {
+    // Video travels as a file handle: no wire here has a video part and the
+    // harness has no video content block, so the declaration states that the
+    // route accepts video files rather than that it receives frames.
+    expect(resolved({ models: [{ id: 'm', capabilities: { modalities: ['text', 'video'] } }] }).models[0]?.modalities)
+      .toEqual(['text', 'video'])
+    // A modality outside the vocabulary never reaches a profile: the schema
+    // refuses it where it is written.
+    expect(() => configured({ models: [{ id: 'm', capabilities: { modalities: ['audio'] } }] })).toThrow(/modalities/)
+    expect(() => resolveProfiles({
+      gateway: { interfaceType: 'openai-chat-completions', models: [{ id: 'm', capabilities: { modalities: ['audio'] } }] },
+    } as never)).toThrow(/unknown modality/)
   })
 
-  it('refuses an image-output declaration the transports cannot serve', () => {
-    expect(refused({ models: [{ id: 'm', capabilities: { imageOutput: true } }] })).toMatch(/declares image output/)
+  it('carries an image-output declaration, and refuses one the named protocol cannot serve', () => {
+    expect(resolved({ models: [{ id: 'm', capabilities: { imageOutput: true } }] }).models[0]?.imageOutput).toBe(true)
+    expect(resolved({ models: [{ id: 'm' }] }).models[0]?.imageOutput).toBe(false)
+    expect(refused({
+      interfaceType: 'anthropic-messages',
+      models: [{ id: 'm', capabilities: { imageOutput: true } }],
+    })).toMatch(/no assistant image part/)
+  })
+
+  it('materializes a model\'s declared request parameters, and leaves each one absent otherwise', () => {
+    const declared = resolved({
+      models: [{ id: 'm', defaults: { temperature: 0.4, topP: 0.9, topK: 40, maxTokens: 2048 } }],
+    })
+    expect(declared.models[0]?.defaults).toEqual({ temperature: 0.4, topP: 0.9, topK: 40, maxTokens: 2048 })
+    // A model that declares none writes none: an absent default is what makes
+    // the request path send only what the caller asked for.
+    expect(resolved({ models: [{ id: 'm' }] }).models[0]?.defaults)
+      .toEqual({ temperature: undefined, topP: undefined, topK: undefined, maxTokens: undefined })
+  })
+
+  it('refuses a top-k default on the protocol that has no top-k field', () => {
+    expect(refused({
+      interfaceType: 'openai-responses',
+      models: [{ id: 'm', defaults: { topK: 20 } }],
+    })).toMatch(/defaults\.topK.*openai-responses/)
+  })
+
+  it('refuses request parameters the schema or the protocol cannot accept', () => {
+    // Ranges are the schema's: a value outside them never reaches a profile.
+    expect(() => configured({ models: [{ id: 'm', defaults: { temperature: 3 } }] })).toThrow(/defaults/)
+    expect(() => configured({ models: [{ id: 'm', defaults: { temperature: -1 } }] })).toThrow(/defaults/)
+    expect(() => configured({ models: [{ id: 'm', defaults: { topP: 1.5 } }] })).toThrow(/defaults/)
+    expect(() => configured({ models: [{ id: 'm', defaults: { topK: 0 } }] })).toThrow(/defaults/)
+    expect(() => configured({ models: [{ id: 'm', defaults: { topK: 2.5 } }] })).toThrow(/defaults/)
+    expect(() => configured({ models: [{ id: 'm', defaults: { maxTokens: 0 } }] })).toThrow(/defaults/)
+    // A raw profile that skipped the schema still cannot send a value that is
+    // not a number.
+    expect(() => resolveProfiles({
+      gateway: {
+        interfaceType: 'openai-chat-completions',
+        models: [{ id: 'm', defaults: { temperature: Number.NaN } }],
+      },
+    } as never)).toThrow(/finite number/)
+  })
+
+  it('materializes an official catalog into this adapter\'s own profile facts', () => {
+    const profile = resolvedCatalog({
+      catalog: {
+        'anthropic-messages': {
+          'chat:k3': {
+            id: 'k3',
+            name: 'Kimi K3',
+            api: 'anthropic-messages',
+            baseUrl: 'https://api.kimi.com/coding',
+            input: ['text', 'image'],
+            reasoning: true,
+            thinkingLevelMap: { off: null, low: 'low', high: 'high' },
+            contextWindow: 1048576,
+            maxTokens: 131072,
+            cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 0 },
+          },
+        },
+      },
+      apiKeyEnv: 'KIMI_CODING_API_KEY',
+    })
+    // The catalog supplies the protocol and the endpoint; the profile's own
+    // credential stands beside them.
+    expect(profile.interfaceType).toBe('anthropic-messages')
+    expect(profile.baseURL).toBe('https://api.kimi.com/coding')
+    expect(profile.apiKeyEnv).toBe('KIMI_CODING_API_KEY')
+    expect(profile.models).toMatchObject([{
+      id: 'k3',
+      name: 'Kimi K3',
+      contextWindow: 1048576,
+      maxTokens: 131072,
+      modalities: ['text', 'image'],
+      effort: ['low', 'high'],
+      thinking: ['enabled'],
+    }])
+    expect(profile.catalogDiagnostics).toEqual([
+      'llm-service-lite: provider "gateway" catalog field "cost" is not carried',
+    ])
+  })
+
+  it('lets the profile override the endpoint, the protocol, and the model list of its catalog', () => {
+    const profile = resolvedCatalog({
+      catalog: {
+        'openai-completions': { 'chat:m': { id: 'm', name: 'Official M', contextWindow: 4096 } },
+      },
+      interfaceType: 'openai-responses',
+      baseURL: 'https://override.test/v1',
+      models: [{ id: 'mine', contextWindow: 8192 }],
+    })
+    expect(profile.interfaceType).toBe('openai-responses')
+    expect(profile.baseURL).toBe('https://override.test/v1')
+    expect(profile.models.map(model => model.id)).toEqual(['mine'])
+    // A converted route with nothing left behind reports nothing.
+    expect(profile.catalogDiagnostics).toEqual([])
+  })
+
+  it('reads a catalog file by path, and keeps a route whose file cannot be read addressable', () => {
+    const file = join(mkdtempSync(join(tmpdir(), 'lite-catalog-')), 'official.json')
+    writeFileSync(file, JSON.stringify({
+      'openai-completions': { 'chat:file-model': { id: 'file-model', api: 'openai-completions' } },
+    }))
+    expect(resolvedCatalog({ catalog: file }).models.map(model => model.id)).toEqual(['file-model'])
+    expect(() => resolvedCatalog({ catalog: join(file, 'missing.json') })).toThrow(/cannot be read/)
+    const deferred = resolveProfiles(
+      { gateway: { catalog: join(file, 'missing.json') } },
+      'deferred',
+    ).get('gateway')
+    expect(deferred?.diagnostic).toMatch(/cannot be read/)
+  })
+
+  it('refuses a profile that names neither a protocol nor a catalog', () => {
+    expect(refusedCatalog({ baseURL: 'https://gateway.test/v1' })).toMatch(/names no interfaceType/)
   })
 
   it('carries a signed-replay declaration, which the responses transport honours', () => {

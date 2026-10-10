@@ -93,6 +93,12 @@ export interface ModelListEditorProps {
   /** Input-type vocabulary this family declares; the shared default is text and image. */
   inputModalities?: readonly string[] | undefined
   /**
+   * The capacities an empty field inherits, spelled for the placeholder. The
+   * card owns this because it reads the composed schema: a family whose
+   * adapter falls back to a different default must not be shown another one.
+   */
+  capacityHint?: Readonly<Record<CapacityField, string>> | undefined
+  /**
    * Adapter-owned extra advanced fields for one row, or `undefined` for a
    * family whose curated fields are the whole story.
    */
@@ -408,12 +414,12 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
             })}
             contextWindow={{
               value: capacityText(model, index, 'contextWindow'),
-              placeholder: CAPACITY_HINT.contextWindow,
+              placeholder: (props.capacityHint ?? CAPACITY_HINT).contextWindow,
               onChange: (text) => { editCapacity(index, 'contextWindow', text) },
             }}
             maxTokens={{
               value: capacityText(model, index, 'maxTokens'),
-              placeholder: CAPACITY_HINT.maxTokens,
+              placeholder: (props.capacityHint ?? CAPACITY_HINT).maxTokens,
               onChange: (text) => { editCapacity(index, 'maxTokens', text) },
             }}
             onFieldChange={(field, value) => { patch(index, { [field]: value }) }}

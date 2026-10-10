@@ -20,6 +20,7 @@ import { attributionHeaders, LlmError, ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, FinishReason, GenerateOptions, RequestMessage, StreamChunk, TokenUsage } from '@deepseek-ai/dsh-llm'
 import type { RequestImageAttachment } from '@deepseek-ai/dsh-attachment'
 import { imageDataUrl, offloadedImageText } from './images.ts'
+import { decodeGeneratedImage, type AdapterChunk } from './image-output.ts'
 import type { ResolvedOwcModel, ResolvedOwcProviderProfile } from './profiles.ts'
 import { reasoningLevelOf, replaysReasoning } from './models.ts'
 import { classifyFailure } from './errors.ts'
@@ -61,11 +62,42 @@ interface WireDelta {
   content?: string | null
   reasoning_content?: string | null
   tool_calls?: WireToolCall[]
+  /**
+   * Image parts a model that returns pictures sends beside its text. The
+   * protocol documents them on the delta and on a whole message, so both are
+   * read; anything else on these fields is ignored.
+   */
+  images?: unknown
+}
+
+/** One image part as this protocol spells it. */
+interface WireImagePart {
+  image_url?: { url?: string }
+}
+
+/** The image URLs one choice states, from the delta or a whole message. */
+function imageUrls(choice: WireChoice): string[] {
+  const urls: string[] = []
+  for (const container of [choice.delta, choice.message]) {
+    if (!Array.isArray(container?.images)) continue
+    for (const part of container.images) {
+      const url = (part as WireImagePart | null)?.image_url?.url
+      if (typeof url === 'string') urls.push(url)
+    }
+  }
+  return urls
+}
+
+/** The subset of one choice this protocol reads, streamed or whole. */
+interface WireChoice {
+  finish_reason?: string | null
+  delta?: WireDelta
+  message?: WireDelta
 }
 
 /** The subset of one streamed chunk this protocol reads. */
 interface WireChunk {
-  choices?: Array<{ finish_reason?: string | null; delta?: WireDelta }>
+  choices?: WireChoice[]
   usage?: {
     prompt_tokens?: number
     completion_tokens?: number
@@ -247,13 +279,19 @@ export function chatRequest(
 ): ChatHttpRequest {
   const level = reasoningLevelOf(model, options.reasoningEffort)
   const messages = toWireMessages(options, model, versions)
+  // A caller's own value always wins. The model's declared default is written
+  // only where the caller stated none, so a profile setting can never override
+  // a choice a request made explicitly.
+  const temperature = options.temperature ?? model.defaults.temperature
   const body: Record<string, unknown> = {
     ...profile.extraBody,
     model: options.model,
     stream: true,
     ...profile.includeUsage ? { stream_options: { include_usage: true } } : {},
     ...options.maxTokens === undefined ? {} : { max_tokens: options.maxTokens },
-    ...options.temperature === undefined ? {} : { temperature: options.temperature },
+    ...temperature === undefined ? {} : { temperature },
+    ...model.defaults.topP === undefined ? {} : { top_p: model.defaults.topP },
+    ...model.defaults.topK === undefined ? {} : { top_k: model.defaults.topK },
     ...level.effort === undefined ? {} : { reasoning_effort: level.effort },
     ...thinkingSwitch(model, level.thinking),
     messages,
@@ -328,7 +366,7 @@ function usageOf(chunk: WireChunk): TokenUsage | undefined {
 export async function* translateChatStream(
   events: AsyncIterable<Record<string, unknown>>,
   sawDone: () => boolean,
-): AsyncGenerator<StreamChunk> {
+): AsyncGenerator<AdapterChunk> {
   const open = new Map<'text' | 'reasoning', OpenBlock>()
   const tools = new Map<number, ToolAccumulator>()
   let nextIndex = 0
@@ -368,6 +406,19 @@ export async function* translateChatStream(
     if (usage !== undefined) pendingUsage = usage
     for (const choice of chunk.choices ?? []) {
       if (typeof choice.finish_reason === 'string') stopReason = choice.finish_reason
+      // Images may arrive on a whole message rather than on a delta, so they
+      // are read before the delta is required to exist.
+      for (const url of imageUrls(choice)) {
+        // An image is a block of its own: text or reasoning still streaming
+        // ends here rather than wrapping around it.
+        for (const end of endOpenBlocks()) yield end
+        const index = nextIndex
+        nextIndex += 1
+        const image = decodeGeneratedImage(url, 'the chat-completions endpoint')
+        sawOutput = true
+        yield { type: 'block-start', index, blockType: 'image' }
+        yield { type: 'generated-image', index, ...image }
+      }
       const delta = choice.delta
       if (delta === undefined) continue
       if (typeof delta.content === 'string' && delta.content.length > 0) {

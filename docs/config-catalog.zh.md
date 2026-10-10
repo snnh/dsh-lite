@@ -2154,7 +2154,7 @@ export type Config = Readonly<Record<string, never>>
 
 - `inject`: `llm`
 - `refs`: [`RetryPolicyConfig`](../packages/llm/llm/src/index.ts) · `Volatile` (`@deepseek-ai/cordis`)
-- `source`: [`packages/llm/llm-service-lite/src/config.ts:348`](../packages/llm/llm-service-lite/src/config.ts)
+- `source`: [`packages/llm/llm-service-lite/src/config.ts:395`](../packages/llm/llm-service-lite/src/config.ts)
 
 ```ts config-catalog
 /**
@@ -2181,8 +2181,20 @@ export interface OwcProviderProfile {
   displayName?: string
   /** Whether the route registers at all; a disabled profile keeps its configuration but serves nothing. */
   enabled?: boolean
-  /** Wire protocol every model on this route speaks; every entry in {@link INTERFACE_TYPES} is served. */
-  interfaceType: InterfaceType
+  /**
+   * Wire protocol every model on this route speaks; every entry in
+   * {@link INTERFACE_TYPES} is served. Required unless `catalog` supplies one.
+   */
+  interfaceType?: InterfaceType
+  /**
+   * Official-format model configuration this route starts from: the path of an
+   * official provider file, or its parsed content. Every field it states —
+   * protocol, endpoint, headers, models with their capacities, modalities,
+   * thinking levels, and request defaults — is converted into this adapter's
+   * own vocabulary, and the profile's own fields override the conversion. A
+   * field the conversion cannot carry is reported rather than guessed.
+   */
+  catalog?: string | Record<string, unknown>
   /** Endpoint of every model on the route; the protocol's usual host and version apply when omitted. */
   baseURL?: string
   /** Credential reference resolved per request through the harness credential seam. */
@@ -2253,6 +2265,12 @@ export interface OwcModelProfile {
    * the token meter price an image-bearing context instead of guessing.
    */
   imageTokens?: OwcImageTokenAccounting
+  /**
+   * Request parameters this model sends when the caller states none, so one
+   * endpoint's sampling settings are configuration rather than a caller
+   * concern.
+   */
+  defaults?: OwcModelDefaults
 }
 
 /**
@@ -2282,9 +2300,13 @@ export interface OwcModelCapabilities {
    */
   tools?: boolean
   /**
-   * Whether the model returns images. Declaring it is refused at resolution:
-   * this adapter carries text and tool output, and an accepted declaration
-   * nothing acts on would read as a capability the route does not have.
+   * Whether the model answers with images of its own. A declared model's
+   * answers are published as image blocks — this adapter reads the inline
+   * picture the endpoint returns, stores it through the attachment provider,
+   * and republishes a durable reference — and an image from a model that never
+   * declared one fails by name rather than being carried unclaimed. Declaring
+   * it is refused on `anthropic-messages`, whose assistant turn has no image
+   * part.
    */
   imageOutput?: boolean
   /**
@@ -2327,6 +2349,32 @@ export interface OwcImageTokenAccounting {
   base?: number
   /** `tiles`: tokens charged for each tile the image covers. */
   perTile?: number
+}
+
+/**
+ * Request parameters one model sends when the caller states none. These are
+ * the endpoint's own settings, not capabilities: a field left out is one this
+ * adapter never writes, and a field declared is written exactly when the
+ * caller's own request left it unstated — a caller that names a value always
+ * wins, so a default can never override an explicit choice.
+ */
+export interface OwcModelDefaults {
+  /** Sampling temperature written when the caller names none. */
+  temperature?: number
+  /** Nucleus cutoff written when the caller names none. */
+  topP?: number
+  /**
+   * Top-k cutoff written when the caller names none. Only the two protocols
+   * with a top-k field carry it, so declaring it on `openai-responses` is
+   * refused at resolution rather than silently dropped.
+   */
+  topK?: number
+  /**
+   * Output cap this model asks for when the caller states none; defaults to
+   * the model's own `maxTokens`, which stays the capability a configuration
+   * surface reads.
+   */
+  maxTokens?: number
 }
 
 /** One input modality from {@link MODALITIES}. */

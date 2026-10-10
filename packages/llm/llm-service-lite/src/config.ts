@@ -140,11 +140,10 @@ export interface OwcImageTokenAccounting {
 declare module '@deepseek-ai/dsh-llm' {
   interface ModelModalityMap {
     /**
-     * Video input, which OWC's catalog names and every other adapter leaves
-     * out. Declaring it is refused by name at resolution until the transport
-     * carries moving pictures, so nothing downstream ever reads it as a served
-     * capability — the vocabulary is the port's, and the refusal is where the
-     * harness stops short.
+     * Video input. This adapter carries a video occurrence as a file handle
+     * rather than as a native part: the harness has no video content block yet,
+     * so declaring it states that the route accepts video files, not that their
+     * moving pictures reach the model.
      */
     video: 'video'
   }
@@ -153,8 +152,8 @@ declare module '@deepseek-ai/dsh-llm' {
 /**
  * Input modalities a model accepts; text is the assumption when none is
  * declared. The vocabulary mirrors OWC's; `image` is carried as an inline
- * base64 `image_url` part, and `video` is refused by name until the wire
- * carries one.
+ * base64 `image_url` part, and `video` is carried as a file handle until the
+ * harness has a video content block for a native part.
  */
 export const MODALITIES = ['text', 'image', 'video'] as const
 
@@ -230,9 +229,13 @@ export interface OwcModelCapabilities {
    */
   tools?: boolean
   /**
-   * Whether the model returns images. Declaring it is refused at resolution:
-   * this adapter carries text and tool output, and an accepted declaration
-   * nothing acts on would read as a capability the route does not have.
+   * Whether the model answers with images of its own. A declared model's
+   * answers are published as image blocks — this adapter reads the inline
+   * picture the endpoint returns, stores it through the attachment provider,
+   * and republishes a durable reference — and an image from a model that never
+   * declared one fails by name rather than being carried unclaimed. Declaring
+   * it is refused on `anthropic-messages`, whose assistant turn has no image
+   * part.
    */
   imageOutput?: boolean
   /**
@@ -257,6 +260,32 @@ export interface OwcModelCapabilities {
    * declaration list then carrying `defer_loading` for the tools it defers.
    */
   toolUpdate?: ToolUpdate
+}
+
+/**
+ * Request parameters one model sends when the caller states none. These are
+ * the endpoint's own settings, not capabilities: a field left out is one this
+ * adapter never writes, and a field declared is written exactly when the
+ * caller's own request left it unstated — a caller that names a value always
+ * wins, so a default can never override an explicit choice.
+ */
+export interface OwcModelDefaults {
+  /** Sampling temperature written when the caller names none. */
+  temperature?: number
+  /** Nucleus cutoff written when the caller names none. */
+  topP?: number
+  /**
+   * Top-k cutoff written when the caller names none. Only the two protocols
+   * with a top-k field carry it, so declaring it on `openai-responses` is
+   * refused at resolution rather than silently dropped.
+   */
+  topK?: number
+  /**
+   * Output cap this model asks for when the caller states none; defaults to
+   * the model's own `maxTokens`, which stays the capability a configuration
+   * surface reads.
+   */
+  maxTokens?: number
 }
 
 /** One model a route serves, with the endpoint facts a request needs. */
@@ -287,6 +316,12 @@ export interface OwcModelProfile {
    * the token meter price an image-bearing context instead of guessing.
    */
   imageTokens?: OwcImageTokenAccounting
+  /**
+   * Request parameters this model sends when the caller states none, so one
+   * endpoint's sampling settings are configuration rather than a caller
+   * concern.
+   */
+  defaults?: OwcModelDefaults
 }
 
 /**
@@ -299,8 +334,20 @@ export interface OwcProviderProfile {
   displayName?: string
   /** Whether the route registers at all; a disabled profile keeps its configuration but serves nothing. */
   enabled?: boolean
-  /** Wire protocol every model on this route speaks; every entry in {@link INTERFACE_TYPES} is served. */
-  interfaceType: InterfaceType
+  /**
+   * Wire protocol every model on this route speaks; every entry in
+   * {@link INTERFACE_TYPES} is served. Required unless `catalog` supplies one.
+   */
+  interfaceType?: InterfaceType
+  /**
+   * Official-format model configuration this route starts from: the path of an
+   * official provider file, or its parsed content. Every field it states —
+   * protocol, endpoint, headers, models with their capacities, modalities,
+   * thinking levels, and request defaults — is converted into this adapter's
+   * own vocabulary, and the profile's own fields override the conversion. A
+   * field the conversion cannot carry is reported rather than guessed.
+   */
+  catalog?: string | Record<string, unknown>
   /** Endpoint of every model on the route; the protocol's usual host and version apply when omitted. */
   baseURL?: string
   /** Credential reference resolved per request through the harness credential seam. */
@@ -370,7 +417,7 @@ const capabilities: z<OwcModelCapabilities> = z.object({
   reasoningContent: z.boolean(),
   /** Whether tool declarations may be sent to this model. */
   tools: z.boolean(),
-  /** Whether the model returns images; refused until an image-output transport exists. */
+  /** Whether the model answers with images of its own; refused on the protocol with no assistant image part. */
   imageOutput: z.boolean(),
   /** Whether the endpoint replays signed reasoning; refused until the responses transport exists. */
   responsesEncryptedReplay: z.boolean(),
@@ -378,6 +425,17 @@ const capabilities: z<OwcModelCapabilities> = z.object({
   systemPromptUpdate: z.union(SYSTEM_PROMPT_UPDATES),
   /** Whether the endpoint activates and deactivates tools through mid-history messages. */
   toolUpdate: z.union(TOOL_UPDATES),
+})
+
+const modelDefaults: z<OwcModelDefaults> = z.object({
+  /** Sampling temperature written when the caller names none. */
+  temperature: z.number().min(0).max(2),
+  /** Nucleus cutoff written when the caller names none. */
+  topP: z.number().min(0).max(1),
+  /** Top-k cutoff written when the caller names none. */
+  topK: z.number().step(1).min(1),
+  /** Output cap asked for when the caller states none. */
+  maxTokens: z.number().step(1).min(1),
 })
 
 const modelProfile: z<OwcModelProfile> = z.object({
@@ -407,6 +465,8 @@ const modelProfile: z<OwcModelProfile> = z.object({
     base: z.number(),
     perTile: z.number(),
   })]),
+  /** Request parameters this model sends when the caller states none. */
+  defaults: modelDefaults,
 })
 
 const providerProfile: z<OwcProviderProfile> = z.object({
@@ -415,7 +475,9 @@ const providerProfile: z<OwcProviderProfile> = z.object({
   /** Whether the route registers at all. */
   enabled: z.boolean().default(true),
   /** Wire protocol every model on this route speaks. */
-  interfaceType: z.union(INTERFACE_TYPES).required(),
+  interfaceType: z.union(INTERFACE_TYPES),
+  /** Official-format model configuration this route starts from. */
+  catalog: z.union([z.string(), z.dict(z.any())]),
   /** Endpoint of every model on the route. */
   baseURL: z.string(),
   /** Credential reference resolved per request through the harness credential seam. */
@@ -442,6 +504,14 @@ const providerProfile: z<OwcProviderProfile> = z.object({
   defaultContextWindow: z.number().step(1).min(1).default(DEFAULT_CONTEXT_WINDOW),
   /** Output capability for a route model that declares none. */
   defaultMaxTokens: z.number().step(1).min(1).default(DEFAULT_MAX_TOKENS),
+  /** Accumulated base64 image payload one request carries before the oldest occurrences offload. */
+  imageRequestMaxBytes: z.number().step(1).min(1),
+  /** Image occurrences one request carries. */
+  imageRequestMaxImages: z.number().step(1).min(1),
+  /** Payload removed as one deterministic offload step. */
+  imageOffloadByteQuantum: z.number().step(1).min(1),
+  /** Occurrences removed as one deterministic offload step. */
+  imageOffloadCountQuantum: z.number().step(1).min(1),
 })
 
 /**

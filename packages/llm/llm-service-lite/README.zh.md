@@ -115,6 +115,7 @@ kind: "package-reference"
 | `enabled` | `true` | 该路由是否注册 |
 | `interfaceType` | 必填 | `openai-chat-completions`、`anthropic-messages` 或 `openai-responses`；每个值各自选择一条传输 |
 | `baseURL` | 协议默认端点 | 该路由所有模型的端点；省略时采用该协议惯用的主机与版本段 |
+| `catalog` | 无 | 该路由的起始官方格式模型配置：服务商文件的路径，或它解析后的内容 |
 | `apiKeyEnv` | 无 | 凭据引用，按请求经凭据缝解析 |
 | `apiKey` | 无 | 内联凭据，供从别的工具导入的档案使用 |
 | `headers` | 无 | 静态请求头；若同时点名凭据，凭据仍然覆盖 `authorization` |
@@ -125,16 +126,29 @@ kind: "package-reference"
 | `streamIdleTimeoutMs` | `300000` | 两次流事件之间的最大空闲时长 |
 | `retryPolicy` | normal，5 次 | 由 `dsh-llm-retry` 执行的服务商重试策略 |
 | `models` | `[]` | 该路由对外声明的模型及其容量与能力 |
-| `defaultContextWindow` | `262144` | 未声明上下文的模型所用的上下文容量 |
+| `defaultContextWindow` | `256000` | 未声明上下文的模型所用的上下文容量 |
 | `defaultMaxTokens` | `8192` | 未声明输出上限的模型所用的输出能力 |
 | `imageRequestMaxBytes` | `20971520` | 单个请求承载的 base64 图片累计字节 |
 | `imageRequestMaxImages` | `600` | 单个请求承载的图片出现次数 |
 | `imageOffloadByteQuantum` | `10485760` | 一次确定性卸载步骤移除的字节 |
 | `imageOffloadCountQuantum` | `20` | 一次确定性卸载步骤移除的出现次数 |
 
+### 从官方配置文件开始
+
+官方发行版为每个服务商发布一个配置文件——一张以 API 为键、条目键为 `chat:<id>` 的映射。`catalog` 把这样的文件转换为本适配器自己的词汇：API 成为路由的 `interfaceType`（`openai-completions` 转 `openai-chat-completions`，另有 `openai-responses`、`anthropic-messages`），`baseUrl` 成为 `baseURL`，所有模型共用的请求头成为路由的请求头，每个 chat 条目成为一个模型，带上它的 id、名称、`contextWindow`、`maxTokens`、输入模态与思考档位。模型的 `samplingParams` 成为它的 `defaults`，端点的采样设置因此是配置，而不是调用方的事。本适配器没有对应物的字段——`cost`、未建模的 `compat` 标志、`inputLimits`、逐模型请求头——会逐条报告而不是被猜测，路由照常服务。档案自己的字段优先于转换结果；`models` 缺省或为空时保留目录中的模型；协议或端点不一致、没有任何 chat 模型、或无法读取的文件，会让这条路由留下诊断，而不是变成一个转了一半的路由。
+
+```yaml
+providers:
+  kimi-coding:
+    catalog: /etc/dsh/official/kimi-coding.json
+    apiKeyEnv: KIMI_CODING_API_KEY
+```
+
 ### 声明模型能做什么
 
-模型条目的 `capabilities` 是对端点的声明，不是猜测：没写的就不声明，写下的要么被履行、要么在声明处被按名拒绝——绝不"接受却无人在用"。`effort` 列出可选的推理档位，其值即线上拼写，因此自有词汇表的网关直接声明自己的词汇。`thinking` 列出可接受的思考模式（`enabled`、`disabled`、`adaptive`）。`thinkingStyle` 说明端点如何表达这个开关：`thinking: { type: … }`、顶层 `enable_thinking` 布尔值、始终思考的 `fixed`，或 `effort_only`——"只收档位、没有开关"的显式写法，与省略样式发出的是同一个请求。`reasoningContent` 声明端点会以 `reasoning_content` 返回思考，这正是后续请求得以回带既有思考的依据。`tools` 声明是否允许发送工具声明：关闭的模型收到的请求里没有工具列表，而不是一份会被端点拒绝的清单。`modalities` 声明端点接受哪些输入——`text`、`image`、`video`。其中 `image` 已被承载：保留的图片按模型声明的像素预算（或源尺寸）从附件提供方读取，按模型的字节目标重新编码，并以 base64 `image_url` 内联部分发出；已被会话卸载的图片则贡献它的占位文本。整条路由累计的请求由 `imageRequestMaxBytes`、`imageRequestMaxImages`、`imageOffloadByteQuantum` 与 `imageOffloadCountQuantum` 约束；超预算的请求以 `IMAGE_OFFLOAD_REQUIRED` 失败并给出必须卸载的最旧图片数量，而不是静默丢弃图片。`video` 输入与 `imageOutput` 仍在声明处被拒绝，直到有传输承载它们——一个无人执行的声明会被读成路由并不具备的能力。`responsesEncryptedReplay` 已由 Responses 传输履行：请求会索要 `reasoning.encrypted_content`，并在下一回合把每个 reasoning item 原样交回。`systemPromptUpdate` 与 `toolUpdate` 声明 Messages 端点可以被要求的两种"会话中途读取"：把最新的 system 消息读作完整的生效提示词，以及把一次工具变更读作对声明列表中已有工具的启用或停用。声明其中任意一条，harness 才会把 `tool-addition` 与 `tool-removal` 块交给这条路由，而不是每回合重述提示词与工具列表；被推迟的工具，其声明随之带上 `defer_loading`。两条声明在两种 OpenAI 线上都会被拒绝——那里没有可供读取的中途部件。`imageTokens` 声明端点自己的视觉 token 计价——扁平像素网格用 `{ kind: area, per: 750 }`，底价加逐方形瓦片计价用 `{ kind: tiles, tile: 512, base: 85, perTile: 170 }`——token meter 正是据此为含图片的上下文计价；未声明该字段的路由保留 meter 自己的结构化启发式，而不是本适配器臆造的数值。
+模型条目的 `capabilities` 是对端点的声明，不是猜测：没写的就不声明，写下的要么被履行、要么在声明处被按名拒绝——绝不"接受却无人在用"。`effort` 列出可选的推理档位，其值即线上拼写，因此自有词汇表的网关直接声明自己的词汇。`thinking` 列出可接受的思考模式（`enabled`、`disabled`、`adaptive`）。`thinkingStyle` 说明端点如何表达这个开关：`thinking: { type: … }`、顶层 `enable_thinking` 布尔值、始终思考的 `fixed`，或 `effort_only`——"只收档位、没有开关"的显式写法，与省略样式发出的是同一个请求。`reasoningContent` 声明端点会以 `reasoning_content` 返回思考，这正是后续请求得以回带既有思考的依据。`tools` 声明是否允许发送工具声明：关闭的模型收到的请求里没有工具列表，而不是一份会被端点拒绝的清单。`modalities` 声明端点接受哪些输入——`text`、`image`、`video`。其中 `image` 已被承载：保留的图片按模型声明的像素预算（或源尺寸）从附件提供方读取，按模型的字节目标重新编码，并以 base64 `image_url` 内联部分发出；已被会话卸载的图片则贡献它的占位文本。整条路由累计的请求由 `imageRequestMaxBytes`、`imageRequestMaxImages`、`imageOffloadByteQuantum` 与 `imageOffloadCountQuantum` 约束；超预算的请求以 `IMAGE_OFFLOAD_REQUIRED` 失败并给出必须卸载的最旧图片数量，而不是静默丢弃图片。`imageOutput` 声明该模型会自己产出图片：端点返回的内联图片经附件提供方落盘，并以可持久化的图片块重新发布；未声明该能力的模型若返回图片，会按名失败；而该声明在 `anthropic-messages` 上会被拒绝——那条协议的助手回合没有图片部件。`video` 被接受并以文件承载：一次视频出现以任何文件都会贡献的句柄文本抵达模型，原生部件要等 harness 自己的视频内容块。`responsesEncryptedReplay` 已由 Responses 传输履行：请求会索要 `reasoning.encrypted_content`，并在下一回合把每个 reasoning item 原样交回。`systemPromptUpdate` 与 `toolUpdate` 声明 Messages 端点可以被要求的两种"会话中途读取"：把最新的 system 消息读作完整的生效提示词，以及把一次工具变更读作对声明列表中已有工具的启用或停用。声明其中任意一条，harness 才会把 `tool-addition` 与 `tool-removal` 块交给这条路由，而不是每回合重述提示词与工具列表；被推迟的工具，其声明随之带上 `defer_loading`。两条声明在两种 OpenAI 线上都会被拒绝——那里没有可供读取的中途部件。`imageTokens` 声明端点自己的视觉 token 计价——扁平像素网格用 `{ kind: area, per: 750 }`，底价加逐方形瓦片计价用 `{ kind: tiles, tile: 512, base: 85, perTile: 170 }`——token meter 正是据此为含图片的上下文计价；未声明该字段的路由保留 meter 自己的结构化启发式，而不是本适配器臆造的数值。
+
+模型条目的 `defaults` 声明该端点在调用方未给值时所希望的请求参数：`temperature`、`topP`、`topK` 与 `maxTokens`。每个值只在调用方自己没写时才会写出，因此默认值永远不会覆盖显式选择；`topK` 在 `openai-responses` 上被拒绝，因为那条协议没有 top-k 字段；`defaults.maxTokens` 是未声明输出上限的调用方拿到的值，未声明时回落到模型自己的 `maxTokens`。
 
 图片请求需要挂载附件提供方（`attachments`）；只服务纯文本路由的部署从不挂载它，而声明了 `image` 却没有附件提供方的路由，会在端点看到任何部分调用之前就让请求失败。
 
@@ -182,7 +196,7 @@ kind: "package-reference"
 
 ### 线上翻译
 
-两条传输服务同一道缝：`openai-chat-completions` 说 OpenAI 兼容的线协议，`anthropic-messages` 说 Messages 协议；两者都承担了三件服务商不做的事：块的身份与顺序、跨流式分片拼装工具调用，以及区分"流结束了"与"流被截断了"。
+三条传输服务同一道缝：`openai-chat-completions` 说 OpenAI 兼容的线协议，`anthropic-messages` 说 Messages 协议；两者都承担了三件服务商不做的事：块的身份与顺序、跨流式分片拼装工具调用，以及区分"流结束了"与"流被截断了"。
 
 两者也都在出门时修复各自协议的配对规则，因为持久历史可能持有端点无法接受的形态。调用已不在的结果被丢弃；同一条助手回合内重复声明、或后续回合再次声明的调用 id，折叠为其首次出现；同一个调用的重复结果只留首条；无人回答的调用补一个占位结果，而不是留给端点回一个 400；同一并行批次的结果合并为两种协议都要求的单个 user 回合。修复发生在线上投影里，因此持久日志绝不会为了请求可被接受而被改写。
 
@@ -235,7 +249,7 @@ harness 组装出的对话原样：系统提示词作为开头的 system 消息�
 <a id="known-limitations-and-deferred-work"></a>
 
 - **三条协议，三种形态。** 每个被声明的协议都有自己的传输，各自承载本协议的特性：Responses API 的服务端工具（`web_search_call` item）未被承载，也不发送 `store` 字段，因此想要服务端状态的部署应把它排除在请求路径之外。
-- **不支持视频输入与图片输出。** 声明 `video` 输入或 `imageOutput` 的档案会被拒绝，而不是把差异丢掉后照常服务。`image` 输入已被承载，档案通过 `imageTokens` 声明的计价同样被承载；未声明该字段的路由保留 meter 的结构化启发式；字节旁边也不会附带适配器自撰的说明文本，因此一条被计价的出现次数只计入端点实际收取的视觉 token，不计入本适配器臆造的部分。
+- **视频输入以文件抵达，而不是活动画面。** 声明的 `video` 输入以任何附件都会贡献的文件句柄承载，因为这里没有哪条线有视频部件、harness 也还没有视频内容块。 声明 `video` 输入或 `imageOutput` 的档案会被拒绝，而不是把差异丢掉后照常服务。`image` 输入已被承载，档案通过 `imageTokens` 声明的计价同样被承载；未声明该字段的路由保留 meter 的结构化启发式；字节旁边也不会附带适配器自撰的说明文本，因此一条被计价的出现次数只计入端点实际收取的视觉 token，不计入本适配器臆造的部分。
 - **适配器侧不重试。** 一次调用就是一次服务商尝试，重试策略由 `dsh-llm-retry` 在持久步骤边界执行，重试会重新推导整个请求。
 - **回放元数据是分协议的。** Messages 传输为自己写下的思考签名维护专属信封，Responses 传输则保留每个 reasoning item（id 与加密载荷）供索要加密回放的模型使用；两种信封都不跨服务商移植。
 - **中途变更属于端点自己的契约。** 声明了 `systemPromptUpdate` 或 `toolUpdate` 的路由会以 `system` 角色历史消息接收它们，因此若某端点把该部件挡在 beta 头之后，部署须在 `headers` 里写明该头：本适配器不代端点注入任何东西；而一个前面没有 user 回合可跟随的变更会让请求以 `UNSUPPORTED_CONTENT` 失败，而不是被静默搬移或丢弃。

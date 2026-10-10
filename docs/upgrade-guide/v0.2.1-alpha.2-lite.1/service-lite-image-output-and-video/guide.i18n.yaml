@@ -1,0 +1,16 @@
+# Bilingual-pair consistency record for guide.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/upgrade-guide/v0.2.1-alpha.2-lite.1/service-lite-image-output-and-video/guide.md
+/:
+  en: ca88329789f58348
+  zh: ca88329789f58348
+/model-routes-carry-image-output-and-video-arrives-as-a-file:
+  en: 9fca640ef266ded6
+  zh: 5b846733ec89d289
+/model-routes-carry-image-output-and-video-arrives-as-a-file/change:
+  en: 46422211a44713a5
+  zh: 0411bfcdf957b4cf
+/model-routes-carry-image-output-and-video-arrives-as-a-file/migration:
+  en: 99f0854c391c83d5
+  zh: 126c2517df7d8b86

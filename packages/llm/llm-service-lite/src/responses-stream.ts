@@ -23,6 +23,7 @@
 import { LlmError, ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { FinishReason, StreamChunk, TokenUsage } from '@deepseek-ai/dsh-llm'
 import { classifyFailure } from './errors.ts'
+import { encodedImage, type AdapterChunk } from './image-output.ts'
 import { RESPONSES_REPLAY_KIND, RESPONSES_REPLAY_VERSION } from './openai-responses.ts'
 import type { ResponsesReplayBlock, ResponsesReplayState } from './openai-responses.ts'
 
@@ -156,7 +157,7 @@ function finishReasonOf(
 export async function* translateResponsesStream(
   events: AsyncIterable<Record<string, unknown>>,
   sawSentinel: () => boolean,
-): AsyncGenerator<StreamChunk> {
+): AsyncGenerator<AdapterChunk> {
   /** Blocks by the provider identity they were opened under. */
   const slots = new Map<string, Slot>()
   /** Blocks by the provider's item id, which `output_item.done` may arrive without an index for. */
@@ -185,6 +186,24 @@ export async function* translateResponsesStream(
     slots.set(key, slot)
     replay.push(entry)
     return { slot, started: true }
+  }
+  /** Image items already written, so a terminal event does not repeat one. */
+  const writtenImages = new Set<string>()
+  /**
+   * Chunks one image-generation item contributes: this protocol returns the
+   * finished picture inside the item, so the image is one whole block rather
+   * than a stream of fragments.
+   */
+  const writeImage = (item: Record<string, unknown>): AdapterChunk[] => {
+    const result = asText(item['result'])
+    if (result === undefined || result.length === 0) return []
+    const index = nextIndex
+    nextIndex += 1
+    sawOutput = true
+    return [
+      { type: 'block-start', index, blockType: 'image' },
+      { type: 'generated-image', index, ...encodedImage(result, 'the Responses endpoint') },
+    ]
   }
   const announce = (slot: Slot): StreamChunk => ({
     type: 'block-start',
@@ -385,6 +404,11 @@ export async function* translateResponsesStream(
           for (const chunk of writeCall(item, itemId)) yield chunk
           continue
         }
+        if (item['type'] === 'image_generation_call') {
+          if (itemId !== undefined) writtenImages.add(itemId)
+          for (const chunk of writeImage(item)) yield chunk
+          continue
+        }
         if (item['type'] === 'message' || item['type'] === 'reasoning') {
           const kind = item['type'] === 'message' ? 'text' : 'reasoning'
           const key = typeof outputIndex === 'number' ? `${kind}:${String(outputIndex)}` : undefined
@@ -409,6 +433,12 @@ export async function* translateResponsesStream(
         if (record['type'] === 'function_call') {
           if (itemId === undefined) continue
           for (const chunk of writeCall(record, itemId)) yield chunk
+          continue
+        }
+        if (record['type'] === 'image_generation_call') {
+          // An image the stream already carried is skipped for the same reason.
+          if (itemId !== undefined && writtenImages.has(itemId)) continue
+          for (const chunk of writeImage(record)) yield chunk
           continue
         }
         if (record['type'] === 'message' || record['type'] === 'reasoning') {

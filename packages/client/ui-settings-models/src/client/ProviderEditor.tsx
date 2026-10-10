@@ -37,6 +37,7 @@ import {
 import { apiKeyFailure } from './apiKey.ts'
 import { EditorFooter } from './EditorFooter.tsx'
 import { ModelListEditor } from './ModelListEditor.tsx'
+import { formatCapacity } from './DeepSeekModelsEditor.tsx'
 import { OWC_INPUT_MODALITIES, OwcModelCapabilities } from './OwcModelCapabilities.tsx'
 import { OwcProfileFields } from './OwcProfileFields.tsx'
 import type { OwcConnectionReport } from './OwcProfileFields.tsx'
@@ -482,6 +483,16 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
       defaultMaxTokens: inheritedNumber('defaultMaxTokens'),
     })
 
+    /**
+     * The capacities a blank model field inherits, spelled for the placeholder:
+     * the two OpenAI-compatible families fall back to their own defaults, and
+     * showing one family another's number would read as the wrong promise.
+     */
+    const capacityHint = (): Readonly<Record<'contextWindow' | 'maxTokens', string>> => ({
+      contextWindow: formatCapacity(inheritedNumber('defaultContextWindow') ?? 256_000),
+      maxTokens: formatCapacity(inheritedNumber('defaultMaxTokens') ?? 8_192),
+    })
+
     /** The family's model list: one contract, family-owned extras. */
     const modelList = (): ReactNode => {
       if (family === 'deepseek') {
@@ -501,6 +512,7 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
             {...catalogProps}
             inputField={['capabilities', 'modalities']}
             inputModalities={OWC_INPUT_MODALITIES}
+            capacityHint={capacityHint()}
             probe={probe}
             probeBlocked={keyFailure}
             operations={operations}
@@ -514,6 +526,7 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
           {...catalogProps}
           catalogProvider={props.declared === true ? undefined : props.provider}
           defaultInput={Array.isArray(defaultInput) ? defaultInput : undefined}
+          capacityHint={capacityHint()}
           probe={probe}
           probeBlocked={keyFailure}
           operations={operations}

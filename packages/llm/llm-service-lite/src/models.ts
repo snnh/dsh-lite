@@ -14,7 +14,7 @@
  */
 
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
-import type { LlmModelInfo, LlmResolvedModelInfo } from '@deepseek-ai/dsh-llm'
+import type { LlmModelInfo, LlmResolvedModelInfo, ModelModality } from '@deepseek-ai/dsh-llm'
 import type { EffortLevel, ThinkingMode } from './config.ts'
 import { modelOf, type ResolvedOwcModel, type ResolvedOwcProviderProfile } from './profiles.ts'
 
@@ -85,12 +85,26 @@ export function replaysReasoning(model: ResolvedOwcModel): boolean {
  * @param model - resolved model facts.
  * @returns the seam's model info.
  */
+export function outputModalitiesOf(model: ResolvedOwcModel): readonly ModelModality[] {
+  return model.imageOutput ? ['text', 'image'] : ['text']
+}
+
+/**
+ * The modalities one model's answers may carry. A model that declared image
+ * output answers with text and images; every other model is declared text-only
+ * rather than left unknown, so an image block from a route that never claimed
+ * one is a failure a caller can see.
+ * @param profile - resolved route.
+ * @param model - resolved model facts.
+ * @returns the seam's model info.
+ */
 export function catalogInfo(profile: ResolvedOwcProviderProfile, model: ResolvedOwcModel): LlmModelInfo {
   return {
     provider: profile.provider,
     id: model.id,
     name: model.name,
     inputModalities: [...model.modalities],
+    outputModalities: [...outputModalitiesOf(model)],
   }
 }
 
@@ -118,8 +132,9 @@ export function resolvedModelInfo(profile: ResolvedOwcProviderProfile, model: st
     id: facts.id,
     name: facts.name,
     inputModalities: [...facts.modalities],
+    outputModalities: [...outputModalitiesOf(facts)],
     context: { contextWindow: facts.contextWindow },
-    defaultMaxTokens: facts.maxTokens,
+    defaultMaxTokens: facts.defaults.maxTokens ?? facts.maxTokens,
     // Declared only when the profile declares them: an absent capability is
     // what makes the harness rewrite the prompt and the tool list every turn,
     // which is the honest reading of a route that never said it reads either

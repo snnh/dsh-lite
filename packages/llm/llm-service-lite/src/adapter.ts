@@ -29,10 +29,11 @@ import { chatRequest, translateChatStream } from './chat-completions.ts'
 import { responsesRequest } from './openai-responses.ts'
 import { translateResponsesStream } from './responses-stream.ts'
 import { imageRequestPricing, prepareRequestImages } from './images.ts'
+import { generatedImageBlock, isGeneratedImage, type AdapterChunk } from './image-output.ts'
 import { classifyFailure, classifyTransport } from './errors.ts'
 import { ConcurrencyLimiter } from './limiter.ts'
 import { catalogModels, resolvedModelInfo } from './models.ts'
-import { modelOf, type ResolvedOwcProviderProfile } from './profiles.ts'
+import { modelOf, type ResolvedOwcModel, type ResolvedOwcProviderProfile } from './profiles.ts'
 import { SseReader } from './sse.ts'
 import type { ServedInterfaceType } from './config.ts'
 
@@ -223,6 +224,55 @@ export class OwcProfilesAdapter extends LlmAdapter {
       throw new LlmError(`llm-service-lite: provider "${profile.provider}" returned no response body`, 'EMPTY_RESPONSE')
     }
     const reader = new SseReader(response.body, activity)
-    yield* transport.translate(reader.events(), () => reader.sawDone)
+    yield* this.materializeImages(model, transport.translate(reader.events(), () => reader.sawDone))
+  }
+
+  /**
+   * Commit every image the endpoint returned and republish it as a durable
+   * block.
+   *
+   * The wire translators carry bytes, not attachments: this is the one place
+   * that knows the route, so it is where a route that never declared image
+   * output fails by name, where a deployment without an attachment provider
+   * fails rather than losing the picture, and where the session ends up
+   * holding a reference instead of base64.
+   *
+   * @param model - the route's declared facts for this model.
+   * @param chunks - the transport's chunk stream.
+   * @yields harness chunks, with each generated image replaced by its block.
+   */
+  private async * materializeImages(
+    model: ResolvedOwcModel,
+    chunks: AsyncIterable<AdapterChunk>,
+  ): AsyncGenerator<StreamChunk> {
+    for await (const chunk of chunks) {
+      if (!isGeneratedImage(chunk)) {
+        yield chunk
+        continue
+      }
+      if (!model.imageOutput) {
+        throw new LlmError(
+          `llm-service-lite: model "${model.id}" returned an image without declaring image output;`
+          + ' declare capabilities.imageOutput on the model so the route states what it serves',
+          'UNSUPPORTED_CONTENT',
+        )
+      }
+      const attachments = this.dependencies.resolveAttachments?.()
+      if (attachments === undefined) {
+        throw new LlmError(
+          `llm-service-lite: model "${model.id}" returned an image and no attachment provider is mounted;`
+          + ' load @deepseek-ai/dsh-attachment-local (or another provider) to store it',
+          'INVALID_CONFIG',
+        )
+      }
+      const [attachment] = await attachments.saveImages([{ data: chunk.data, mediaType: chunk.mediaType }])
+      if (attachment === undefined) {
+        throw new LlmError(
+          `llm-service-lite: the attachment provider returned no reference for an image from "${model.id}"`,
+          'EMPTY_RESPONSE',
+        )
+      }
+      yield { type: 'block-end', index: chunk.index, block: generatedImageBlock(attachment) }
+    }
   }
 }

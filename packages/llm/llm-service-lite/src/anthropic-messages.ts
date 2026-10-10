@@ -516,7 +516,8 @@ function systemParts(message: RequestMessage): AnthropicSystemPart[] {
 function effectiveMaxTokens(profile: ResolvedOwcProviderProfile, model: ResolvedOwcModel, options: GenerateOptions): number {
   if (options.maxTokens !== undefined) return options.maxTokens
   const override = profile.extraBody['max_tokens']
-  return typeof override === 'number' ? override : model.maxTokens
+  if (typeof override === 'number') return override
+  return model.defaults.maxTokens ?? model.maxTokens
 }
 
 /** Extended thinking's documented floor; a smaller budget is rejected outright. */
@@ -617,13 +618,18 @@ export function anthropicRequest(
   const level = reasoningLevelOf(model, options.reasoningEffort)
   const maxTokens = effectiveMaxTokens(profile, model, options)
   const tools = options.tools === undefined || options.tools.length === 0 || !model.tools ? [] : options.tools
+  // A caller's own value always wins; the model's declared default is written
+  // only where the caller stated none.
+  const temperature = options.temperature ?? model.defaults.temperature
   const body: Record<string, unknown> = {
     ...profile.extraBody,
     model: options.model,
     // This protocol requires the output cap, and streaming is opt-in on it.
     max_tokens: maxTokens,
     stream: true,
-    ...options.temperature === undefined ? {} : { temperature: options.temperature },
+    ...temperature === undefined ? {} : { temperature },
+    ...model.defaults.topP === undefined ? {} : { top_p: model.defaults.topP },
+    ...model.defaults.topK === undefined ? {} : { top_k: model.defaults.topK },
     ...options.stop === undefined || options.stop.length === 0 ? {} : { stop_sequences: [...options.stop] },
     ...systemField(options, caching),
     messages: toAnthropicMessages(options, profile.provider, model, versions),

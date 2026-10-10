@@ -76,6 +76,8 @@ export { ConcurrencyLimiter } from './limiter.ts'
 export type { Lease } from './limiter.ts'
 export { resolveProfiles, modelOf } from './profiles.ts'
 export type { ResolvedOwcModel, ResolvedOwcProviderProfile } from './profiles.ts'
+export { convertOfficialProvider } from './official-catalog.ts'
+export type { OfficialCatalogConversion, OfficialCatalogProfile } from './official-catalog.ts'
 export { discoverEndpointModels } from './discovery.ts'
 
 /** Plugin name, also the default settings namespace. */
@@ -169,7 +171,20 @@ export function apply(ctx: Context, config: Config): void {
   })
   let directory: DirectoryRegistrationHandle | undefined
   let registeredDirectory: unknown
+  let reportedCatalogDiagnostics: unknown
+  /**
+   * Report what a catalog conversion could not carry, once per distinct set.
+   * The route still serves; these lines are what keeps a lossy conversion from
+   * looking whole.
+   */
+  const reportCatalogDiagnostics = (): void => {
+    const notes = [...profiles().values()].flatMap(profile => profile.catalogDiagnostics)
+    if (deepEqualJson(notes, reportedCatalogDiagnostics)) return
+    reportedCatalogDiagnostics = notes
+    for (const note of notes) ctx.logger.warn('%s', note)
+  }
   const ensureDirectory = (): void => {
+    reportCatalogDiagnostics()
     const entries: LlmConfigurableProvider[] = [...profiles().values()].map(profile => ({
       provider: profile.provider,
       displayName: profile.displayName,

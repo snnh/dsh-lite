@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { StreamChunk } from '@deepseek-ai/dsh-llm'
 import { chatRequest, toWireMessages, translateChatStream } from '../src/chat-completions.ts'
+import type { AdapterChunk } from '../src/image-output.ts'
 import type { ResolvedOwcModel, ResolvedOwcProviderProfile } from '../src/profiles.ts'
 import { resolveProfiles } from '../src/profiles.ts'
 import { assistant, image, request, requestImage, system, text, toolCall, toolResult, toolSchema, user } from './messages.ts'
@@ -34,8 +34,8 @@ const bodyOf = (profile: ResolvedOwcProviderProfile, options = request()): Recor
 const translate = async (
   events: Array<Record<string, unknown>>,
   sawDone = true,
-): Promise<StreamChunk[]> => {
-  const chunks: StreamChunk[] = []
+): Promise<AdapterChunk[]> => {
+  const chunks: AdapterChunk[] = []
   for await (const chunk of translateChatStream((async function* generate() {
     yield* events
   })(), () => sawDone)) {
@@ -43,6 +43,13 @@ const translate = async (
   }
   return chunks
 }
+
+/** One PNG payload, and the inline part an endpoint returns it in. */
+const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+const imagePart = (): Record<string, unknown> => ({
+  type: 'image_url',
+  image_url: { url: `data:image/png;base64,${Buffer.from(PNG_BYTES).toString('base64')}` },
+})
 
 /** One provider chunk with a content delta. */
 const delta = (fields: Record<string, unknown>, finish: string | null = null): Record<string, unknown> => ({
@@ -58,6 +65,33 @@ describe('chat-completions request', () => {
     expect(bodyOf(profile)).toMatchObject({ top_k: 40, temperature: 0.1 })
   })
 
+  it('carries an image the endpoint returned as a block of its own', async () => {
+    const chunks = await translate([
+      { choices: [{ finish_reason: null, delta: { content: 'here: ' } }] },
+      { choices: [{ finish_reason: null, delta: { images: [imagePart()] } }] },
+      { choices: [{ finish_reason: 'stop', delta: {} }] },
+    ])
+    // The text block closes before the image opens, so the message reads in
+    // the order the endpoint answered.
+    expect(chunks).toContainEqual({ type: 'block-end', index: 0, block: { type: 'text', text: 'here: ' } })
+    expect(chunks).toContainEqual({ type: 'block-start', index: 1, blockType: 'image' })
+    expect(chunks).toContainEqual({ type: 'generated-image', index: 1, mediaType: 'image/png', data: PNG_BYTES })
+  })
+
+  it('reads an image from a whole message as well as from a delta', async () => {
+    const chunks = await translate([
+      { choices: [{ finish_reason: 'stop', message: { images: [imagePart()] } }] },
+    ])
+    expect(chunks.filter(chunk => chunk.type === 'generated-image')).toHaveLength(1)
+  })
+
+  it('refuses an image URL it would have to fetch, and one that is not a raster image', async () => {
+    const remote = [{ choices: [{ delta: { images: [{ type: 'image_url', image_url: { url: 'https://cdn.test/a.png' } }] } }] }]
+    await expect(translate(remote)).rejects.toThrow(/does not fetch/)
+    const vector = [{ choices: [{ delta: { images: [{ image_url: { url: 'data:image/svg+xml;base64,PHN2Zz4=' } }] } }] }]
+    await expect(translate(vector)).rejects.toThrow(/does not carry/)
+  })
+
   it('asks for a streamed usage report only when the profile does', () => {
     expect(bodyOf(route())).not.toHaveProperty('stream_options')
     expect(bodyOf(route({ includeUsage: true }))).toMatchObject({ stream_options: { include_usage: true } })
@@ -66,6 +100,27 @@ describe('chat-completions request', () => {
   it('sends max_tokens only when the request configured one', () => {
     expect(bodyOf(route())).not.toHaveProperty('max_tokens')
     expect(bodyOf(route(), request({ maxTokens: 64 }))).toMatchObject({ max_tokens: 64 })
+  })
+
+  it('writes a model\'s declared request parameters where the caller stated none', () => {
+    const profile = route({
+      models: [{ id: 'm', contextWindow: 8192, maxTokens: 1024, defaults: { temperature: 0.3, topP: 0.8, topK: 20 } }],
+    })
+    expect(bodyOf(profile)).toMatchObject({ temperature: 0.3, top_p: 0.8, top_k: 20 })
+    // The caller's own value always wins over the declared default; the fields
+    // it did not restate still come from the model.
+    expect(bodyOf(profile, request({ temperature: 1.1 }))).toMatchObject({
+      temperature: 1.1,
+      top_p: 0.8,
+      top_k: 20,
+    })
+  })
+
+  it('writes no sampling parameter a model did not declare', () => {
+    const body = bodyOf(route())
+    expect(body).not.toHaveProperty('temperature')
+    expect(body).not.toHaveProperty('top_p')
+    expect(body).not.toHaveProperty('top_k')
   })
 
   it('sends the effort level the model declares', () => {

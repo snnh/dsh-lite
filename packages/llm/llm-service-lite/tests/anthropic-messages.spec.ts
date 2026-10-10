@@ -98,6 +98,20 @@ describe('anthropic-messages request', () => {
     expect(bodyOf(route(), { stop: [] })).not.toHaveProperty('stop_sequences')
   })
 
+  it('writes a model\'s declared request parameters where the caller stated none', () => {
+    const profile = route({
+      models: [{ id: 'm', contextWindow: 8192, maxTokens: 1024, defaults: { temperature: 0.3, topP: 0.7, topK: 32, maxTokens: 256 } }],
+    })
+    expect(bodyOf(profile)).toMatchObject({ temperature: 0.3, top_p: 0.7, top_k: 32, max_tokens: 256 })
+    expect(bodyOf(profile, { temperature: 1, maxTokens: 64 })).toMatchObject({ temperature: 1, max_tokens: 64 })
+  })
+
+  it('writes no sampling parameter a model did not declare', () => {
+    const body = bodyOf(route())
+    expect(body).not.toHaveProperty('top_p')
+    expect(body).not.toHaveProperty('top_k')
+  })
+
   it('lays profile extra body fields under the fields the adapter owns', () => {
     const profile = route({ extraBody: { top_k: 40, max_tokens: 128 } })
     expect(bodyOf(profile, { maxTokens: 64 })).toMatchObject({ top_k: 40, max_tokens: 64 })

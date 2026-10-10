@@ -13,10 +13,12 @@
  */
 
 import { credentialRef, type CredentialRef } from '@deepseek-ai/dsh-credentials'
+import { readFileSync } from 'node:fs'
 import { resolveRetryPolicy, type ResolvedRetryPolicy } from '@deepseek-ai/dsh-llm'
 import { deepEqualJson, isJsonValue } from '@deepseek-ai/dsh-util-values'
 import type { ImageRequestBudget } from './images.ts'
 import { LOW_DETAIL_IMAGE_PIXEL_BUDGET } from './images.ts'
+import { convertOfficialProvider } from './official-catalog.ts'
 import {
   DEFAULT_CONTEXT_WINDOW,
   DEFAULT_IMAGE_OFFLOAD_BYTE_QUANTUM,
@@ -37,6 +39,7 @@ import {
   type Options,
   type OwcImageTokenAccounting,
   type OwcModelCapabilities,
+  type OwcModelDefaults,
   type OwcModelProfile,
   type OwcProviderProfile,
   type ServedInterfaceType,
@@ -98,6 +101,26 @@ export interface ResolvedOwcModel {
   readonly imageMaxBytes: number | undefined
   /** Visual-token accounting this model's endpoint charges; absent keeps the meter's heuristic. */
   readonly imageTokens: ResolvedImageTokens | undefined
+  /** Whether the model may answer with images of its own. */
+  readonly imageOutput: boolean
+  /** Request parameters the model writes when the caller states none. */
+  readonly defaults: ResolvedOwcModelDefaults
+}
+
+/**
+ * One model's request defaults, with the protocol that carries them already
+ * checked: the request path writes each declared value exactly when the
+ * caller's own request left it unstated.
+ */
+export interface ResolvedOwcModelDefaults {
+  /** Sampling temperature written when the caller names none. */
+  readonly temperature: number | undefined
+  /** Nucleus cutoff written when the caller names none. */
+  readonly topP: number | undefined
+  /** Top-k cutoff written when the caller names none. */
+  readonly topK: number | undefined
+  /** Output cap the request asks for when the caller states none; absent keeps the declared `maxTokens`. */
+  readonly maxTokens: number | undefined
 }
 
 /**
@@ -185,6 +208,12 @@ export interface ResolvedOwcProviderProfile {
   readonly imageRequestBudget: ImageRequestBudget
   /** Why this route cannot serve, when it cannot; a store keeps such a route editable rather than dropping it. */
   readonly diagnostic: string | undefined
+  /**
+   * One line per official field a `catalog` conversion could not carry. Empty
+   * for a profile that declares no catalog and for one whose catalog converted
+   * whole.
+   */
+  readonly catalogDiagnostics: readonly string[]
 }
 
 /** How a caller wants an unserviceable profile handled. */
@@ -231,6 +260,12 @@ function assertRouteName(provider: string): void {
  */
 function assertAddressable(provider: string, source: OwcProviderProfile): ServedInterfaceType {
   assertRouteName(provider)
+  if (source.interfaceType === undefined) {
+    throw new Error(
+      `llm-service-lite: provider "${provider}" names no interfaceType;`
+      + ` state one of ${INTERFACE_TYPES.join(', ')} or point "catalog" at an official provider file`,
+    )
+  }
   if (!INTERFACE_TYPES.includes(source.interfaceType)) {
     throw new Error(
       `llm-service-lite: provider "${provider}" names interfaceType "${source.interfaceType}",`
@@ -304,6 +339,53 @@ function assertExtraBody(provider: string, extraBody: Readonly<Record<string, un
   }
 }
 
+/** The request parameters a model may declare a default for. */
+const DEFAULT_PARAM_FIELDS = ['temperature', 'topP', 'topK', 'maxTokens'] as const
+
+/**
+ * Validate one model's declared request parameters against the protocol that
+ * would carry them. Ranges are the schema's work; this refuses what a raw
+ * profile could still state — a value no request can send, and a knob the
+ * named protocol has no field for.
+ * @param provider - route name, for the diagnostic.
+ * @param modelId - model id, for the diagnostic.
+ * @param declared - configured request defaults, if any.
+ * @param interfaceType - protocol every request on this route speaks.
+ * @returns the defaults the request path writes, each absent unless declared.
+ * @throws Error naming the field a request could not carry.
+ */
+function resolveModelDefaults(
+  provider: string,
+  modelId: string,
+  declared: OwcModelDefaults | undefined,
+  interfaceType: ServedInterfaceType,
+): ResolvedOwcModelDefaults {
+  const source = declared ?? {}
+  // A knob the named protocol has no field for is refused where it is written,
+  // the same way a route-level switch is: a request that silently dropped it
+  // would make a configured setting look applied.
+  if (source.topK !== undefined && interfaceType === 'openai-responses') {
+    throw new Error(
+      `llm-service-lite: provider "${provider}" model "${modelId}" declares defaults.topK`
+      + ' on interfaceType "openai-responses"; that protocol has no top-k field',
+    )
+  }
+  for (const field of DEFAULT_PARAM_FIELDS) {
+    const value = source[field]
+    if (value === undefined || Number.isFinite(value)) continue
+    throw new Error(
+      `llm-service-lite: provider "${provider}" model "${modelId}" declares defaults.${field}`
+      + ` "${String(value)}"; a request parameter must be a finite number`,
+    )
+  }
+  return {
+    temperature: source.temperature,
+    topP: source.topP,
+    topK: source.topK,
+    maxTokens: source.maxTokens,
+  }
+}
+
 /**
  * Materialize one declared model's capacities and capabilities.
  * @param provider - route name, for the diagnostic.
@@ -325,16 +407,15 @@ function resolveModel(
   }
   const capabilities: OwcModelCapabilities = model.capabilities ?? {}
   const modalities = capabilities.modalities ?? []
+  const maxTokens = model.maxTokens ?? fallbackMaxTokens
   for (const modality of modalities) {
     if (!MODALITIES.includes(modality)) {
       throw new Error(`llm-service-lite: provider "${provider}" model "${model.id}" declares unknown modality "${modality}"`)
     }
-    if (modality !== 'text' && modality !== 'image') {
-      throw new Error(
-        `llm-service-lite: provider "${provider}" model "${model.id}" declares ${modality} input,`
-        + ' which this adapter does not carry; the wire has an image part and no video part',
-      )
-    }
+    // Video is accepted as a declaration and carried as a file: a video
+    // occurrence reaches the model as the same handle text any file
+    // contributes, and the harness's own video content block is what a native
+    // part will need before this adapter can send pixels of it.
   }
   const carriesImages = modalities.includes('image')
   if (model.imagePixelBudget !== undefined && !carriesImages) {
@@ -357,13 +438,13 @@ function resolveModel(
       + ' without declaring image input',
     )
   }
-  // A declaration the request path cannot act on is refused where it is made,
-  // in the same place the unimplemented protocols are: accepting it would put a
-  // capability in the document that no request ever uses.
-  if (capabilities.imageOutput === true) {
+  // Image output is carried as an assistant image block, which the two
+  // OpenAI-compatible protocols have a part for and the Messages protocol does
+  // not: declaring it there would name a capability no request could act on.
+  if (capabilities.imageOutput === true && interfaceType === 'anthropic-messages') {
     throw new Error(
-      `llm-service-lite: provider "${provider}" model "${model.id}" declares image output,`
-      + ' which this adapter does not serve yet; drop the declaration until it does',
+      `llm-service-lite: provider "${provider}" model "${model.id}" declares image output`
+      + ' on interfaceType "anthropic-messages"; that protocol has no assistant image part',
     )
   }
   // Mid-conversation prompt and tool changes are carried as `system`-role
@@ -396,7 +477,8 @@ function resolveModel(
     id: model.id,
     name: model.name ?? model.id,
     contextWindow: model.contextWindow ?? fallbackContextWindow,
-    maxTokens: model.maxTokens ?? fallbackMaxTokens,
+    maxTokens,
+    defaults: resolveModelDefaults(provider, model.id, model.defaults, interfaceType),
     modalities: modalities.length === 0 ? ['text'] : [...modalities],
     effort: [...capabilities.effort ?? []],
     thinking: [...capabilities.thinking ?? []],
@@ -413,6 +495,7 @@ function resolveModel(
     imageTokens: model.imageTokens === undefined
       ? undefined
       : resolveImageTokens(provider, model.id, model.imageTokens),
+    imageOutput: capabilities.imageOutput ?? false,
   }
 }
 
@@ -437,9 +520,18 @@ export function resolveProfiles(
     throw new Error('llm-service-lite: providers is a dict keyed by provider route, not an array of profiles')
   }
   const resolved = new Map<string, ResolvedOwcProviderProfile>()
-  for (const [provider, source] of Object.entries(providers ?? {})) {
+  for (const [provider, rawSource] of Object.entries(providers ?? {})) {
     if (provider.length === 0) throw new Error('llm-service-lite: provider route names must be non-empty')
     if (resolved.has(provider)) throw new Error(`llm-service-lite: duplicate provider route "${provider}"`)
+    let source: OwcProviderProfile
+    let catalogDiagnostics: readonly string[]
+    try {
+      ({ profile: source, diagnostics: catalogDiagnostics } = materializeCatalog(provider, rawSource))
+    } catch (error) {
+      if (validation === 'strict') throw error
+      resolved.set(provider, unserviceable(provider, rawSource, error))
+      continue
+    }
     let interfaceType: ServedInterfaceType
     try {
       interfaceType = assertAddressable(provider, source)
@@ -493,9 +585,60 @@ export function resolveProfiles(
         countQuantum: source.imageOffloadCountQuantum ?? DEFAULT_IMAGE_OFFLOAD_COUNT_QUANTUM,
       },
       diagnostic: undefined,
+      catalogDiagnostics,
     })
   }
   return resolved
+}
+
+/**
+ * Materialize one profile's official-format catalog, when it names one.
+ *
+ * The conversion supplies the profile's protocol, endpoint, headers, and
+ * models; every field the profile states itself wins over the converted value,
+ * which is what lets one file describe a route while the deployment overrides
+ * its credential, its endpoint, or its model list. The catalog field itself is
+ * spent: what the route serves is the converted facts.
+ *
+ * @param provider - route name, for diagnostics.
+ * @param source - configured profile.
+ * @returns the profile the request path reads, and the conversion's diagnostics.
+ * @throws Error when the catalog cannot be read or cannot become one route profile.
+ */
+function materializeCatalog(
+  provider: string,
+  source: OwcProviderProfile,
+): { profile: OwcProviderProfile; diagnostics: readonly string[] } {
+  const catalog = source.catalog
+  if (catalog === undefined) return { profile: source, diagnostics: [] }
+  let content: unknown
+  if (typeof catalog === 'string') {
+    try {
+      content = JSON.parse(readFileSync(catalog, 'utf8')) as unknown
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
+      throw new Error(`llm-service-lite: provider "${provider}" catalog "${catalog}" cannot be read: ${detail}`)
+    }
+  } else {
+    content = catalog
+  }
+  const { profile, diagnostics } = convertOfficialProvider(content, provider)
+  // The profile's own fields win over the converted ones, which is what lets
+  // one file describe a route while the deployment overrides its credential,
+  // its endpoint, or its model list. `interfaceType` is optional precisely so
+  // the catalog can supply it, so an absent declaration must not erase it; and
+  // an absent or empty model list keeps the catalog's models, which is the
+  // official rule — a list replaces the catalog only when it names one.
+  const declaredModels = source.models ?? []
+  return {
+    profile: {
+      ...profile,
+      ...source,
+      interfaceType: source.interfaceType ?? profile.interfaceType,
+      models: declaredModels.length === 0 ? profile.models : declaredModels,
+    },
+    diagnostics,
+  }
 }
 
 /**
@@ -511,8 +654,8 @@ function unserviceable(provider: string, source: OwcProviderProfile, error: unkn
     provider,
     displayName: source.displayName ?? provider,
     enabled: source.enabled ?? true,
-    interfaceType: (INTERFACE_TYPES as readonly string[]).includes(source.interfaceType)
-      ? source.interfaceType
+    interfaceType: (INTERFACE_TYPES as readonly string[]).includes(source.interfaceType ?? '')
+      ? source.interfaceType as ServedInterfaceType
       : 'openai-chat-completions',
     baseURL: source.baseURL ?? ENDPOINT_DEFAULTS['openai-chat-completions'],
     apiKeyEnv: undefined,
@@ -535,6 +678,7 @@ function unserviceable(provider: string, source: OwcProviderProfile, error: unkn
       countQuantum: DEFAULT_IMAGE_OFFLOAD_COUNT_QUANTUM,
     },
     diagnostic: message,
+    catalogDiagnostics: [],
   }
 }
 
@@ -582,10 +726,17 @@ export function modelOf(profile: ResolvedOwcProviderProfile, model: string): Res
     name: model,
     contextWindow: profile.defaultContextWindow,
     maxTokens: profile.defaultMaxTokens,
+    defaults: {
+      temperature: undefined,
+      topP: undefined,
+      topK: undefined,
+      maxTokens: undefined,
+    },
     modalities: ['text'],
     imagePixelBudget: undefined,
     imageMaxBytes: undefined,
     imageTokens: undefined,
+    imageOutput: false,
     effort: [],
     thinking: [],
     thinkingStyle: undefined,

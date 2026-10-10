@@ -465,8 +465,12 @@ export function responsesRequest(
 ): ResponsesHttpRequest {
   const level = reasoningLevelOf(model, options.reasoningEffort)
   const reasoning = reasoningFields(model, level)
-  const maxTokens = options.maxTokens ?? model.maxTokens
+  const maxTokens = options.maxTokens ?? model.defaults.maxTokens ?? model.maxTokens
   const tools = options.tools === undefined || options.tools.length === 0 || !model.tools ? [] : options.tools
+  // A caller's own value always wins; the model's declared default is written
+  // only where the caller stated none.
+  const temperature = options.temperature ?? model.defaults.temperature
+  const topP = model.defaults.topP
   const body: Record<string, unknown> = {
     ...profile.extraBody,
     model: options.model,
@@ -478,7 +482,8 @@ export function responsesRequest(
     max_output_tokens: Math.max(maxTokens, MIN_OUTPUT_TOKENS),
     // Reasoning rejects sampling: an endpoint that reads `reasoning.effort`
     // answers a temperature with a 400, so it is sent only without one.
-    ...level.effort === undefined && options.temperature !== undefined ? { temperature: options.temperature } : {},
+    ...level.effort === undefined && temperature !== undefined ? { temperature } : {},
+    ...level.effort === undefined && topP !== undefined ? { top_p: topP } : {},
     ...tools.length === 0 ? {} : {
       tools: tools.map(tool => ({
         type: 'function',

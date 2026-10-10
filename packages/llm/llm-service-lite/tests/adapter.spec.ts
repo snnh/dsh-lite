@@ -122,6 +122,13 @@ const adapterFor = (
   })
 }
 
+/** One PNG payload, and the inline part an endpoint returns it in. */
+const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+const generatedImagePart = (): Record<string, unknown> => ({
+  type: 'image_url',
+  image_url: { url: `data:image/png;base64,${Buffer.from(PNG_BYTES).toString('base64')}` },
+})
+
 /** An attachment provider answering with one PNG request version over the given bytes. */
 const attachmentStore = (bytes = 4): AttachmentStore => ({
   readImageRequest: (ref: ImageAttachmentRef, target: ImageRequestTarget) => Promise.resolve({
@@ -162,6 +169,56 @@ describe('owc profiles adapter', () => {
         { type: 'image_url', image_url: { url: `data:image/png;base64,${Buffer.alloc(4).toString('base64')}` } },
       ],
     }])
+  })
+
+  it('stores an image the endpoint returned and publishes a durable block', async () => {
+    const upstream = await provider((response) => {
+      response.writeHead(200, { 'content-type': 'text/event-stream' })
+      frame(response, { choices: [{ finish_reason: null, delta: { content: 'here: ' } }] })
+      frame(response, { choices: [{ finish_reason: null, delta: { images: [generatedImagePart()] } }] })
+      frame(response, { choices: [{ finish_reason: 'stop', delta: {} }] })
+      frame(response, '[DONE]')
+      response.end()
+    })
+    running.push(upstream)
+    const attachment = { attachmentId: 'sha256:pic', mediaType: 'image/png', bytes: 8, width: 1, height: 1 }
+    const saved: unknown[] = []
+    const adapter = adapterFor(
+      routeFor(upstream.url, { models: [{ id: 'm', capabilities: { imageOutput: true } }] }),
+      () => Promise.resolve('sk-test'),
+      () => ({ saveImages: (inputs: unknown) => { saved.push(inputs); return Promise.resolve([attachment]) } } as never),
+    )
+    const chunks = await collect(adapter.stream(request()))
+    expect(saved).toEqual([[{ data: PNG_BYTES, mediaType: 'image/png' }]])
+    expect(chunks).toContainEqual({ type: 'block-end', index: 1, block: { type: 'image', attachment } })
+  })
+
+  it('fails an image from a model that never declared image output', async () => {
+    const upstream = await provider((response) => {
+      response.writeHead(200, { 'content-type': 'text/event-stream' })
+      frame(response, { choices: [{ finish_reason: null, delta: { images: [generatedImagePart()] } }] })
+      frame(response, { choices: [{ finish_reason: 'stop', delta: {} }] })
+      frame(response, '[DONE]')
+      response.end()
+    })
+    running.push(upstream)
+    const adapter = adapterFor(routeFor(upstream.url), () => Promise.resolve('sk-test'), () => attachmentStore())
+    const failure = await collect(adapter.stream(request())).catch((error: unknown) => error)
+    expect(String(failure)).toContain('without declaring image output')
+  })
+
+  it('fails an image the endpoint returned when no attachment provider is mounted', async () => {
+    const upstream = await provider((response) => {
+      response.writeHead(200, { 'content-type': 'text/event-stream' })
+      frame(response, { choices: [{ finish_reason: null, delta: { images: [generatedImagePart()] } }] })
+      frame(response, { choices: [{ finish_reason: 'stop', delta: {} }] })
+      frame(response, '[DONE]')
+      response.end()
+    })
+    running.push(upstream)
+    const adapter = adapterFor(routeFor(upstream.url, { models: [{ id: 'm', capabilities: { imageOutput: true } }] }))
+    const failure = await collect(adapter.stream(request())).catch((error: unknown) => error)
+    expect(String(failure)).toContain('no attachment provider is mounted')
   })
 
   it('fails an image request without a mounted attachment provider, before the endpoint sees it', async () => {
@@ -299,7 +356,7 @@ describe('owc profiles adapter', () => {
     }))
     expect(adapter.providerInfo('gateway')).toEqual({ id: 'gateway', name: 'Acme Gateway' })
     expect(await adapter.listModels('gateway')).toEqual([
-      { provider: 'gateway', id: 'm', name: 'Acme One', inputModalities: ['text'] },
+      { provider: 'gateway', id: 'm', name: 'Acme One', inputModalities: ['text'], outputModalities: ['text'] },
     ])
     expect(await adapter.resolveModel('gateway', 'm')).toMatchObject({
       provider: 'gateway',
@@ -308,7 +365,21 @@ describe('owc profiles adapter', () => {
       defaultMaxTokens: 512,
       reasoning: { efforts: [{ id: 'low', name: 'Low' }, { id: 'high', name: 'High' }] },
     })
+    // A declared request default is what the harness hands a caller that
+    // stated no cap, and the model's own capability stays the fallback.
+    const defaulting = adapterFor(routeFor('http://127.0.0.1:1/v1', {
+      models: [{ id: 'm', contextWindow: 4096, maxTokens: 512, defaults: { maxTokens: 256 } }],
+    }))
+    expect(await defaulting.resolveModel('gateway', 'm')).toMatchObject({ defaultMaxTokens: 256 })
     expect(await adapter.resolveModel('gateway', 'unlisted')).toMatchObject({ id: 'unlisted', context: { contextWindow: 256_000 } })
+    // Every route states what its answers may carry; a model that declared
+    // image output states images as well as text.
+    expect(await adapter.resolveModel('gateway', 'm')).toMatchObject({ outputModalities: ['text'] })
+    const drawing = adapterFor(routeFor('http://127.0.0.1:1/v1', {
+      models: [{ id: 'm', capabilities: { imageOutput: true } }],
+    }))
+    expect(await drawing.resolveModel('gateway', 'm')).toMatchObject({ outputModalities: ['text', 'image'] })
+    expect(await drawing.listModels('gateway')).toMatchObject([{ id: 'm', outputModalities: ['text', 'image'] }])
     // Mid-history capabilities are declared only where they were declared: a
     // route that named none keeps the harness restating prompt and tools.
     expect(await adapter.resolveModel('gateway', 'm')).not.toHaveProperty('systemPromptUpdate')

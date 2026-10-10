@@ -97,6 +97,24 @@ describe('openai-responses request', () => {
       .not.toHaveProperty('temperature')
   })
 
+  it('writes a model\'s declared request parameters where the caller stated none', () => {
+    const profile = route({
+      models: [{ id: 'm', contextWindow: 8192, maxTokens: 1024, defaults: { temperature: 0.2, topP: 0.6, maxTokens: 256 } }],
+    })
+    expect(bodyOf(profile)).toMatchObject({ temperature: 0.2, top_p: 0.6, max_output_tokens: 256 })
+    expect(bodyOf(profile, { temperature: 0.9, maxTokens: 64 })).toMatchObject({
+      temperature: 0.9,
+      top_p: 0.6,
+      max_output_tokens: 64,
+    })
+    // Reasoning still owns the sampling decision: a declared default is not
+    // written where this API answers a temperature with a 400.
+    const reasoning = route({ models: [{ id: 'm', capabilities: { effort: ['high'] }, defaults: { temperature: 0.2, topP: 0.6 } }] })
+    expect(bodyOf(reasoning, { reasoningEffort: 'high' as never }))
+      .not.toHaveProperty('temperature')
+    expect(bodyOf(reasoning, { reasoningEffort: 'high' as never })).not.toHaveProperty('top_p')
+  })
+
   it('reads the instructions from the request, else from the leading system message', () => {
     expect(bodyOf(route())).not.toHaveProperty('instructions')
     expect(bodyOf(route(), { system: 'be brief' })).toMatchObject({ instructions: 'be brief' })

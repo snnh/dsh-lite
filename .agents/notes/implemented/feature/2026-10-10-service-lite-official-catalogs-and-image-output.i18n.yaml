@@ -1,0 +1,25 @@
+# Bilingual-pair consistency record for 2026-10-10-service-lite-official-catalogs-and-image-output.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-10-10-service-lite-official-catalogs-and-image-output.md
+/agent-note-the-local-llm-service-converts-official-catalogs-carries-image-output-and-states-per-model-defaults:
+  en: 2f3420bbdc0fce16
+  zh: 42ae3a82d5266294
+/agent-note-the-local-llm-service-converts-official-catalogs-carries-image-output-and-states-per-model-defaults/problem:
+  en: acfb95e548b38b1a
+  zh: e8ce9313eb61b541
+/agent-note-the-local-llm-service-converts-official-catalogs-carries-image-output-and-states-per-model-defaults/decision:
+  en: d3402a0b7799886c
+  zh: 714e43c9237663f5
+/agent-note-the-local-llm-service-converts-official-catalogs-carries-image-output-and-states-per-model-defaults/alternatives-considered:
+  en: 0cd7493d79dce930
+  zh: 7cba4328e9dbc076
+/agent-note-the-local-llm-service-converts-official-catalogs-carries-image-output-and-states-per-model-defaults/consequences:
+  en: 01f5e334e04f88c3
+  zh: 53a17a1871d05317
+/agent-note-the-local-llm-service-converts-official-catalogs-carries-image-output-and-states-per-model-defaults/testing:
+  en: 84928a6a2fdcebfb
+  zh: 7c8c9f04614c88e5
+/agent-note-the-local-llm-service-converts-official-catalogs-carries-image-output-and-states-per-model-defaults/related:
+  en: 565262604f9f1728
+  zh: 722296f03400d58e

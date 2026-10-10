@@ -179,11 +179,12 @@ export function OwcModelCapabilities({ model, position, disabled, t, onChange }:
           ))}
         </div>
       </fieldset>
-      {/* The vocabulary is the adapter's; the two beyond text are refused where
-          they are declared, so the refusal is said beside the input types
-          rather than discovered later on the saved row. */}
-      {modalities.some(modality => modality !== 'text')
-        ? <p className={styles['advancedHint']}>{t('owcModalityRefused')}</p>
+      {/* The vocabulary is the adapter's, and one of its values travels
+          differently: video arrives as a file handle rather than as a part the
+          model can look at, so the limitation is said beside the choice rather
+          than discovered later on the saved row. */}
+      {modalities.includes('video')
+        ? <p className={styles['advancedHint']}>{t('owcVideoAsFile')}</p>
         : null}
       {FLAGS.map((flag) => {
         const declared = readModelField(model, flag.path)
@@ -204,6 +205,12 @@ export function OwcModelCapabilities({ model, position, disabled, t, onChange }:
           </fieldset>
         )
       })}
+      {/* Declared image output is served — the picture is stored and shown —
+          except on the one protocol whose assistant turn has no image part, so
+          the note names that exception rather than warning about the feature. */}
+      {readModelField(model, ['capabilities', 'imageOutput']) === true
+        ? <p className={styles['advancedHint']}>{t('owcImageOutputHint')}</p>
+        : null}
     </>
   )
 }
