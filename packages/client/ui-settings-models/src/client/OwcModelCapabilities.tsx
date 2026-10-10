@@ -78,11 +78,35 @@ const CAPABILITY_PATHS: Readonly<Record<'effort' | 'thinking' | 'style', readonl
   style: ['capabilities', 'thinkingStyle'],
 }
 
-/** The single-value declarations, in the order OWC's editor shows them. */
+/**
+ * The single-value declarations that belong with thinking: what the endpoint
+ * returns, and whether that reasoning travels back on the next request. A
+ * cleared replay box writes nothing, which is how a profile says "let the
+ * model's family decide" — the same shape `tools` has, where the box opens at
+ * the adapter's own answer.
+ */
+const REASONING_FLAGS: readonly CapabilityFlag[] = [
+  { path: ['capabilities', 'reasoningContent'], labelKey: 'owcReasoningContent', whenAbsent: false },
+]
+
+/**
+ * Whether prior reasoning travels back is a three-state answer, not a switch:
+ * absent means the model's family decides, which is neither on nor off. The
+ * empty value is that absence and stays first, like the switch spelling's.
+ */
+const REPLAY_PATH: readonly string[] = ['capabilities', 'replayReasoning']
+
+/** The three replay answers, in the order the select shows them. */
+const REPLAY_CHOICES: readonly { readonly value: string; readonly labelKey: ModelsKey }[] = [
+  { value: '', labelKey: 'owcReplayFamily' },
+  { value: 'on', labelKey: 'owcReplayOn' },
+  { value: 'off', labelKey: 'owcReplayOff' },
+]
+
+/** The remaining single-value declarations, in OWC's own order. */
 const FLAGS: readonly CapabilityFlag[] = [
   { path: ['capabilities', 'imageOutput'], labelKey: 'owcImageOutput', whenAbsent: false },
   { path: ['capabilities', 'tools'], labelKey: 'owcTools', whenAbsent: true },
-  { path: ['capabilities', 'reasoningContent'], labelKey: 'owcReasoningContent', whenAbsent: false },
   { path: ['capabilities', 'responsesEncryptedReplay'], labelKey: 'owcEncryptedReplay', whenAbsent: false },
 ]
 
@@ -101,6 +125,7 @@ export function OwcModelCapabilities({ model, position, disabled, t, onChange }:
   const effort = declaredMembers(readModelField(model, CAPABILITY_PATHS.effort))
   const thinking = declaredMembers(readModelField(model, CAPABILITY_PATHS.thinking))
   const style = readModelField(model, CAPABILITY_PATHS.style)
+  const replay = readModelField(model, REPLAY_PATH)
 
   /** The `aria-label` every control in a group carries, so rows stay addressable. */
   const groupLabel = (key: ModelsKey): string => `${t(key)} ${String(position)}`
@@ -133,50 +158,110 @@ export function OwcModelCapabilities({ model, position, disabled, t, onChange }:
 
   return (
     <>
-      <fieldset className={styles['modelCapabilities']} aria-label={groupLabel('owcThinking')}>
-        <legend className={styles['modelFieldLabel']}>{t('owcThinking')}</legend>
-        <div className={styles['modelInputChoices']}>
-          {THINKING_MODES.map(mode => (
-            <Checkbox
-              key={mode.id}
-              label={t(mode.labelKey)}
-              checked={thinking.includes(mode.id)}
+      <fieldset className={styles['modelCapabilities']} aria-label={groupLabel('owcThinkingFormat')}>
+        <legend className={styles['modelFieldLabel']}>{t('owcThinkingFormat')}</legend>
+        {/* One row per question a reader asks in order: which modes, which
+            switch spelling, which ladder, and what travels back. */}
+        <div className={styles['capabilityRows']}>
+          <fieldset className={styles['modelCapabilities']} aria-label={groupLabel('owcThinking')}>
+            <legend className={styles['modelFieldLabel']}>{t('owcThinking')}</legend>
+            <div className={styles['modelInputChoices']}>
+              {THINKING_MODES.map(mode => (
+                <Checkbox
+                  key={mode.id}
+                  label={t(mode.labelKey)}
+                  checked={thinking.includes(mode.id)}
+                  disabled={disabled}
+                  onChange={(checked) => {
+                    toggleMember(CAPABILITY_PATHS.thinking, THINKING_MODES.map(entry => entry.id), thinking, mode.id, checked)
+                  }}
+                />
+              ))}
+            </div>
+          </fieldset>
+          <label className={styles['modelField']}>
+            <span className={styles['modelFieldLabel']}>{t('owcThinkingStyle')}</span>
+            <select
+              className={`${styles['input']} ${styles['selectInput']}`}
+              value={typeof style === 'string' ? style : ''}
+              aria-label={groupLabel('owcThinkingStyle')}
               disabled={disabled}
-              onChange={(checked) => {
-                toggleMember(CAPABILITY_PATHS.thinking, THINKING_MODES.map(entry => entry.id), thinking, mode.id, checked)
+              onChange={(event) => {
+                onChange(writeModelField(model, CAPABILITY_PATHS.style,
+                  event.target.value === '' ? undefined : event.target.value))
               }}
-            />
-          ))}
-        </div>
-      </fieldset>
-      <label className={styles['modelField']}>
-        <span className={styles['modelFieldLabel']}>{t('owcThinkingStyle')}</span>
-        <select
-          className={`${styles['input']} ${styles['selectInput']}`}
-          value={typeof style === 'string' ? style : ''}
-          aria-label={groupLabel('owcThinkingStyle')}
-          disabled={disabled}
-          onChange={(event) => {
-            onChange(writeModelField(model, CAPABILITY_PATHS.style,
-              event.target.value === '' ? undefined : event.target.value))
-          }}
-        >
-          <option value="">{t('owcThinkingStyleUnset')}</option>
-          {THINKING_STYLES.map(choice => <option key={choice.id} value={choice.id}>{t(choice.labelKey)}</option>)}
-        </select>
-      </label>
-      <fieldset className={styles['modelCapabilities']} aria-label={groupLabel('owcEffort')}>
-        <legend className={styles['modelFieldLabel']}>{t('owcEffort')}</legend>
-        <div className={styles['modelInputChoices']}>
-          {EFFORT_LEVELS.map(level => (
-            <Checkbox
-              key={level}
-              label={level}
-              checked={effort.includes(level)}
+            >
+              <option value="">{t('owcThinkingStyleUnset')}</option>
+              {THINKING_STYLES.map(choice => <option key={choice.id} value={choice.id}>{t(choice.labelKey)}</option>)}
+            </select>
+          </label>
+          <fieldset className={styles['modelCapabilities']} aria-label={groupLabel('owcEffort')}>
+            <legend className={styles['modelFieldLabel']}>{t('owcEffort')}</legend>
+            <div className={styles['modelInputChoices']}>
+              {EFFORT_LEVELS.map(level => (
+                <Checkbox
+                  key={level}
+                  label={level}
+                  checked={effort.includes(level)}
+                  disabled={disabled}
+                  onChange={(checked) => { toggleMember(CAPABILITY_PATHS.effort, EFFORT_LEVELS, effort, level, checked) }}
+                />
+              ))}
+            </div>
+          </fieldset>
+          {REASONING_FLAGS.map((flag) => {
+            const declared = readModelField(model, flag.path)
+            const on = declared === undefined ? flag.whenAbsent : declared === true
+            return (
+              <div key={flag.labelKey} className={styles['modelInputChoices']}>
+                <Checkbox
+                  label={t(flag.labelKey)}
+                  checked={on}
+                  disabled={disabled}
+                  onChange={(checked) => { setFlag(flag, checked) }}
+                />
+              </div>
+            )
+          })}
+          <label className={styles['modelField']}>
+            <span className={styles['modelFieldLabel']}>{t('owcReasoningReplay')}</span>
+            <select
+              className={`${styles['input']} ${styles['selectInput']}`}
+              value={replay === true ? 'on' : replay === false ? 'off' : ''}
+              aria-label={groupLabel('owcReasoningReplay')}
               disabled={disabled}
-              onChange={(checked) => { toggleMember(CAPABILITY_PATHS.effort, EFFORT_LEVELS, effort, level, checked) }}
-            />
-          ))}
+              onChange={(event) => {
+                onChange(writeModelField(model, REPLAY_PATH,
+                  event.target.value === '' ? undefined : event.target.value === 'on'))
+              }}
+            >
+              {REPLAY_CHOICES.map(choice => <option key={choice.value} value={choice.value}>{t(choice.labelKey)}</option>)}
+            </select>
+          </label>
+        </div>
+        <p className={styles['advancedHint']}>{t('owcReasoningReplayHint')}</p>
+      </fieldset>
+      {/* The boxes that say what else this endpoint does, as one row: each is a
+          single yes, and a column of one-checkbox groups reads as noise. */}
+      <fieldset className={styles['modelCapabilities']} aria-label={groupLabel('owcOtherCapabilities')}>
+        <legend className={styles['modelFieldLabel']}>{t('owcOtherCapabilities')}</legend>
+        <div className={styles['modelInputChoices']}>
+          {FLAGS.map((flag) => {
+            const declared = readModelField(model, flag.path)
+            // A box shows the meaning the adapter would apply: an absent
+            // `tools` key means tool declarations are sent, so that box opens
+            // checked.
+            const on = declared === undefined ? flag.whenAbsent : declared === true
+            return (
+              <Checkbox
+                key={flag.labelKey}
+                label={t(flag.labelKey)}
+                checked={on}
+                disabled={disabled}
+                onChange={(checked) => { setFlag(flag, checked) }}
+              />
+            )
+          })}
         </div>
       </fieldset>
       {/* The vocabulary is the adapter's, and one of its values travels
@@ -186,25 +271,6 @@ export function OwcModelCapabilities({ model, position, disabled, t, onChange }:
       {modalities.includes('video')
         ? <p className={styles['advancedHint']}>{t('owcVideoAsFile')}</p>
         : null}
-      {FLAGS.map((flag) => {
-        const declared = readModelField(model, flag.path)
-        // A box shows the meaning the adapter would apply: an absent `tools`
-        // key means tool declarations are sent, so that box opens checked.
-        const on = declared === undefined ? flag.whenAbsent : declared === true
-        return (
-          <fieldset key={flag.labelKey} className={styles['modelCapabilities']} aria-label={groupLabel(flag.labelKey)}>
-            <legend className={styles['modelFieldLabel']}>{t(flag.labelKey)}</legend>
-            <div className={styles['modelInputChoices']}>
-              <Checkbox
-                label={t(flag.labelKey)}
-                checked={on}
-                disabled={disabled}
-                onChange={(checked) => { setFlag(flag, checked) }}
-              />
-            </div>
-          </fieldset>
-        )
-      })}
       {/* Declared image output is served — the picture is stored and shown —
           except on the one protocol whose assistant turn has no image part, so
           the note names that exception rather than warning about the feature. */}

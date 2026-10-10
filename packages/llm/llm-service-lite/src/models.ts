@@ -73,10 +73,21 @@ export function reasoningLevelOf(
 /**
  * Whether a model's route can replay prior reasoning for the next request.
  * @param model - resolved route.
- * @returns true when the route carries reasoning content.
+ * @returns true when the route carries reasoning content and sends it back.
  */
 export function replaysReasoning(model: ResolvedOwcModel): boolean {
-  return model.reasoningContent
+  return model.replayReasoning && model.reasoningContent
+}
+
+/**
+ * The reasoning level one request should act on: the caller's own when it
+ * named one, else the level the model's family applies by default.
+ * @param model - resolved route.
+ * @param requested - the level the caller named, when any.
+ * @returns the level to interpret, or undefined to send nothing.
+ */
+export function reasoningLevelFor(model: ResolvedOwcModel, requested: string | undefined): string | undefined {
+  return requested ?? model.effortDefault
 }
 
 /**
@@ -134,7 +145,11 @@ export function resolvedModelInfo(profile: ResolvedOwcProviderProfile, model: st
     inputModalities: [...facts.modalities],
     outputModalities: [...outputModalitiesOf(facts)],
     context: { contextWindow: facts.contextWindow },
-    defaultMaxTokens: facts.defaults.maxTokens ?? facts.maxTokens,
+    // Only a profile-declared default becomes a request cap: a model's own
+    // capacity is what it *can* answer, not what every request should ask for,
+    // and writing it here would put a `max_tokens` on calls that never asked
+    // for one.
+    ...facts.defaults.maxTokens === undefined ? {} : { defaultMaxTokens: facts.defaults.maxTokens },
     // Declared only when the profile declares them: an absent capability is
     // what makes the harness rewrite the prompt and the tool list every turn,
     // which is the honest reading of a route that never said it reads either
@@ -147,6 +162,10 @@ export function resolvedModelInfo(profile: ResolvedOwcProviderProfile, model: st
           id: ReasoningEffortId(level),
           name: LEVEL_LABELS[level] ?? level,
         })),
+        // A family's own default is materialized into requests when the caller
+        // names none, which is what keeps a bare profile on the vendor's
+        // documented level instead of the endpoint's undocumented one.
+        ...facts.effortDefault === undefined ? {} : { defaultEffort: ReasoningEffortId(facts.effortDefault) },
       },
     },
   }

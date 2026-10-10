@@ -255,7 +255,7 @@ describe('owc profiles adapter', () => {
     running.push(upstream)
     const adapter = adapterFor(routeFor(upstream.url, {
       interfaceType: 'anthropic-messages',
-      models: [{ id: 'm', maxTokens: 512 }],
+      models: [{ id: 'm', defaults: { maxTokens: 512 } }],
     }))
     const chunks = await collect(adapter.stream(request({
       messages: [system('be brief'), user([text('hi')])],
@@ -362,15 +362,19 @@ describe('owc profiles adapter', () => {
       provider: 'gateway',
       id: 'm',
       context: { contextWindow: 4096 },
-      defaultMaxTokens: 512,
       reasoning: { efforts: [{ id: 'low', name: 'Low' }, { id: 'high', name: 'High' }] },
     })
-    // A declared request default is what the harness hands a caller that
-    // stated no cap, and the model's own capability stays the fallback.
+    // A model's own capacity is what it can answer, not what every request asks
+    // for: only a configured request default is materialized for the caller.
+    expect(await adapter.resolveModel('gateway', 'm')).not.toHaveProperty('defaultMaxTokens')
     const defaulting = adapterFor(routeFor('http://127.0.0.1:1/v1', {
       models: [{ id: 'm', contextWindow: 4096, maxTokens: 512, defaults: { maxTokens: 256 } }],
     }))
     expect(await defaulting.resolveModel('gateway', 'm')).toMatchObject({ defaultMaxTokens: 256 })
+    // A model the family table speaks for publishes the family's default level.
+    expect(await adapter.resolveModel('gateway', 'claude-opus-5-5')).toMatchObject({
+      reasoning: { defaultEffort: 'medium' },
+    })
     expect(await adapter.resolveModel('gateway', 'unlisted')).toMatchObject({ id: 'unlisted', context: { contextWindow: 256_000 } })
     // Every route states what its answers may carry; a model that declared
     // image output states images as well as text.

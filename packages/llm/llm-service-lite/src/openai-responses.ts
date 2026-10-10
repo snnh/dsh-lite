@@ -31,7 +31,7 @@ import { attributionHeaders, LlmError } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, GenerateOptions, ImageBlock, RequestMessage } from '@deepseek-ai/dsh-llm'
 import type { RequestImageAttachment } from '@deepseek-ai/dsh-attachment'
 import { offloadedImageText } from './images.ts'
-import { reasoningLevelOf } from './models.ts'
+import { reasoningLevelFor, reasoningLevelOf } from './models.ts'
 import type { ResolvedOwcModel, ResolvedOwcProviderProfile } from './profiles.ts'
 
 /** This API rejects an output cap below this value. */
@@ -463,7 +463,7 @@ export function responsesRequest(
   apiKey: string | undefined,
   versions: ReadonlyMap<string, RequestImageAttachment> = new Map(),
 ): ResponsesHttpRequest {
-  const level = reasoningLevelOf(model, options.reasoningEffort)
+  const level = reasoningLevelOf(model, reasoningLevelFor(model, options.reasoningEffort))
   const reasoning = reasoningFields(model, level)
   const maxTokens = options.maxTokens ?? model.defaults.maxTokens ?? model.maxTokens
   const tools = options.tools === undefined || options.tools.length === 0 || !model.tools ? [] : options.tools

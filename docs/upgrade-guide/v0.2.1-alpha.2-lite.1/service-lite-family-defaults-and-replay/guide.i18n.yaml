@@ -1,0 +1,16 @@
+# Bilingual-pair consistency record for guide.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/upgrade-guide/v0.2.1-alpha.2-lite.1/service-lite-family-defaults-and-replay/guide.md
+/:
+  en: ee66f0868aa4c1fb
+  zh: 956545ad047dfc6c
+/model-defaults-come-from-the-model-s-family:
+  en: 8108f2e8d88032bf
+  zh: 77c25d7c77fc7a66
+/model-defaults-come-from-the-model-s-family/change:
+  en: dd8785751c412c64
+  zh: e854266ca2586ccc
+/model-defaults-come-from-the-model-s-family/migration:
+  en: a51423502c408acb
+  zh: 3bfbb7803378faa2

@@ -560,6 +560,14 @@
   border: none;
 }
 
+/* The thinking-format group stacks its rows: one question per line, so the
+   mode boxes, the switch, the ladder, and the replay boxes read in the order a
+   reader asks them instead of wrapping into one another. */
+.capabilityRows {
+  display: grid;
+  gap: 8px;
+}
+
 /* The OWC profile's numeric limits sit two to a row, like the model fold. */
 .owcNumbers {
   display: grid;

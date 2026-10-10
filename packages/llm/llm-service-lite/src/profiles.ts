@@ -19,6 +19,7 @@ import { deepEqualJson, isJsonValue } from '@deepseek-ai/dsh-util-values'
 import type { ImageRequestBudget } from './images.ts'
 import { LOW_DETAIL_IMAGE_PIXEL_BUDGET } from './images.ts'
 import { convertOfficialProvider } from './official-catalog.ts'
+import { modelDefaultRuleOf } from './model-defaults.ts'
 import {
   DEFAULT_CONTEXT_WINDOW,
   DEFAULT_IMAGE_OFFLOAD_BYTE_QUANTUM,
@@ -74,16 +75,24 @@ export interface ResolvedOwcModel {
   readonly contextWindow: number
   /** Per-request output cap in tokens. */
   readonly maxTokens: number
+  /** Family whose researched defaults filled what the profile left open. */
+  readonly family: string | undefined
   /** Accepted input modalities. */
   readonly modalities: readonly Modality[]
   /** Selectable reasoning-effort levels in declaration order. */
   readonly effort: readonly EffortLevel[]
+  /** Level written when the caller picks none, from the family; absent leaves it to the endpoint. */
+  readonly effortDefault: EffortLevel | undefined
   /** Accepted thinking modes. */
   readonly thinking: readonly ThinkingMode[]
   /** How the endpoint spells the thinking switch, when it has one. */
   readonly thinkingStyle: ThinkingStyle | undefined
   /** Whether prior reasoning may be replayed through `reasoning_content`. */
   readonly reasoningContent: boolean
+  /** Whether prior reasoning is actually sent back on a later request. */
+  readonly replayReasoning: boolean
+  /** Whether the family rejects a follow-up turn that omits the reasoning; not a user choice. */
+  readonly replayRequired: boolean
   /**
    * Whether prior reasoning must be replayed as the provider's own encrypted
    * item, which the Responses protocol hands back verbatim.
@@ -473,17 +482,42 @@ function resolveModel(
       )
     }
   }
+  // The model's family supplies what the profile left open — modalities, the
+  // reasoning ladder, the thinking switch, and whether prior reasoning travels
+  // back. A profile always wins: these fill gaps, they do not overrule.
+  const family = familyFactsOf(model.id)
+  // An endpoint that rejects a follow-up turn without its reasoning is not a
+  // preference, so a declaration that contradicts the family is refused here
+  // rather than discovered as a 400 mid-conversation.
+  if (family.replayRequired && capabilities.replayReasoning === false) {
+    throw new Error(
+      `llm-service-lite: provider "${provider}" model "${model.id}" turns off reasoning replay,`
+      + ` but family "${family.family}" requires it on every follow-up turn`,
+    )
+  }
+  // A profile that says the endpoint returns reasoning is also saying the
+  // replay is available, which is the reading every profile written before this
+  // switch existed already relied on; a family that wants it off says so.
+  const replayReasoning = family.replayRequired
+    ? true
+    : capabilities.replayReasoning
+      ?? capabilities.reasoningContent
+      ?? family.replayReasoning
   return {
     id: model.id,
     name: model.name ?? model.id,
     contextWindow: model.contextWindow ?? fallbackContextWindow,
     maxTokens,
     defaults: resolveModelDefaults(provider, model.id, model.defaults, interfaceType),
-    modalities: modalities.length === 0 ? ['text'] : [...modalities],
-    effort: [...capabilities.effort ?? []],
-    thinking: [...capabilities.thinking ?? []],
-    thinkingStyle: capabilities.thinkingStyle,
-    reasoningContent: capabilities.reasoningContent ?? false,
+    family: family.family,
+    modalities: modalities.length === 0 ? [...family.modalities] : [...modalities],
+    effort: [...capabilities.effort ?? family.effort],
+    effortDefault: capabilities.effort === undefined ? family.effortDefault : undefined,
+    thinking: [...capabilities.thinking ?? family.thinking],
+    thinkingStyle: capabilities.thinkingStyle ?? family.thinkingStyle,
+    reasoningContent: capabilities.reasoningContent ?? family.reasoningContent,
+    replayReasoning,
+    replayRequired: family.replayRequired,
     encryptedReplay: capabilities.responsesEncryptedReplay ?? false,
     systemPromptUpdate: capabilities.systemPromptUpdate,
     toolUpdate: capabilities.toolUpdate,
@@ -721,7 +755,13 @@ export function serviceableRoutes(profiles: ReadonlyMap<string, ResolvedOwcProvi
  * @returns the model facts a request uses.
  */
 export function modelOf(profile: ResolvedOwcProviderProfile, model: string): ResolvedOwcModel {
-  return profile.models.find(entry => entry.id === model) ?? {
+  const listed = profile.models.find(entry => entry.id === model)
+  if (listed !== undefined) return listed
+  // An id the route does not list still gets its family's researched facts:
+  // that is what makes a bare `models: []` route usable for a model the profile
+  // never enumerated.
+  const family = familyFactsOf(model)
+  return {
     id: model,
     name: model,
     contextWindow: profile.defaultContextWindow,
@@ -732,19 +772,51 @@ export function modelOf(profile: ResolvedOwcProviderProfile, model: string): Res
       topK: undefined,
       maxTokens: undefined,
     },
-    modalities: ['text'],
+    ...family,
+    modalities: [...family.modalities],
+    effort: [...family.effort],
+    thinking: [...family.thinking],
     imagePixelBudget: undefined,
     imageMaxBytes: undefined,
     imageTokens: undefined,
     imageOutput: false,
-    effort: [],
-    thinking: [],
-    thinkingStyle: undefined,
-    reasoningContent: false,
     encryptedReplay: false,
     systemPromptUpdate: undefined,
     toolUpdate: undefined,
     tools: true,
+  }
+}
+
+/**
+ * The facts one model id's family supplies, or the empty answer when no family
+ * speaks for it. Both entry points read them the same way, so a listed model
+ * and an id the route never enumerated cannot drift apart.
+ * @param model - exact model id from the request.
+ * @returns family-derived facts, already in resolved form.
+ */
+function familyFactsOf(model: string): {
+  family: string | undefined
+  modalities: readonly Modality[]
+  effort: readonly EffortLevel[]
+  effortDefault: EffortLevel | undefined
+  thinking: readonly ThinkingMode[]
+  thinkingStyle: ThinkingStyle | undefined
+  reasoningContent: boolean
+  replayReasoning: boolean
+  replayRequired: boolean
+} {
+  const rule = modelDefaultRuleOf(model)
+  const replayRequired = rule?.replayRequired === true
+  return {
+    family: rule?.family,
+    modalities: rule?.modalities ?? ['text'],
+    effort: rule?.effort ?? [],
+    effortDefault: rule?.effortDefault,
+    thinking: rule?.thinking ?? [],
+    thinkingStyle: rule?.thinkingStyle,
+    reasoningContent: rule?.reasoningContent ?? false,
+    replayReasoning: replayRequired || (rule?.replayReasoning ?? rule?.reasoningContent ?? false),
+    replayRequired,
   }
 }
 

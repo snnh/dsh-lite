@@ -22,7 +22,7 @@ import type { RequestImageAttachment } from '@deepseek-ai/dsh-attachment'
 import { imageDataUrl, offloadedImageText } from './images.ts'
 import { decodeGeneratedImage, type AdapterChunk } from './image-output.ts'
 import type { ResolvedOwcModel, ResolvedOwcProviderProfile } from './profiles.ts'
-import { reasoningLevelOf, replaysReasoning } from './models.ts'
+import { reasoningLevelFor, reasoningLevelOf, replaysReasoning } from './models.ts'
 import { classifyFailure } from './errors.ts'
 
 /** One assembled request, ready for `fetch`. */
@@ -277,7 +277,7 @@ export function chatRequest(
   apiKey: string | undefined,
   versions: ReadonlyMap<string, RequestImageAttachment> = new Map(),
 ): ChatHttpRequest {
-  const level = reasoningLevelOf(model, options.reasoningEffort)
+  const level = reasoningLevelOf(model, reasoningLevelFor(model, options.reasoningEffort))
   const messages = toWireMessages(options, model, versions)
   // A caller's own value always wins. The model's declared default is written
   // only where the caller stated none, so a profile setting can never override

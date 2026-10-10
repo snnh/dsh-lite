@@ -222,6 +222,15 @@ export interface OwcModelCapabilities {
    */
   reasoningContent?: boolean
   /**
+   * Whether prior reasoning is sent back to the endpoint on a later request.
+   * Absent defers to the model's family (see `model-defaults.ts`), which is
+   * what makes a bare profile work; `true` turns the replay on where a family
+   * would leave it off, and only an endpoint that does not mind the field may
+   * be turned off — a family whose follow-up turns are rejected outright
+   * without it refuses `false`.
+   */
+  replayReasoning?: boolean
+  /**
    * Whether tool declarations may be sent to this model; omission means they
    * may. A model declaring `false` is one whose endpoint rejects or mishandles
    * a `tools` array, so the request carries none and the model answers as plain
@@ -415,6 +424,8 @@ const capabilities: z<OwcModelCapabilities> = z.object({
   thinkingStyle: z.union(THINKING_STYLES),
   /** Whether prior reasoning may be replayed through `reasoning_content`. */
   reasoningContent: z.boolean(),
+  /** Whether prior reasoning is sent back; absent defers to the model's family. */
+  replayReasoning: z.boolean(),
   /** Whether tool declarations may be sent to this model. */
   tools: z.boolean(),
   /** Whether the model answers with images of its own; refused on the protocol with no assistant image part. */

@@ -29,7 +29,8 @@ import { attributionHeaders, LlmError } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, GenerateOptions, ImageBlock, RequestMessage } from '@deepseek-ai/dsh-llm'
 import type { RequestImageAttachment } from '@deepseek-ai/dsh-attachment'
 import { offloadedImageText } from './images.ts'
-import { reasoningLevelOf } from './models.ts'
+import { reasoningLevelFor, reasoningLevelOf } from './models.ts'
+import { anthropicMaxTokensOf } from './model-defaults.ts'
 import type { ResolvedOwcModel, ResolvedOwcProviderProfile } from './profiles.ts'
 
 /** `anthropic-version` this transport speaks; the API requires the header. */
@@ -510,14 +511,15 @@ function systemParts(message: RequestMessage): AnthropicSystemPart[] {
 
 /**
  * The effective output cap: the request's own, else the profile's override,
- * else the model's declared cap. This protocol requires the field, so it is
- * always sent.
+ * else the model's configured default, else the cap its family documents.
+ * This protocol requires the field, so it is always sent — and a model no
+ * family speaks for falls back to the conservative unmatched default.
  */
 function effectiveMaxTokens(profile: ResolvedOwcProviderProfile, model: ResolvedOwcModel, options: GenerateOptions): number {
   if (options.maxTokens !== undefined) return options.maxTokens
   const override = profile.extraBody['max_tokens']
   if (typeof override === 'number') return override
-  return model.defaults.maxTokens ?? model.maxTokens
+  return model.defaults.maxTokens ?? anthropicMaxTokensOf(model.id)
 }
 
 /** Extended thinking's documented floor; a smaller budget is rejected outright. */
@@ -615,7 +617,7 @@ export function anthropicRequest(
   versions: ReadonlyMap<string, RequestImageAttachment> = new Map(),
 ): AnthropicHttpRequest {
   const caching = profile.promptCaching
-  const level = reasoningLevelOf(model, options.reasoningEffort)
+  const level = reasoningLevelOf(model, reasoningLevelFor(model, options.reasoningEffort))
   const maxTokens = effectiveMaxTokens(profile, model, options)
   const tools = options.tools === undefined || options.tools.length === 0 || !model.tools ? [] : options.tools
   // A caller's own value always wins; the model's declared default is written

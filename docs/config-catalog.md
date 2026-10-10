@@ -2152,7 +2152,7 @@ export type Config = Readonly<Record<string, never>>
 
 - `inject`: `llm`
 - `refs`: [`RetryPolicyConfig`](../packages/llm/llm/src/index.ts) · `Volatile` (`@deepseek-ai/cordis`)
-- `source`: [`packages/llm/llm-service-lite/src/config.ts:395`](../packages/llm/llm-service-lite/src/config.ts)
+- `source`: [`packages/llm/llm-service-lite/src/config.ts:404`](../packages/llm/llm-service-lite/src/config.ts)
 
 ```ts config-catalog
 /**
@@ -2290,6 +2290,15 @@ export interface OwcModelCapabilities {
    * later request may replay prior thinking the way DeepSeek's own API does.
    */
   reasoningContent?: boolean
+  /**
+   * Whether prior reasoning is sent back to the endpoint on a later request.
+   * Absent defers to the model's family (see `model-defaults.ts`), which is
+   * what makes a bare profile work; `true` turns the replay on where a family
+   * would leave it off, and only an endpoint that does not mind the field may
+   * be turned off — a family whose follow-up turns are rejected outright
+   * without it refuses `false`.
+   */
+  replayReasoning?: boolean
   /**
    * Whether tool declarations may be sent to this model; omission means they
    * may. A model declaring `false` is one whose endpoint rejects or mishandles

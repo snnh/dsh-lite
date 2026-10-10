@@ -659,6 +659,29 @@ describe('owc model capabilities', () => {
     }])
   })
 
+  it('writes an explicit reasoning-replay answer', async () => {
+    const { mutate } = mountOwc({ effective: { acme: declared({ reasoningContent: true }) } })
+    expandModel(1)
+    fireEvent.change(selectField(`${en.owcReasoningReplay} 1`), { target: { value: 'off' } })
+    fireEvent.click(screen.getByText(en.apply))
+    await waitFor(() => { expect(mutate).toHaveBeenCalledTimes(1) })
+    const written = firstMutate(mutate).ops[0] as unknown as { value: Array<{ capabilities: Record<string, unknown> }> }
+    expect(written.value[0]?.capabilities).toMatchObject({ reasoningContent: true, replayReasoning: false })
+  })
+
+  it('drops the replay answer for the model family to decide', async () => {
+    const { mutate } = mountOwc({ effective: { acme: declared({ replayReasoning: true }) } })
+    expandModel(1)
+    fireEvent.change(selectField(`${en.owcReasoningReplay} 1`), { target: { value: '' } })
+    fireEvent.click(screen.getByText(en.apply))
+    await waitFor(() => { expect(mutate).toHaveBeenCalledTimes(1) })
+    const cleared = firstMutate(mutate).ops[0] as unknown as { value: Array<Record<string, unknown>> }
+    // The model keeps no empty capabilities object either: the family's answer
+    // is what the absence of the key means.
+    expect(cleared.value[0]).not.toHaveProperty('capabilities.replayReasoning')
+    expect(cleared.value[0]?.['capabilities'] ?? {}).not.toHaveProperty('replayReasoning')
+  })
+
   it('shows the whole capability vocabulary the adapter declares', () => {
     mountOwc({ effective: { acme: declared({}) } })
     expandModel(1)
@@ -683,6 +706,10 @@ describe('owc model capabilities', () => {
     for (const label of [en.owcImageOutput, en.owcTools, en.owcReasoningContent, en.owcEncryptedReplay]) {
       expect(screen.getByRole('checkbox', { name: label })).toBeTruthy()
     }
+    // Reasoning replay is a three-state answer: the family decides by default,
+    // and either explicit answer is available.
+    expect([...selectField(`${en.owcReasoningReplay} 1`).options].map(option => option.textContent))
+      .toEqual([en.owcReplayFamily, en.owcReplayOn, en.owcReplayOff])
     // Tools are sent unless the model turns them off, so that box opens set.
     expect(screen.getByRole<HTMLInputElement>('checkbox', { name: en.owcTools }).checked).toBe(true)
   })

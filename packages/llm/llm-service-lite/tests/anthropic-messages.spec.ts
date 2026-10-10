@@ -37,8 +37,9 @@ const bodyOf = (
   profile: ResolvedOwcProviderProfile,
   overrides: Partial<GenerateOptions> = {},
   versions: Parameters<typeof anthropicRequest>[4] = new Map(),
+  id = 'm',
 ): Record<string, unknown> => JSON.parse(
-  anthropicRequest(profile, modelOf(profile), options(overrides), undefined, versions).body,
+  anthropicRequest(profile, modelOf(profile, id), options(overrides), undefined, versions).body,
 ) as Record<string, unknown>
 
 /** One wire message of a translated body. */
@@ -84,10 +85,20 @@ describe('anthropic-messages request', () => {
 
   it('always sends the output cap this protocol requires', () => {
     const profile = route()
-    expect(bodyOf(profile)).toMatchObject({ max_tokens: 1024, stream: true })
+    // A model no family speaks for takes the conservative unmatched cap: the
+    // field is required, so silence is not an option.
+    expect(bodyOf(profile)).toMatchObject({ max_tokens: 64 * 1024, stream: true })
     expect(bodyOf(profile, { maxTokens: 64 })).toMatchObject({ max_tokens: 64 })
     // A profile-level override stands in for the model default.
     expect(bodyOf(route({ extraBody: { max_tokens: 256 } }))).toMatchObject({ max_tokens: 256 })
+    // A configured request default is the model's own answer.
+    expect(bodyOf(route({ models: [{ id: 'm', defaults: { maxTokens: 1024 } }] })))
+      .toMatchObject({ max_tokens: 1024 })
+    // A model its family speaks for takes the documented cap instead.
+    expect(bodyOf(route({ models: [{ id: 'claude-opus-4-5' }] }), {}, undefined, 'claude-opus-4-5'))
+      .toMatchObject({ max_tokens: 64 * 1024 })
+    expect(bodyOf(route({ models: [{ id: 'claude-opus-5-5' }] }), {}, undefined, 'claude-opus-5-5'))
+      .toMatchObject({ max_tokens: 128 * 1024 })
   })
 
   it('sends sampling and stop fields only when the request configured them', () => {
@@ -173,13 +184,13 @@ describe('anthropic-messages request', () => {
     // A level the model never declared sends nothing rather than a guess.
     expect(bodyOf(adaptive, { reasoningEffort: 'ultra' as never })).not.toHaveProperty('thinking')
 
-    const extended = route({ models: [{ id: 'm', maxTokens: 4096, capabilities: { thinking: ['enabled'] } }] })
+    const extended = route({ models: [{ id: 'm', defaults: { maxTokens: 4096 }, capabilities: { thinking: ['enabled'] } }] })
     expect(bodyOf(extended, { reasoningEffort: 'enabled' as never })).toMatchObject({
       thinking: { type: 'enabled', budget_tokens: 3072 },
     })
     // A cap too small for the documented floor asks for the largest budget
     // below it, which the endpoint rejects by name rather than truncating.
-    const tiny = route({ models: [{ id: 'm', maxTokens: 512, capabilities: { thinking: ['enabled'] } }] })
+    const tiny = route({ models: [{ id: 'm', defaults: { maxTokens: 512 }, capabilities: { thinking: ['enabled'] } }] })
     expect(bodyOf(tiny, { reasoningEffort: 'enabled' as never })).toMatchObject({
       thinking: { type: 'enabled', budget_tokens: 511 },
     })
@@ -192,7 +203,7 @@ describe('anthropic-messages request', () => {
       thinking: { type: 'adaptive', display: 'summarized' },
     })
     const extendedOnly = route({
-      models: [{ id: 'm', maxTokens: 4096, capabilities: { effort: ['high'], thinking: ['enabled'] } }],
+      models: [{ id: 'm', defaults: { maxTokens: 4096 }, capabilities: { effort: ['high'], thinking: ['enabled'] } }],
     })
     expect(bodyOf(extendedOnly, { reasoningEffort: 'high' as never })).toMatchObject({
       output_config: { effort: 'high' },
