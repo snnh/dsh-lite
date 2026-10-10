@@ -14,7 +14,7 @@ import { replaysReasoning } from '../src/models.ts'
 import type { GenerateOptions } from '@deepseek-ai/dsh-llm'
 
 /** One chat-completions route whose models the caller declares. */
-const chatRoute = (models: readonly Record<string, unknown>[]): ResolvedOwcProviderProfile => {
+const chatRoute = (models: Array<{ id: string } & Record<string, unknown>>): ResolvedOwcProviderProfile => {
   const profile = resolveProfiles({
     gateway: { interfaceType: 'openai-chat-completions', baseURL: 'https://gateway.test/v1', models },
   }).get('gateway')
@@ -23,7 +23,7 @@ const chatRoute = (models: readonly Record<string, unknown>[]): ResolvedOwcProvi
 }
 
 /** One anthropic-messages route whose models the caller declares. */
-const anthropicRoute = (models: readonly Record<string, unknown>[]): ResolvedOwcProviderProfile => {
+const anthropicRoute = (models: Array<{ id: string } & Record<string, unknown>>): ResolvedOwcProviderProfile => {
   const profile = resolveProfiles({
     gateway: { interfaceType: 'anthropic-messages', baseURL: 'https://gateway.test/v1', models },
   }).get('gateway')
