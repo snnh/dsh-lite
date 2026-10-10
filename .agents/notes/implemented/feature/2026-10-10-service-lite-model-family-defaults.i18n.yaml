@@ -1,0 +1,25 @@
+# Bilingual-pair consistency record for 2026-10-10-service-lite-model-family-defaults.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-10-10-service-lite-model-family-defaults.md
+/agent-note-model-defaults-come-from-the-model-s-family:
+  en: 7730e432b43ee9a8
+  zh: 4d17283ff1e2e876
+/agent-note-model-defaults-come-from-the-model-s-family/problem:
+  en: 70def96c1e5e2ac3
+  zh: d5b2fd60eb7cf5f7
+/agent-note-model-defaults-come-from-the-model-s-family/decision:
+  en: 58e2214521694c63
+  zh: c54121d2f0e3c7eb
+/agent-note-model-defaults-come-from-the-model-s-family/alternatives-considered:
+  en: 41ad10a2c56d9a25
+  zh: 66aa295cd1673ce2
+/agent-note-model-defaults-come-from-the-model-s-family/consequences:
+  en: 77b6e553376baa48
+  zh: c484757d36cdbc98
+/agent-note-model-defaults-come-from-the-model-s-family/testing:
+  en: 87f947611c150110
+  zh: 8bfc360202bf69bd
+/agent-note-model-defaults-come-from-the-model-s-family/related:
+  en: c5e9598fa678df8d
+  zh: fb82d190367b6dda
