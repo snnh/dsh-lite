@@ -14,7 +14,7 @@ import {
   createClientTest, type ClientTestFixtures, webApp,
 } from '@deepseek-ai/dsh-client-test-runtime/src/assembly/index.ts'
 import type {} from '@deepseek-ai/dsh-session-title/client'
-import { SessionManager } from '../src/client/sessions/manager.ts'
+import { SessionManager, type SessionManagerOptions } from '../src/client/sessions/manager.ts'
 import { ClientSessions } from '../src/client/sessions/service.ts'
 import type { SessionRemotes } from '../src/client/sessions/remotes.ts'
 import { entries, plainTurn } from './event-script.client.ts'
@@ -43,10 +43,11 @@ function summary(sessionId: SessionId, over: SummaryOver = {}) {
 function makeManager(
   mock: RemoteMock,
   remote: ClientTestFixtures['remote'],
+  options?: SessionManagerOptions,
 ): SessionManager {
   mock.load(sessionWorld)
   // Cases using this helper never open a Session, so they do not need the broader Client Remote's $stream member.
-  return new SessionManager(remote as unknown as SessionRemotes)
+  return new SessionManager(remote as unknown as SessionRemotes, options)
 }
 
 describe('SessionManager instances', () => {
@@ -1331,6 +1332,32 @@ describe('remaining branches', () => {
     // Same-order same-entries snapshot reuses the items array.
     manager.handleSessionError(S1, 'x')
     expect(manager.getListSnapshot().items).toBe(after.items)
+  })
+
+  it('bounds retained entry identities with an LRU safety valve', async ({ mock, remote }) => {
+    const manager = makeManager(mock, remote, { entryCacheMaxEntries: 2 })
+    onTestFinished(() => manager.dispose())
+    remote.session.list.mockResolvedValueOnce(ok({ items: [summary(S1), summary(S2)] as never[] }))
+    await manager.refreshList()
+    const first = manager.getListSnapshot()
+
+    remote.session.list.mockResolvedValueOnce(ok({ items: [summary(S1), summary(S2)] as never[] }))
+    await manager.refreshList()
+    const second = manager.getListSnapshot()
+    expect(second.items.find(e => e.sessionId === S1)).toBe(first.items.find(e => e.sessionId === S1))
+    expect(second.items.find(e => e.sessionId === S2)).toBe(first.items.find(e => e.sessionId === S2))
+
+    // Admitting a third identity crosses the bound; the least recently reused
+    // identity (S1) is dropped, so the next rebuild has to mint it again.
+    remote.session.list.mockResolvedValueOnce(ok({ items: [summary(S1), summary(S2), summary('fk-m3' as SessionId)] as never[] }))
+    await manager.refreshList()
+    const third = manager.getListSnapshot()
+    expect(third.items).toHaveLength(3)
+
+    remote.session.list.mockResolvedValueOnce(ok({ items: [summary(S1), summary(S2), summary('fk-m3' as SessionId)] as never[] }))
+    await manager.refreshList()
+    const fourth = manager.getListSnapshot()
+    expect(fourth.items.find(e => e.sessionId === S1)).not.toBe(third.items.find(e => e.sessionId === S1))
   })
 
   it('reuses refreshed rows and evicts missing rows independently of Client instances', async ({ mock, remote }) => {
