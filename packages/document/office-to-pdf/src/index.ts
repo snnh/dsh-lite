@@ -4,7 +4,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { extname, isAbsolute, join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
-import { createConverter, type Converter, type ConverterOptions } from '@deepseek-ai/libreoffice-kit'
+import type { Converter, ConverterOptions } from '@deepseek-ai/libreoffice-kit'
 import z from '@deepseek-ai/schemastery'
 import type { WorkspaceFileScope, WorkspaceFileStat } from '@deepseek-ai/dsh-api-workspace-files'
 import type {} from '@deepseek-ai/dsh-fs'
@@ -105,6 +105,12 @@ export class OfficeToPdf extends TypertRemoteService {
   private readonly remoteLifetime = new AbortController()
   private readonly remoteRequests = new Set<Promise<RenderedDocumentBytes>>()
   private readonly slots: Slot[] = []
+  /**
+   * The kit module, imported once on the first conversion and reused by
+   * every slot. A rejected import clears the memo so the next conversion
+   * retries instead of failing every slot with the cached rejection.
+   */
+  private kit: Promise<typeof import('@deepseek-ai/libreoffice-kit')> | undefined
   private readonly queue: ConversionQueue
   private readonly options: ConverterOptions
 
@@ -238,10 +244,20 @@ export class OfficeToPdf extends TypertRemoteService {
     let directory: string | undefined
     try {
       if (slot.converter === undefined) {
-        slot.converter = createConverter(this.options).catch((error: unknown) => {
-          delete slot.converter
-          throw error
-        })
+        this.kit ??= import('@deepseek-ai/libreoffice-kit')
+          .catch((error: unknown) => {
+            // The single rejection handler registered at creation runs before
+            // any later reaction on this promise, so the memo is clear before
+            // another conversion can observe the rejected import.
+            this.kit = undefined
+            throw error
+          })
+        slot.converter = this.kit
+          .then(module => module.createConverter(this.options))
+          .catch((error: unknown) => {
+            delete slot.converter
+            throw error
+          })
       }
       const converter = await slot.converter
       signal.throwIfAborted()

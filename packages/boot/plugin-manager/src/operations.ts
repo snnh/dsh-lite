@@ -3,7 +3,6 @@ import { once } from 'node:events'
 import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, mkdtemp, open, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
-import { execa } from 'execa'
 import type { EntryOptions } from '@deepseek-ai/cordis-plugin-loader'
 import { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import {
@@ -13,6 +12,7 @@ import {
 } from '@deepseek-ai/dsh-app-boot'
 import { scrubbedParentEnv } from '@deepseek-ai/dsh-subprocess'
 import { parseInstallSpec } from './install-spec.ts'
+import { loadExeca } from './execa.ts'
 import { awaitTreeGone, leadsOwnGroup, treeAlive, type RunTree } from './run-tree.ts'
 import { incompatiblePlugin } from './failure.ts'
 import type { IncompatiblePlugin, PackageResult, Registry } from './types.ts'
@@ -174,6 +174,7 @@ async function namedSpecManifest(
     return existsSync(filename) ? JSON.parse(readFileSync(filename, 'utf8')) as object : undefined
   }
   if (parsed.kind !== 'registry') return undefined
+  const execa = await loadExeca()
   const viewed = await execa(options.command ?? 'pnpm', [
     ...options.args ?? [], 'view', parsed.spec, 'name', 'version', 'engines', 'peerDependencies', '--json',
     ...flags, '--config.fetch-retries=0',
@@ -355,6 +356,7 @@ export async function runProfilePnpm(
   // run is killed: a lifecycle script outlives the pnpm process that started it.
   // The CLI keeps the caller's process group, so an interrupt still reaches it.
   const grouped = leadsOwnGroup(options.execution)
+  const execa = await loadExeca()
   const child = execa(options.command ?? 'pnpm', [...options.args ?? [], ...args.map(arg => anchorPathSpec(arg, context.cwd))], {
     cwd: dir, env: environment, extendEnv: false, reject: false,
     stdout: options.execution === 'cli' ? 'inherit' : 'pipe',
@@ -505,6 +507,7 @@ export async function runProfilePnpm(
         await restore()
         const hadLockfile = savedFiles.some(file => file.path.endsWith('pnpm-lock.yaml') && file.text !== undefined)
         const repair = ['install', hadLockfile ? '--frozen-lockfile' : '--config.lockfile=false']
+        const execa = await loadExeca()
         const repairing = execa(options.command ?? 'pnpm', [...options.args ?? [], ...repair], {
           cwd: dir, env: environment, extendEnv: false, reject: false, stdin: 'ignore',
           ...options.idleTimeoutMs === undefined ? {} : { timeout: options.idleTimeoutMs },
@@ -595,6 +598,7 @@ export interface PackageViewOptions {
 export async function readProfileRegistry(
   dir: string, options: { command?: string; args?: readonly string[]; env?: Readonly<Record<string, string>>; timeoutMs: number },
 ): Promise<string | null> {
+  const execa = await loadExeca()
   const result = await execa(options.command ?? 'pnpm', [...options.args ?? [], 'config', 'get', 'registry'], {
     cwd: dir, env: { ...scrubbedParentEnv(), ...options.env }, extendEnv: false, reject: false, stdin: 'ignore', timeout: options.timeoutMs,
   })
@@ -624,6 +628,7 @@ export function registryArguments(registry: Registry): string[] {
  * @returns pnpm's exit, output, and how the lookup ended.
  */
 export async function viewProfilePackage(dir: string, spec: string, options: PackageViewOptions): Promise<PackageViewResult> {
+  const execa = await loadExeca()
   const result = await execa(options.command ?? 'pnpm', [
     ...options.args ?? [], 'view', spec, 'name', 'version', 'description', 'dsh', '--json',
     ...registryArguments(options.registry ?? null), '--config.fetch-retries=0',

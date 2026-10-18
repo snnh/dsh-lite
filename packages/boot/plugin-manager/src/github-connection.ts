@@ -1,8 +1,8 @@
 /** Bounded GitHub repository checks using the installer's Git configuration and environment. */
 import { mkdir, mkdtemp, open } from 'node:fs/promises'
 import { join } from 'node:path'
-import { execa } from 'execa'
 import { scrubbedParentEnv } from '@deepseek-ai/dsh-subprocess'
+import { loadExeca } from './execa.ts'
 import { classifyInstallFailure } from './install-failure.ts'
 import type { ParsedInstallSpec } from './install-spec.ts'
 import type { PackageResult } from './types.ts'
@@ -41,6 +41,7 @@ export async function checkGithubConnection(
   const logPath = join(logDir, 'git.log')
   const log = await open(logPath, 'ax+', 0o600)
   try {
+    const execa = await loadExeca()
     const result = await execa('git', ['-c', 'credential.helper=', 'ls-remote', '--', repository, 'HEAD'], {
       cwd: dir,
       env: {
