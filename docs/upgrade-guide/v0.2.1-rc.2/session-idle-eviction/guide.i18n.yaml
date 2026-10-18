@@ -1,0 +1,16 @@
+# Bilingual-pair consistency record for guide.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/upgrade-guide/v0.2.1-rc.2/session-idle-eviction/guide.md
+/:
+  en: 2bf2dd127f20ed3c
+  zh: 63d8776aee444fbe
+/an-idle-client-session-is-released-after-60-minutes:
+  en: 8821b12aa576413d
+  zh: 364ebfbf147562ca
+/an-idle-client-session-is-released-after-60-minutes/change:
+  en: 985665d7c36b726a
+  zh: 72f9dbfdba2fd87b
+/an-idle-client-session-is-released-after-60-minutes/migration:
+  en: 2448d09d19b9d4de
+  zh: 71d6294e627e9391
