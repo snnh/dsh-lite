@@ -491,9 +491,12 @@ importers:
       '@deepseek-ai/schemastery':
         specifier: link:../../vendor/schemastery
         version: link:../../vendor/schemastery
-      '@snnh/dsh-lite':
-        specifier: ^0.2.1-rc.2
-        version: 0.2.1-rc.2(@deepseek-ai/cordis-plugin-loader@vendor+loader)(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-attachment@0.2.1-rc.2(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-brand@0.2.1-rc.2(@deepseek-ai/cordis@vendor+cordis)))(@deepseek-ai/dsh-credentials@0.2.1-rc.2(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/dsh-launch-environment@packages+util+launch-environment)(@deepseek-ai/dsh-llm@packages+llm+llm)(@deepseek-ai/dsh-timeout@0.2.1-rc.2(@deepseek-ai/cordis@vendor+cordis))
+      '@snnh/dsh-llm-service-lite':
+        specifier: ^0.1.1
+        version: 0.1.1(@deepseek-ai/cordis-plugin-loader@vendor+loader)(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-attachment@0.2.1-rc.2(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-brand@0.2.1-rc.2(@deepseek-ai/cordis@vendor+cordis)))(@deepseek-ai/dsh-credentials@0.2.1-rc.2(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/dsh-launch-environment@packages+util+launch-environment)(@deepseek-ai/dsh-llm@packages+llm+llm)(@deepseek-ai/dsh-timeout@0.2.1-rc.2(@deepseek-ai/cordis@vendor+cordis))
+      '@snnh/dsh-price-stats':
+        specifier: ^0.2.0
+        version: 0.2.0
       commander:
         specifier: ^15.0.0
         version: 15.0.0
@@ -18807,10 +18810,6 @@ packages:
     resolution: {integrity: sha512-r7jh49VJxGerfAcTQA6gXcKc+98zOp/tqRwzYjgOE+iSQsP6cEU1hq2QzbuipmP68QtYdY9wKEhiCQZIzHgZ4Q==}
     engines: {node: '>=18.0.0'}
 
-  '@snnh/dsh-lite@0.2.1-rc.2':
-    resolution: {integrity: sha512-25F4Sm5C/5qTvDnJ/nkmvq4Xfq9BQJUsbjSYVqJ8aqgrKobV9RshOsEwUpBGdQFQ5pEwKgem4rvZ2WubDpGVew==}
-    engines: {node: ^22.19.0 || >=24.0.0}
-
   '@snnh/dsh-llm-service-lite@0.1.1':
     resolution: {integrity: sha512-LIjTDCF7260xQnNF/su8170JmjOCQmNyPXuOvr3ECLj65ngr8YBAMXw3+p+iQSQzKq+T0T9F/h08P+OIJ76Xvg==}
     engines: {node: ^22.19.0 || >=24.0.0}
@@ -26068,19 +26067,6 @@ snapshots:
   '@smithy/types@4.19.0':
     dependencies:
       tslib: 2.8.1
-
-  '@snnh/dsh-lite@0.2.1-rc.2(@deepseek-ai/cordis-plugin-loader@vendor+loader)(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-attachment@0.2.1-rc.2(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-brand@0.2.1-rc.2(@deepseek-ai/cordis@vendor+cordis)))(@deepseek-ai/dsh-credentials@0.2.1-rc.2(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/dsh-launch-environment@packages+util+launch-environment)(@deepseek-ai/dsh-llm@packages+llm+llm)(@deepseek-ai/dsh-timeout@0.2.1-rc.2(@deepseek-ai/cordis@vendor+cordis))':
-    dependencies:
-      '@snnh/dsh-llm-service-lite': 0.1.1(@deepseek-ai/cordis-plugin-loader@vendor+loader)(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-attachment@0.2.1-rc.2(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-brand@0.2.1-rc.2(@deepseek-ai/cordis@vendor+cordis)))(@deepseek-ai/dsh-credentials@0.2.1-rc.2(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/dsh-launch-environment@packages+util+launch-environment)(@deepseek-ai/dsh-llm@packages+llm+llm)(@deepseek-ai/dsh-timeout@0.2.1-rc.2(@deepseek-ai/cordis@vendor+cordis))
-      '@snnh/dsh-price-stats': 0.2.0
-    transitivePeerDependencies:
-      - '@deepseek-ai/cordis'
-      - '@deepseek-ai/cordis-plugin-loader'
-      - '@deepseek-ai/dsh-attachment'
-      - '@deepseek-ai/dsh-credentials'
-      - '@deepseek-ai/dsh-launch-environment'
-      - '@deepseek-ai/dsh-llm'
-      - '@deepseek-ai/dsh-timeout'
 
   '@snnh/dsh-llm-service-lite@0.1.1(@deepseek-ai/cordis-plugin-loader@vendor+loader)(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-attachment@0.2.1-rc.2(@deepseek-ai/cordis@vendor+cordis)(@deepseek-ai/dsh-brand@0.2.1-rc.2(@deepseek-ai/cordis@vendor+cordis)))(@deepseek-ai/dsh-credentials@0.2.1-rc.2(@deepseek-ai/cordis@vendor+cordis))(@deepseek-ai/dsh-launch-environment@packages+util+launch-environment)(@deepseek-ai/dsh-llm@packages+llm+llm)(@deepseek-ai/dsh-timeout@0.2.1-rc.2(@deepseek-ai/cordis@vendor+cordis))':
     dependencies:

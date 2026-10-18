@@ -88,7 +88,6 @@
     "@deepseek-ai/dsh-web-app": "workspace:*",
     "@deepseek-ai/dsh-workflow-ptc": "workspace:*",
     "@deepseek-ai/schemastery": "workspace:~",
-    "@snnh/dsh-lite": "^0.2.1-rc.2",
     "commander": "^15.0.0",
     "js-yaml": "^4.3.2",
     "node-addon-require-builtin": "^0.1.9",
@@ -106,7 +105,9 @@
     "@deepseek-ai/dsh-experimental-terminal-bundle": "workspace:*",
     "@deepseek-ai/dsh-experimental-session-search": "workspace:*",
     "@deepseek-ai/dsh-experimental-tool-worktree": "workspace:*",
-    "@deepseek-ai/dsh-experimental-plugin-market-bundle": "workspace:*"
+    "@deepseek-ai/dsh-experimental-plugin-market-bundle": "workspace:*",
+    "@snnh/dsh-llm-service-lite": "^0.1.1",
+    "@snnh/dsh-price-stats": "^0.2.0"
   },
   "devDependencies": {
     "@deepseek-ai/dsh-skill-badge": "workspace:*",

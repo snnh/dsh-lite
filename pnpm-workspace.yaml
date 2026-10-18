@@ -107,7 +107,6 @@ minimumReleaseAgeExclude:
   - electron@44.7.0
   # The dsh-lite overlay and its two plugins are released together; the shipped
   # Web profile consumes these exact versions without waiting out the window.
-  - '@snnh/dsh-lite@0.2.1-rc.2'
   - '@snnh/dsh-llm-service-lite@0.1.1'
   - '@snnh/dsh-price-stats@0.2.0'
 patchedDependencies:
