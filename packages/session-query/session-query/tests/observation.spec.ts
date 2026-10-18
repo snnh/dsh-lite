@@ -287,6 +287,60 @@ describe('SessionObservationReader cold path', () => {
     await ctx.fiber.dispose()
   })
 
+  it('evicts unpinned observations past the byte budget', async () => {
+    const ctx = await readerContext()
+    const a = header('byte-a')
+    const b = header('byte-b')
+    const store = new Map([
+      [a.id, { header: a, events: [messageEvent(0, 'a')], revision: 'ra' }],
+      [b.id, { header: b, events: [messageEvent(0, 'b')], revision: 'rb' }],
+    ])
+    const counters = { stat: 0, open: 0, read: 0 }
+    ctx.provide('sessionPersistence', stubPersistence(store, counters))
+    const reader = new SessionObservationReader(ctx, 10, 1)
+
+    {
+      using observedA = await reader.read(a.id, { projectionMode: 'none' })
+      void observedA
+    }
+    {
+      using observedB = await reader.read(b.id, { projectionMode: 'none' })
+      void observedB
+    }
+    using rereadA = await reader.read(a.id, { projectionMode: 'none' })
+    void rereadA
+    expect(counters.read).toBe(3)
+    await ctx.fiber.dispose()
+  })
+
+  it('treats a non-positive byte budget as unbounded', async () => {
+    const ctx = await readerContext()
+    const a = header('unbounded-a')
+    const b = header('unbounded-b')
+    const store = new Map([
+      [a.id, { header: a, events: [messageEvent(0, 'a')], revision: 'ra' }],
+      [b.id, { header: b, events: [messageEvent(0, 'b')], revision: 'rb' }],
+    ])
+    const counters = { stat: 0, open: 0, read: 0 }
+    ctx.provide('sessionPersistence', stubPersistence(store, counters))
+    const reader = new SessionObservationReader(ctx, 5, 0)
+
+    {
+      using observedA = await reader.read(a.id, { projectionMode: 'none' })
+      void observedA
+    }
+    {
+      using observedB = await reader.read(b.id, { projectionMode: 'none' })
+      void observedB
+    }
+    using hitA = await reader.read(a.id, { projectionMode: 'none' })
+    using hitB = await reader.read(b.id, { projectionMode: 'none' })
+    void hitA
+    void hitB
+    expect(counters.read).toBe(2)
+    await ctx.fiber.dispose()
+  })
+
   it('reloads when the durable revision changes', async () => {
     const ctx = await readerContext()
     const meta = header('cache-stale')

@@ -10,7 +10,11 @@ import type {
 } from '@deepseek-ai/dsh-session-persistence'
 import type { ProjectionSnapshot } from '@deepseek-ai/dsh-session-projection'
 import type {} from '@deepseek-ai/dsh-session-projection-cache'
-import { SESSION_QUERY_DEFAULT_PREPARED_SESSION_CACHE_SIZE, SessionQueryError } from './config.ts'
+import {
+  SESSION_QUERY_DEFAULT_PREPARED_SESSION_CACHE_BYTES,
+  SESSION_QUERY_DEFAULT_PREPARED_SESSION_CACHE_SIZE,
+  SessionQueryError,
+} from './config.ts'
 import { readColdSessionLog, type ColdSessionLog } from './cold-read.ts'
 
 /** One exact immutable Session cut retained for the caller's read lifetime. */
@@ -62,6 +66,8 @@ interface PreparedEntry {
   readonly session: Session
   /** Immutable balanced log (stored events plus in-memory interrupted-turn closers). */
   readonly events: readonly SessionEvent[]
+  /** Estimated retained bytes of {@link events}, charged to the cache budget. */
+  readonly bytes: number
   /** Active observation leases; a pinned entry (`refs > 0`) is never evicted. */
   refs: number
 }
@@ -78,14 +84,18 @@ interface PreparedEntry {
  */
 export class SessionObservationReader {
   private readonly cache = new Map<SessionId, PreparedEntry>()
+  /** Estimated bytes currently charged by {@link cache}. */
+  private cacheBytes = 0
 
   /**
    * @param ctx - context carrying Session and optional persistence/projection services.
    * @param cacheCapacity - maximum unpinned cold observations retained for reuse.
+   * @param cacheMaxBytes - estimated byte budget for retained observations; 0 disables it.
    */
   constructor(
     private readonly ctx: Context,
     private readonly cacheCapacity: number = SESSION_QUERY_DEFAULT_PREPARED_SESSION_CACHE_SIZE,
+    private readonly cacheMaxBytes: number = SESSION_QUERY_DEFAULT_PREPARED_SESSION_CACHE_BYTES,
   ) {}
 
   /**
@@ -143,6 +153,7 @@ export class SessionObservationReader {
           revision: snapshot.revision,
           session,
           events: Object.freeze(seed),
+          bytes: estimateEventBytes(seed),
           refs: 0,
         }
         this.store(sessionId, entry)
@@ -215,27 +226,38 @@ export class SessionObservationReader {
     return cached
   }
 
-  /** Insert or replace the entry for one id, then evict past the capacity. */
+  /** Insert or replace the entry for one id, then evict past the count and byte bounds. */
   private store(sessionId: SessionId, entry: PreparedEntry): void {
     // Replacing a stale revision only drops the map's reference; live leases
     // keep the old entry alive through their own references.
+    const previous = this.cache.get(sessionId)
+    if (previous !== undefined) this.cacheBytes -= previous.bytes
     this.cache.delete(sessionId)
     this.cache.set(sessionId, entry)
-    this.evictPastCapacity(entry)
+    this.cacheBytes += entry.bytes
+    this.evictPastBounds(entry)
   }
 
   /**
-   * Evict oldest unpinned entries until the cache fits its capacity again.
-   * Runs on store and whenever a lease release unpins an entry, so leases
-   * that pinned every candidate cannot leave the cache over budget for good.
+   * Evict oldest unpinned entries until the cache fits both its entry count and
+   * its estimated byte budget. Runs on store and whenever a lease release
+   * unpins an entry, so leases that pinned every candidate cannot leave the
+   * cache over budget for good.
+   *
+   * A single entry priced above the whole byte budget is kept once it is the
+   * only unpinned candidate: emptying the cache could not satisfy the budget,
+   * and the caller is about to lease the entry it just stored.
    * @param keep - the entry being stored, about to be leased; never evicted.
    */
-  private evictPastCapacity(keep?: PreparedEntry): void {
-    if (this.cache.size <= this.cacheCapacity) return
+  private evictPastBounds(keep?: PreparedEntry): void {
+    const withinBounds = (): boolean => this.cache.size <= this.cacheCapacity
+      && (this.cacheMaxBytes <= 0 || this.cacheBytes <= this.cacheMaxBytes)
+    if (withinBounds()) return
     for (const [id, candidate] of this.cache) {
+      if (withinBounds()) return
       if (candidate === keep || candidate.refs > 0) continue
       this.cache.delete(id)
-      if (this.cache.size <= this.cacheCapacity) return
+      this.cacheBytes -= candidate.bytes
     }
   }
 
@@ -265,7 +287,7 @@ export class SessionObservationReader {
           if (disposed) return
           disposed = true
           entry.refs -= 1
-          if (entry.refs === 0) this.evictPastCapacity()
+          if (entry.refs === 0) this.evictPastBounds()
         },
       }
     }
@@ -323,6 +345,19 @@ export class SessionObservationReader {
       ? registry.hydrate(entry.session, {}, entry.events, SessionLogOffset(0))
       : cache.hydratePrepared(entry.session, entry.events)
   }
+}
+
+/**
+ * Estimate the retained bytes of a frozen event array without serializing the
+ * whole array at once. One event's JSON text is produced at a time, which keeps
+ * the transient string bounded while still pricing the dominant payload.
+ * @param events - the immutable balanced log retained by a prepared entry.
+ * @returns the estimated UTF-8 byte size of the event payload.
+ */
+function estimateEventBytes(events: readonly SessionEvent[]): number {
+  let bytes = 0
+  for (const event of events) bytes += Buffer.byteLength(JSON.stringify(event), 'utf8')
+  return bytes
 }
 
 function throwIfObservationAborted(signal: AbortSignal | undefined): void {

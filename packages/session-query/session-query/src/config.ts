@@ -11,6 +11,15 @@ export const SESSION_QUERY_DEFAULT_PERSISTED_INSPECT_CONCURRENCY = 4
 /** Default maximum number of cold prepared-Session observations retained for reuse. */
 export const SESSION_QUERY_DEFAULT_PREPARED_SESSION_CACHE_SIZE = 5
 
+/**
+ * Default estimated bytes of cold prepared-Session observations retained for
+ * reuse. One retained entry is a restored Session plus its whole frozen event
+ * array, so the byte budget is the bound that matters on a long-lived host;
+ * 128 MiB holds a handful of large sessions while staying far below the
+ * resident set a host can afford.
+ */
+export const SESSION_QUERY_DEFAULT_PREPARED_SESSION_CACHE_BYTES = 128 * 1024 * 1024
+
 /** Backend-independent configuration inherited by every session-query implementation. */
 export interface Config {
   /** Maximum accepted raw read context on either side. Defaults to 50. */
