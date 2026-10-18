@@ -5,6 +5,7 @@ import type { Duplex } from 'node:stream'
 import { Deque } from '@deepseek-ai/dsh-deque'
 import { RemoteError, remoteErrorOf, type PeerScope, type RemoteUplinkWindow } from '@deepseek-ai/dsh-typert-protocol'
 import WebSocket, { WebSocketServer, type RawData } from 'ws'
+import { REMOTE_STREAM_FRAME_TOO_LARGE } from './remote-error-codes.ts'
 import {
   parseRemoteStreamClientMessage,
   type RemoteStreamClientMessage,
@@ -41,6 +42,28 @@ export type RemoteStreamFailureMapper = (error: unknown) => RemoteStreamFailure
 
 const MAX_MISSED_HEARTBEATS = 2
 
+/**
+ * Default byte cap on one encoded downlink frame. The mux never splits an
+ * item, so the cap must clear the largest item a Host method legitimately
+ * produces: the workspace file service returns a whole file as one byte array
+ * up to its own 32 MiB cap, and the Client codec expands those bytes before
+ * framing. 100 MiB clears that with room for JSON escaping while still
+ * bounding what one item makes the Host encode, buffer, and hold for a peer
+ * that reads slowly.
+ */
+const DEFAULT_DOWNLINK_MAX_FRAME_BYTES = 100 * 1024 * 1024
+
+/**
+ * Default deadline for one frame's carrier write callback.
+ *
+ * ws reports a frame written once the socket accepted it, so the callback waits
+ * on drain: a peer that stopped reading leaves it pending while the frame stays
+ * queued. One minute is generous for the bytes one frame may carry — the largest
+ * admitted frame leaves the transport ~1 MiB/s — so the deadline fails a peer
+ * that reads nothing, not one on a slow link.
+ */
+const DEFAULT_DOWNLINK_SEND_TIMEOUT_MS = 60_000
+
 /** Own the no-server WebSocket acceptor and every active logical stream. */
 export class RemoteStreamMuxServer {
   private readonly server = new WebSocketServer({ noServer: true })
@@ -53,12 +76,16 @@ export class RemoteStreamMuxServer {
    * @param failure - Gateway error-to-wire mapper.
    * @param heartbeatIntervalMs - interval between WebSocket Ping control frames.
    * @param streamInboxBytes - buffered uplink frame bytes one logical stream may hold before it fails.
+   * @param maxFrameBytes - byte cap on one encoded downlink frame.
+   * @param sendTimeoutMs - deadline for one frame's carrier write callback.
    */
   constructor(
     private readonly open: RemoteStreamOpener,
     private readonly failure: RemoteStreamFailureMapper,
     private readonly heartbeatIntervalMs: number,
     private readonly streamInboxBytes: number,
+    private readonly maxFrameBytes: number = DEFAULT_DOWNLINK_MAX_FRAME_BYTES,
+    private readonly sendTimeoutMs: number = DEFAULT_DOWNLINK_SEND_TIMEOUT_MS,
   ) {}
 
   /**
@@ -79,7 +106,9 @@ export class RemoteStreamMuxServer {
       this.startHeartbeat()
       const bound: BoundStreamOpener = (endpoint, payload, uplink, control, window) =>
         this.open(endpoint, payload, uplink, peer, control, window)
-      const connection = new RemoteStreamMuxConnection(websocket, bound, this.failure, this.streamInboxBytes, alive)
+      const connection = new RemoteStreamMuxConnection(
+        websocket, bound, this.failure, this.streamInboxBytes, this.maxFrameBytes, this.sendTimeoutMs, alive,
+      )
       const done = connection.run().catch((error: unknown) => {
         console.error('[api-gateway] Remote stream connection failed:', error)
       }).then(async () => { await release() }).catch((error: unknown) => {
@@ -144,8 +173,16 @@ class RemoteStreamMuxConnection {
     private readonly open: BoundStreamOpener,
     private readonly failure: RemoteStreamFailureMapper,
     private readonly streamInboxBytes: number,
+    private readonly maxFrameBytes: number,
+    private readonly sendTimeoutMs: number,
     private readonly alive: () => void,
   ) {}
+  /**
+   * Set once one frame's write callback missed `sendTimeoutMs`. A peer that
+   * stopped reading leaves that frame queued, so every later frame on this
+   * socket waits behind it: the connection refuses to write another one.
+   */
+  private stalled = false
 
   /**
    * Serve frames until the socket closes. A Pong, any received frame, and a
@@ -294,24 +331,46 @@ class RemoteStreamMuxConnection {
     } catch (cause) {
       return Promise.reject(new Error('api gateway: Remote stream item is not JSON serializable', { cause }))
     }
-    const delivery = this.writes.then(() => new Promise<void>((resolve, reject) => {
-      if (this.socket.readyState !== WebSocket.OPEN) {
-        reject(new Error('api gateway: Remote stream socket is closed'))
-        return
-      }
-      let queued = false
-      this.socket.send(text, (error) => {
-        if (error) {
-          reject(error)
+    const frameBytes = Buffer.byteLength(text, 'utf8')
+    if (frameBytes > this.maxFrameBytes) {
+      return Promise.reject(new RemoteError(
+        REMOTE_STREAM_FRAME_TOO_LARGE,
+        `api gateway: Remote stream ${message.type} frame of ${String(frameBytes)} bytes exceeds the ${String(this.maxFrameBytes)} byte cap`,
+        { streamId: message.streamId },
+      ))
+    }
+    const delivery = this.writes.then(() => {
+      // A frame whose write already missed its deadline left the peer's backlog
+      // undrained, so this frame could only queue behind it: fail it now rather
+      // than arm a second deadline that the same peer cannot clear either.
+      if (this.stalled) throw new Error('api gateway: Remote stream socket is stalled by an unwritten frame')
+      return new Promise<void>((resolve, reject) => {
+        if (this.socket.readyState !== WebSocket.OPEN) {
+          reject(new Error('api gateway: Remote stream socket is closed'))
           return
         }
-        if (queued) this.alive()
-        resolve()
+        let queued = false
+        const timer = setTimeout(() => {
+          this.stalled = true
+          reject(new Error(`api gateway: Remote stream ${message.streamId} frame write exceeded ${String(this.sendTimeoutMs)}ms`))
+        }, this.sendTimeoutMs)
+        // ws throws synchronously only for a socket it no longer has open, which
+        // the check above already excluded, so every settled frame clears the
+        // deadline here: no armed timer is left to mark a healthy socket stalled.
+        this.socket.send(text, (error) => {
+          clearTimeout(timer)
+          if (error) {
+            reject(error)
+            return
+          }
+          if (queued) this.alive()
+          resolve()
+        })
+        // Read after send(): bytes still buffered mean the local send buffer was
+        // full, so their completion requires the peer to acknowledge data.
+        queued = this.socket.bufferedAmount > 0
       })
-      // Read after send(): bytes still buffered mean the local send buffer was
-      // full, so their completion requires the peer to acknowledge data.
-      queued = this.socket.bufferedAmount > 0
-    }))
+    })
     this.writes = delivery.catch(() => undefined)
     return delivery
   }

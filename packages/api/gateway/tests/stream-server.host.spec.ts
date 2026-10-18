@@ -444,6 +444,43 @@ describe('Remote stream mux server uplink', () => {
     await once(client, 'close')
   })
 
+  it('fails a stream whose downlink item exceeds the frame cap and keeps the socket open', async () => {
+    const entry = await startMux(async () => (async function *(): AsyncIterable<string> {
+      yield 'x'.repeat(1024)
+    })(), 2_000, 262_144, undefined, 500)
+    const client = await connect(entry.url)
+    const frames = collectFrames(client)
+    client.send(openFrame('oversized'))
+    await vi.waitFor(() => {
+      expect(frames).toEqual([{
+        type: 'error',
+        streamId: 'oversized',
+        error: {
+          code: 'gateway/downlink-frame-too-large',
+          message: expect.stringContaining('exceeds the 500 byte cap') as string,
+          details: { streamId: 'oversized' },
+        },
+      }])
+    })
+    expect(client.readyState).toBe(WebSocket.OPEN)
+    client.close()
+    await once(client, 'close')
+  })
+
+  it('closes the socket when a downlink frame write misses its deadline', async () => {
+    const entry = await startMux(async () => (async function *(): AsyncIterable<string> {
+      yield 'stalled'
+    })(), 2_000, 262_144, undefined, undefined, 10)
+    const client = await connect(entry.url)
+    const serverSocket = acceptedSocket(entry.mux)
+    const send = vi.spyOn(serverSocket, 'send').mockImplementation(() => {})
+    const closed = once(client, 'close')
+    client.send(openFrame('stalled'))
+    const closeEvent = await closed
+    expect(closeEvent[0]).toBe(1011)
+    send.mockRestore()
+  })
+
   it('fails a stream whose buffered uplink exceeds the configured bytes and drops later items', async () => {
     const release = Promise.withResolvers<undefined>()
     const entry = await startMux(async () => (async function *(): AsyncIterable<never> {
@@ -590,9 +627,11 @@ async function startMux(
   heartbeatIntervalMs = 2_000,
   streamInboxBytes = 262_144,
   peer?: PeerScope,
+  maxFrameBytes?: number,
+  sendTimeoutMs?: number,
 ): Promise<RunningMux> {
   const admitted = peer ?? await fixturePeer()
-  const mux = new RemoteStreamMuxServer(open, mapFailure, heartbeatIntervalMs, streamInboxBytes)
+  const mux = new RemoteStreamMuxServer(open, mapFailure, heartbeatIntervalMs, streamInboxBytes, maxFrameBytes, sendTimeoutMs)
   const http = createServer()
   http.on('upgrade', (request, socket, head) => { mux.handleUpgrade(request, socket, head, admitted) })
   await new Promise<void>((resolve, reject) => {
