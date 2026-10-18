@@ -1,0 +1,15 @@
+# dsh-lite overlay bundle.
+#
+# This layer mounts the two snnh plugins that make up the dsh-lite Web profile:
+# the third-party LLM adapter and the session cost dashboard. The packages are
+# runtime dependencies of this bundle, so installing the overlay also installs
+# both plugin modules and their client halves.
+#
+# llm-service-lite is mounted dormant: it registers no route until the profile
+# declares a provider profile. Configure it in Plugins -> llm-service-lite or
+# under this row's `config` in the profile's cordis.patch.yml.
+- insert:
+    - id: llm-service-lite
+      name: '@snnh/dsh-llm-service-lite'
+    - id: price-stats
+      name: '@snnh/dsh-price-stats'
