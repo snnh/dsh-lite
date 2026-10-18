@@ -69,6 +69,22 @@ describe('TerminalController', () => {
     await controller.close(agent, id)
   })
 
+  it('allows the host-wide terminal buffer ceiling to be disabled', async () => {
+    const { controller, agent } = fixture({ maxTotalBufferedBytes: 0 })
+    expect(await controller.create(agent, request, signal())).toMatchObject({ id, state: 'running' })
+    await controller.close(agent, id)
+  })
+
+  it('tells the operator to raise maxTotalBufferedBytes when the host budget is exhausted', async () => {
+    const { controller, agent, subprocess } = fixture({ maxTotalBufferedBytes: 1 })
+    await expect(controller.create(agent, request, signal())).rejects.toMatchObject({
+      code: 'terminal/capacity-reached',
+      details: { limit: 1, purpose: 'terminal' },
+    })
+    await expect(controller.create(agent, request, signal())).rejects.toThrow('maxTotalBufferedBytes')
+    expect(subprocess.spawnTerminal).not.toHaveBeenCalled()
+  })
+
   it('creates the environment default shell and keeps an existing identity when that default changes', async () => {
     const { controller, agent, subprocess } = fixture({ shell: undefined })
     subprocess.terminalEnvironment.mockResolvedValue({ platform: 'posix', defaultShell: '/usr/local/bin/zsh' })

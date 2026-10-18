@@ -1,0 +1,16 @@
+# Bilingual-pair consistency record for guide.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/upgrade-guide/v0.2.1-rc.2/terminal-buffer-ceiling/guide.md
+/:
+  en: 102be5eac4125bee
+  zh: 1535f8207c0c1f27
+/terminal-buffers-now-share-a-host-wide-ceiling:
+  en: efba8361eaddca75
+  zh: 7177b05519c5105b
+/terminal-buffers-now-share-a-host-wide-ceiling/change:
+  en: 996159e68a2abad5
+  zh: c1d40a0f923e4c8b
+/terminal-buffers-now-share-a-host-wide-ceiling/migration:
+  en: 5788cce9d81a36da
+  zh: b89e7019637c7a88
